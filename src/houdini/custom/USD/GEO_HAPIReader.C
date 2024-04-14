@@ -139,7 +139,10 @@ GEO_HAPIReader::init(const std::string &filePath, const std::string &assetName)
     {
         mySessionId = GEO_HAPISessionManager::registerAsUser();
         if (mySessionId < 0)
+        {
+            TF_RUNTIME_ERROR("Failed to create engine session");
             return false;
+        }
     }
 
     // Take control of the session

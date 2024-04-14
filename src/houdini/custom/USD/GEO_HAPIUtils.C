@@ -116,6 +116,25 @@ GEOhapiSendError(const HAPI_Session &session)
     TF_WARN("%s", buf.buffer());
 }
 
+void
+GEOhapiSendConnectionError()
+{
+    PXR_NAMESPACE_USING_DIRECTIVE
+
+    int len;
+    HAPI_GetConnectionErrorLength(&len);
+    if (len == 0)
+        return;
+
+    UT_WorkBuffer buf;
+    char *str = buf.lock(0, len);
+    HAPI_GetConnectionError(str, len, /*clear=*/ true);
+    // HAPI_GetConnectionErrorLength included the null terminator.
+    buf.releaseSetLength(len - 1);
+
+    TF_WARN("Connection error: %s", buf.buffer());
+}
+
 GT_Type
 GEOhapiAttribType(HAPI_AttributeTypeInfo typeinfo)
 {

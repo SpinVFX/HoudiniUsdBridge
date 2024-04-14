@@ -15,14 +15,15 @@
  */
 
 #include "GEO_HAPISessionManager.h"
+
+#include "GEO_HAPIUtils.h"
+
 #include <UT/UT_Exit.h>
 #include <UT/UT_Map.h>
 #include <UT/UT_RecursiveTimedLock.h>
 #include <UT/UT_Thread.h>
 #include <UT/UT_ThreadQueue.h>
 #include <UT/UT_WorkBuffer.h>
-
-#include <thread>
 
 #ifndef _WIN32
 #include <unistd.h>
@@ -335,29 +336,20 @@ GEO_HAPISessionManager::createSession(GEO_HAPISessionID id)
     pipeName += std::to_string(_getpid());
 #endif
 
-    if (HAPI_RESULT_SUCCESS
-        != HAPI_StartThriftNamedPipeServer(
-                   &serverOptions, pipeName.c_str(), nullptr, nullptr))
-    {
-        return false;
-    }
+    ENSURE_CONNECTION_SUCCESS(HAPI_StartThriftNamedPipeServer(
+            &serverOptions, pipeName.c_str(), nullptr, nullptr));
 
-    if (HAPI_RESULT_SUCCESS
-        != HAPI_CreateThriftNamedPipeSession(&mySession, pipeName.c_str()))
-    {
-        return false;
-    }
+    ENSURE_CONNECTION_SUCCESS(HAPI_CreateThriftNamedPipeSession(
+            &mySession, pipeName.c_str()));
 
     // Set up cooking options
     HAPI_CookOptions cookOptions = getCookOptions();
 
-    if (HAPI_RESULT_SUCCESS
-        != HAPI_Initialize(
-                   &mySession, &cookOptions, true, -1, nullptr, nullptr,
-                   nullptr, nullptr, nullptr))
-    {
-        return false;
-    }
+    ENSURE_SUCCESS(
+            HAPI_Initialize(
+                    &mySession, &cookOptions, true, -1, nullptr, nullptr,
+                    nullptr, nullptr, nullptr),
+            mySession);
 
     return true;
 }

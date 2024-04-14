@@ -63,6 +63,13 @@ class GEO_HAPIPart;
         return false;                                                          \
     }
 
+#define ENSURE_CONNECTION_SUCCESS(result)                                      \
+    if ((result) != HAPI_RESULT_SUCCESS)                                       \
+    {                                                                          \
+        GEOhapiSendConnectionError();                                          \
+        return false;                                                          \
+    }
+
 #define CHECK_RETURN(result)                                                   \
     if (!result)                                                               \
         return false;
@@ -92,6 +99,8 @@ bool GEOhapiExtractString(const HAPI_Session &session,
 void GEOhapiSendCookError(const HAPI_Session &session, HAPI_NodeId node_id);
 
 void GEOhapiSendError(const HAPI_Session &session);
+
+void GEOhapiSendConnectionError();
 
 template <class T>
 void
