@@ -660,7 +660,7 @@ XUSD_Data::createCopyWithReplacement(
 	}
     }
 
-    // Go through the reference map performaing any required updates on the
+    // Go through the reference map performing any required updates on the
     // new copies of the layers.
     for (auto &&refit : refmap)
     {
@@ -697,8 +697,13 @@ XUSD_Data::createCopyWithReplacement(
 		    if (replacemap.find(it.first) != replacemap.end())
 			continue;
 
-                    replacemap[it.first] =
-                        oldlayer->ComputeAbsolutePath(it.second);
+                    // oldlayer may be null when dealing with the root layer
+                    // (which has a refmap entry of ""), and skip over
+                    // anonymous layers which can't meaningfully compute an
+                    // absolute path from a relative path.
+                    if (oldlayer && !oldlayer->IsAnonymous())
+                        replacemap[it.first] =
+                            oldlayer->ComputeAbsolutePath(it.second);
 		}
 
 		// If we find any reference we want to replace, do all the
