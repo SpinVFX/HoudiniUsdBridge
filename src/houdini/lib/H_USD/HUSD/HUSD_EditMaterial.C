@@ -108,7 +108,7 @@ husdSetSignature( OP_Node &node, const UT_StringRef &shader_id )
 	return;
 
     exint idx = info->getInputSetScriptNames().find( shader_id );
-    if( idx < 0 && idx >= info->getInputSetNames().size() )
+    if( !info->getInputSetNames().isValidIndex( idx ))
 	return;
 
     parm->setValue( 0, info->getInputSetNames()[idx], CH_STRING_LITERAL );
