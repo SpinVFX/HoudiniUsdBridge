@@ -18,6 +18,7 @@
 
 #include "GEO_HAPIUtils.h"
 
+#include <HAPI/HAPI_Helpers.h>
 #include <UT/UT_Exit.h>
 #include <UT/UT_Map.h>
 #include <UT/UT_RecursiveTimedLock.h>
@@ -323,8 +324,8 @@ getCookOptions()
 bool
 GEO_HAPISessionManager::createSession(GEO_HAPISessionID id)
 {
-    HAPI_ThriftServerOptions serverOptions{true, 3000.f,
-        HAPI_STATUSVERBOSITY_WARNINGS};
+    HAPI_ThriftServerOptions serverOptions;
+    HAPI_ThriftServerOptions_Init(&serverOptions);
 
     std::string pipeName = "hapi" + std::to_string(id) + "_";
 
