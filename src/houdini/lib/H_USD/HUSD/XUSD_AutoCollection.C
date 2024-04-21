@@ -34,9 +34,11 @@
 #include <gusd/UT_Gf.h>
 #include <FS/UT_DSO.h>
 #include <BV/BV_Overlap.h>
+#include <UT/UT_Interrupt.h>
 #include <UT/UT_Matrix3.h>
 #include <UT/UT_Matrix4.h>
 #include <UT/UT_Vector3.h>
+#include <UT/UT_ParallelUtil.h>
 #include <UT/UT_ThreadSpecificValue.h>
 #include <UT/UT_WorkArgs.h>
 #include <SYS/SYS_Hash.h>
@@ -416,7 +418,8 @@ XUSD_AutoCollection::parsePattern(const UT_StringRef &str,
 
     findprims.setTraversalDemands(demands);
     findprims.addPattern(str, nodeid, timecode);
-    paths = findprims.getExpandedPathSet().sdfPathSet();
+    const auto &foundpaths = findprims.getExpandedPathSet().sdfPathSet();
+    paths.insert(foundpaths.begin(), foundpaths.end());
 
     if (timevaryingflag)
         *timevaryingflag |= findprims.getIsTimeVarying();
@@ -3029,15 +3032,15 @@ class XUSD_RenderVarsAutoCollection : public XUSD_AutoCollection
 {
 public:
     XUSD_RenderVarsAutoCollection(
-           const UT_StringHolder &collectionname,
-           const UT_StringArray &orderedargs,
-           const UT_StringMap<UT_StringHolder> &namedargs,
-           HUSD_AutoAnyLock &lock,
-           HUSD_PrimTraversalDemands demands,
-           int nodeid,
-           const HUSD_TimeCode &timecode)
-       : XUSD_AutoCollection(collectionname, orderedargs, namedargs,
-           lock, demands, nodeid, timecode)
+            const UT_StringHolder &collectionname,
+            const UT_StringArray &orderedargs,
+            const UT_StringMap<UT_StringHolder> &namedargs,
+            HUSD_AutoAnyLock &lock,
+            HUSD_PrimTraversalDemands demands,
+            int nodeid,
+            const HUSD_TimeCode &timecode)
+        : XUSD_AutoCollection(collectionname, orderedargs, namedargs,
+            lock, demands, nodeid, timecode)
     {
         if (orderedargs.size() > 0)
             parsePatternSingleResult(orderedargs[0],
@@ -3084,6 +3087,91 @@ public:
 
 protected:
     SdfPath                          mySettingsPath;
+};
+
+////////////////////////////////////////////////////////////////////////////
+// XUSD_ForEachAutoCollection
+////////////////////////////////////////////////////////////////////////////
+
+class XUSD_ForEachAutoCollection : public XUSD_AutoCollection
+{
+public:
+    XUSD_ForEachAutoCollection(
+            const UT_StringHolder &collectionname,
+            const UT_StringArray &orderedargs,
+            const UT_StringMap<UT_StringHolder> &namedargs,
+            HUSD_AutoAnyLock &lock,
+            HUSD_PrimTraversalDemands demands,
+            int nodeid,
+            const HUSD_TimeCode &timecode)
+        : XUSD_AutoCollection(collectionname, orderedargs, namedargs,
+            lock, demands, nodeid, timecode)
+    {
+        XUSD_PathSet pathset;
+        if (orderedargs.size() > 0)
+            parsePattern(orderedargs[0],
+                lock, demands, nodeid, timecode, pathset,
+                &myMayBeTimeVaryingSubPattern);
+        if (orderedargs.size() > 1)
+            myPerPathPattern = orderedargs[1];
+        myRangePaths.reserve(pathset.size());
+        for (auto &&path : pathset)
+            myRangePaths.push_back(path);
+    }
+    ~XUSD_ForEachAutoCollection() override
+    { }
+
+    bool randomAccess() const override
+    { return false; }
+
+    void matchPrimitives(XUSD_PathSet &matches) const override
+    {
+        UT_AutoInterrupt boss("Matching primitives: %foreach");
+
+        UTparallelForEachNumber(myRangePaths.size(),
+            [&](const UT_BlockedRange<size_t> &r)
+            {
+                UT_WorkBuffer per_path_pattern;
+
+                for (size_t i = r.begin(), n = r.end(); i < n; ++i)
+                {
+                    float progress = float(i) / float(myRangePaths.size());
+                    if (boss.wasInterrupted(int(progress * 100.0)))
+                        break;
+
+                    SdfPath path = myRangePaths[i];
+                    per_path_pattern = myPerPathPattern;
+                    per_path_pattern.substitute(
+                        "@path", path.GetAsString().c_str());
+                    per_path_pattern.substitute(
+                        "@name", path.GetName().c_str());
+                    parsePattern(per_path_pattern,
+                        myLock, myDemands, myNodeId, myHusdTimeCode,
+                        myPerPathPatternMatches.get(),
+                        &myMayBeTimeVarying.get());
+                }
+            });
+        if (!boss.wasInterrupted())
+            for (auto &&paths : myPerPathPatternMatches)
+                matches.insert(paths.begin(), paths.end());
+    }
+
+    bool getMayBeTimeVarying() const override
+    {
+        if (XUSD_AutoCollection::getMayBeTimeVarying())
+            return true;
+
+        for (auto &&maybetimevarying : myMayBeTimeVarying)
+            if (maybetimevarying)
+                return true;
+        return false;
+    }
+
+protected:
+    SdfPathVector                                    myRangePaths;
+    UT_StringHolder                                  myPerPathPattern;
+    mutable UT_ThreadSpecificValue<XUSD_PathSet>     myPerPathPatternMatches;
+    mutable UT_ThreadSpecificValue<bool>             myMayBeTimeVarying;
 };
 
 ////////////////////////////////////////////////////////////////////////////
@@ -3167,6 +3255,8 @@ XUSD_AutoCollection::registerPlugins()
         <XUSD_RenderProductsAutoCollection>("renderproducts"));
     registerPlugin(new XUSD_SimpleAutoCollectionFactory
         <XUSD_RenderVarsAutoCollection>("rendervars"));
+    registerPlugin(new XUSD_SimpleAutoCollectionFactory
+        <XUSD_ForEachAutoCollection>("foreach"));
     if (!thePluginsInitialized)
     {
         UT_DSO dso;
