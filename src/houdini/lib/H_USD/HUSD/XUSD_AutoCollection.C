@@ -34,9 +34,11 @@
 #include <gusd/UT_Gf.h>
 #include <FS/UT_DSO.h>
 #include <BV/BV_Overlap.h>
+#include <UT/UT_Interrupt.h>
 #include <UT/UT_Matrix3.h>
 #include <UT/UT_Matrix4.h>
 #include <UT/UT_Vector3.h>
+#include <UT/UT_ParallelUtil.h>
 #include <UT/UT_ThreadSpecificValue.h>
 #include <UT/UT_WorkArgs.h>
 #include <SYS/SYS_Hash.h>
@@ -105,6 +107,7 @@ XUSD_AutoCollection::XUSD_AutoCollection(
         const HUSD_TimeCode &timecode)
     : myOrderedArgs(orderedargs),
       myNamedArgs(namedargs),
+      myMayBeTimeVaryingSubPattern(false),
       myLock(lock),
       myDemands(demands),
       myNodeId(nodeid),
@@ -408,14 +411,19 @@ XUSD_AutoCollection::parsePattern(const UT_StringRef &str,
         HUSD_PrimTraversalDemands demands,
         int nodeid,
         const HUSD_TimeCode &timecode,
-        XUSD_PathSet &paths)
+        XUSD_PathSet &paths,
+        bool *timevaryingflag)
 {
     HUSD_FindPrims   findprims(lock);
 
     findprims.setTraversalDemands(demands);
     findprims.addPattern(str, nodeid, timecode);
-    paths = findprims.getExpandedPathSet().sdfPathSet();
+    const auto &foundpaths = findprims.getExpandedPathSet().sdfPathSet();
+    paths.insert(foundpaths.begin(), foundpaths.end());
 
+    if (timevaryingflag)
+        *timevaryingflag |= findprims.getIsTimeVarying();
+    
     return true;
 }
 
@@ -425,7 +433,8 @@ XUSD_AutoCollection::parsePatternSingleResult(const UT_StringRef &str,
     HUSD_PrimTraversalDemands demands,
     int nodeid,
     const HUSD_TimeCode &timecode,
-    SdfPath &path)
+    SdfPath &path,
+    bool *timevaryingflag)
 {
     HUSD_FindPrims   findprims(lock);
 
@@ -433,6 +442,9 @@ XUSD_AutoCollection::parsePatternSingleResult(const UT_StringRef &str,
     findprims.addPattern(str, nodeid, timecode);
     if (!findprims.getExpandedPathSet().empty())
         path = *findprims.getExpandedPathSet().sdfPathSet().begin();
+    
+    if (timevaryingflag)
+        *timevaryingflag |= findprims.getIsTimeVarying();
 
     return true;
 }
@@ -824,6 +836,9 @@ public:
 
     bool getMayBeTimeVarying() const override
     {
+        if (XUSD_AutoCollection::getMayBeTimeVarying())
+            return true;
+        
         for (auto &&maybetimevarying : myMayBeTimeVarying)
             if (maybetimevarying)
                 return true;
@@ -1198,7 +1213,8 @@ public:
     {
         if (orderedargs.size() > 0)
             parsePattern(orderedargs[0],
-                lock, demands, nodeid, timecode, myRefPaths);
+                lock, demands, nodeid, timecode, myRefPaths,
+                &myMayBeTimeVaryingSubPattern);
 
         // We are only interested in direct composition authored on this prim,
         // that may be references, inherits, or specializes. We don't care
@@ -1288,7 +1304,8 @@ public:
     {
         if (orderedargs.size() > 0)
             parsePattern(orderedargs[0],
-                lock, demands, nodeid, timecode, myRefPaths);
+                lock, demands, nodeid, timecode, myRefPaths,
+                &myMayBeTimeVaryingSubPattern);
 
         // We are only interested in direct composition authored on this prim,
         // that may be references, inherits, or specializes. We don't care
@@ -1383,7 +1400,8 @@ public:
     {
         if (orderedargs.size() > 0)
             parsePatternSingleResult(orderedargs[0],
-                lock, demands, nodeid, timecode, mySrcPath);
+                lock, demands, nodeid, timecode, mySrcPath,
+                &myMayBeTimeVaryingSubPattern);
         initialize(lock);
     }
 
@@ -1510,7 +1528,8 @@ public:
     {
         if (orderedargs.size() > 0)
             parsePatternSingleResult(orderedargs[0],
-                lock, demands, nodeid, timecode, myPath);
+                lock, demands, nodeid, timecode, myPath,
+                &myMayBeTimeVaryingSubPattern);
         initialize(lock, namedargs);
     }
     ~XUSD_BoundAutoCollection() override
@@ -1590,6 +1609,9 @@ public:
 
     bool getMayBeTimeVarying() const override
     {
+        if (XUSD_AutoCollection::getMayBeTimeVarying())
+            return true;
+
         if (myBoundsPrimIsTimeVarying)
             return true;
 
@@ -1834,7 +1856,8 @@ public:
             else
             {
                 parsePattern(orderedargs[0],
-                    lock, demands, nodeid, timecode, myMaterialPaths);
+                    lock, demands, nodeid, timecode, myMaterialPaths,
+                    &myMayBeTimeVaryingSubPattern);
                 myMaterialUnbound = false;
             }
         }
@@ -1908,7 +1931,8 @@ public:
         if (orderedargs.size() > 0)
         {
             parsePattern(orderedargs[0],
-                lock, demands, nodeid, timecode, myGeoPaths);
+                lock, demands, nodeid, timecode, myGeoPaths,
+                &myMayBeTimeVaryingSubPattern);
             myGeoPaths.removeDescendants();
         }
 
@@ -1983,7 +2007,8 @@ public:
         if (orderedargs.size() == 2)
         {
             parsePattern(orderedargs[0],
-                lock, demands, nodeid, timecode, myPaths);
+                lock, demands, nodeid, timecode, myPaths,
+                &myMayBeTimeVaryingSubPattern);
             myRelationshipName = TfToken(orderedargs(1).toStdString());
         }
         else if (orderedargs.size() == 1)
@@ -2056,7 +2081,8 @@ public:
         else
         {
             parsePatternSingleResult(orderedargs[0],
-                lock, demands, nodeid, timecode, myPath);
+                lock, demands, nodeid, timecode, myPath,
+                &myMayBeTimeVaryingSubPattern);
             myDistanceBound2 = pow(orderedargs[1].toFloat(), 2);
             initialize(lock, namedargs);
         }
@@ -2112,6 +2138,9 @@ public:
 
     bool getMayBeTimeVarying() const override
     {
+        if (XUSD_AutoCollection::getMayBeTimeVarying())
+            return true;
+        
         for (auto &&maybetimevarying : myMayBeTimeVarying)
             if (maybetimevarying)
                 return true;
@@ -2204,7 +2233,8 @@ public:
 
         if (orderedargs.size() > 0)
             parsePattern(orderedargs[0],
-                lock, demands, nodeid, timecode, myPaths);
+                lock, demands, nodeid, timecode, myPaths,
+                &myMayBeTimeVaryingSubPattern);
     }
     ~XUSD_RelativeAutoCollection() override
     { }
@@ -2505,7 +2535,8 @@ public:
     {
         if (orderedargs.size() > 0)
             parsePattern(orderedargs[0],
-                lock, demands, nodeid, timecode, myPaths);
+                lock, demands, nodeid, timecode, myPaths,
+                &myMayBeTimeVaryingSubPattern);
     }
     ~XUSD_MinimalSetAutoCollection() override
     { }
@@ -2545,7 +2576,8 @@ public:
     {
         if (orderedargs.size() > 0)
             parsePattern(orderedargs[0],
-                lock, demands, nodeid, timecode, myPaths);
+                lock, demands, nodeid, timecode, myPaths,
+                &myMayBeTimeVaryingSubPattern);
 
         myPaths.removeDescendants();
     }
@@ -2582,7 +2614,8 @@ public:
     {
         if (orderedargs.size() > 0)
             parsePattern(orderedargs[0],
-                lock, demands, nodeid, timecode, myPaths);
+                lock, demands, nodeid, timecode, myPaths,
+                &myMayBeTimeVaryingSubPattern);
     }
     ~XUSD_LowestAutoCollection() override
     { }
@@ -2623,7 +2656,8 @@ public:
         if (orderedargs.size() > 0)
         {
             parsePattern(orderedargs[0],
-                lock, demands, nodeid, timecode, myPaths);
+                lock, demands, nodeid, timecode, myPaths,
+                &myMayBeTimeVaryingSubPattern);
 
             exint idx = 0;
             exint start = getValueFromArg("start", 0);
@@ -2706,7 +2740,8 @@ public:
         if (orderedargs.size() > 0)
         {
             parsePattern(orderedargs[0],
-                lock, demands, nodeid, timecode, myPaths);
+                lock, demands, nodeid, timecode, myPaths,
+                &myMayBeTimeVaryingSubPattern);
 
             fpreal64 seed = 0.0;
             fpreal64 fraction = 0.5;
@@ -2860,7 +2895,8 @@ public:
     {
         if (orderedargs.size() > 0)
             parsePatternSingleResult(orderedargs[0],
-                lock, demands, nodeid, timecode, mySettingsPath);
+                lock, demands, nodeid, timecode, mySettingsPath,
+                &myMayBeTimeVaryingSubPattern);
     }
     ~XUSD_RenderCameraAutoCollection() override
     { }
@@ -2909,7 +2945,8 @@ public:
     {
         if (orderedargs.size() > 0)
             parsePatternSingleResult(orderedargs[0],
-                lock, demands, nodeid, timecode, mySettingsPath);
+                lock, demands, nodeid, timecode, mySettingsPath,
+                &myMayBeTimeVaryingSubPattern);
     }
     ~XUSD_RenderProductsAutoCollection() override
     { }
@@ -2946,19 +2983,20 @@ class XUSD_RenderVarsAutoCollection : public XUSD_AutoCollection
 {
 public:
     XUSD_RenderVarsAutoCollection(
-           const UT_StringHolder &collectionname,
-           const UT_StringArray &orderedargs,
-           const UT_StringMap<UT_StringHolder> &namedargs,
-           HUSD_AutoAnyLock &lock,
-           HUSD_PrimTraversalDemands demands,
-           int nodeid,
-           const HUSD_TimeCode &timecode)
-       : XUSD_AutoCollection(collectionname, orderedargs, namedargs,
-           lock, demands, nodeid, timecode)
+            const UT_StringHolder &collectionname,
+            const UT_StringArray &orderedargs,
+            const UT_StringMap<UT_StringHolder> &namedargs,
+            HUSD_AutoAnyLock &lock,
+            HUSD_PrimTraversalDemands demands,
+            int nodeid,
+            const HUSD_TimeCode &timecode)
+        : XUSD_AutoCollection(collectionname, orderedargs, namedargs,
+            lock, demands, nodeid, timecode)
     {
         if (orderedargs.size() > 0)
             parsePatternSingleResult(orderedargs[0],
-                lock, demands, nodeid, timecode, mySettingsPath);
+                lock, demands, nodeid, timecode, mySettingsPath,
+                &myMayBeTimeVaryingSubPattern);
     }
     ~XUSD_RenderVarsAutoCollection() override
     { }
@@ -3000,6 +3038,91 @@ public:
 
 protected:
     SdfPath                          mySettingsPath;
+};
+
+////////////////////////////////////////////////////////////////////////////
+// XUSD_ForEachAutoCollection
+////////////////////////////////////////////////////////////////////////////
+
+class XUSD_ForEachAutoCollection : public XUSD_AutoCollection
+{
+public:
+    XUSD_ForEachAutoCollection(
+            const UT_StringHolder &collectionname,
+            const UT_StringArray &orderedargs,
+            const UT_StringMap<UT_StringHolder> &namedargs,
+            HUSD_AutoAnyLock &lock,
+            HUSD_PrimTraversalDemands demands,
+            int nodeid,
+            const HUSD_TimeCode &timecode)
+        : XUSD_AutoCollection(collectionname, orderedargs, namedargs,
+            lock, demands, nodeid, timecode)
+    {
+        XUSD_PathSet pathset;
+        if (orderedargs.size() > 0)
+            parsePattern(orderedargs[0],
+                lock, demands, nodeid, timecode, pathset,
+                &myMayBeTimeVaryingSubPattern);
+        if (orderedargs.size() > 1)
+            myPerPathPattern = orderedargs[1];
+        myRangePaths.reserve(pathset.size());
+        for (auto &&path : pathset)
+            myRangePaths.push_back(path);
+    }
+    ~XUSD_ForEachAutoCollection() override
+    { }
+
+    bool randomAccess() const override
+    { return false; }
+
+    void matchPrimitives(XUSD_PathSet &matches) const override
+    {
+        UT_AutoInterrupt boss("Matching primitives: %foreach");
+
+        UTparallelForEachNumber((exint)myRangePaths.size(),
+            [&](const UT_BlockedRange<exint> &r)
+            {
+                UT_WorkBuffer per_path_pattern;
+
+                for (exint i = r.begin(), n = r.end(); i < n; ++i)
+                {
+                    float progress = float(i) / float(myRangePaths.size());
+                    if (boss.wasInterrupted(int(progress * 100.0)))
+                        break;
+
+                    SdfPath path = myRangePaths[i];
+                    per_path_pattern = myPerPathPattern;
+                    per_path_pattern.substitute(
+                        "@path", path.GetAsString().c_str());
+                    per_path_pattern.substitute(
+                        "@name", path.GetName().c_str());
+                    parsePattern(per_path_pattern,
+                        myLock, myDemands, myNodeId, myHusdTimeCode,
+                        myPerPathPatternMatches.get(),
+                        &myMayBeTimeVarying.get());
+                }
+            });
+        if (!boss.wasInterrupted())
+            for (auto &&paths : myPerPathPatternMatches)
+                matches.insert(paths.begin(), paths.end());
+    }
+
+    bool getMayBeTimeVarying() const override
+    {
+        if (XUSD_AutoCollection::getMayBeTimeVarying())
+            return true;
+
+        for (auto &&maybetimevarying : myMayBeTimeVarying)
+            if (maybetimevarying)
+                return true;
+        return false;
+    }
+
+protected:
+    SdfPathVector                                    myRangePaths;
+    UT_StringHolder                                  myPerPathPattern;
+    mutable UT_ThreadSpecificValue<XUSD_PathSet>     myPerPathPatternMatches;
+    mutable UT_ThreadSpecificValue<bool>             myMayBeTimeVarying;
 };
 
 ////////////////////////////////////////////////////////////////////////////
@@ -3081,6 +3204,8 @@ XUSD_AutoCollection::registerPlugins()
         <XUSD_RenderProductsAutoCollection>("renderproducts"));
     registerPlugin(new XUSD_SimpleAutoCollectionFactory
         <XUSD_RenderVarsAutoCollection>("rendervars"));
+    registerPlugin(new XUSD_SimpleAutoCollectionFactory
+        <XUSD_ForEachAutoCollection>("foreach"));
     if (!thePluginsInitialized)
     {
         UT_DSO dso;
