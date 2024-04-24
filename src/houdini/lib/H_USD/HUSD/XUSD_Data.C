@@ -2423,5 +2423,18 @@ XUSD_Data::afterRelease()
     }
 }
 
+void
+XUSD_Data::clearAllMirroredData()
+{
+    for (auto &&data : theRegisteredData)
+    {
+        if (data->myMirroring == HUSD_FOR_MIRRORING)
+        {
+            XUSD_Data emptydata(HUSD_NOT_FOR_MIRRORING);
+            data->mirror(emptydata, HUSD_LoadMasks());
+        }
+    }
+}
+
 PXR_NAMESPACE_CLOSE_SCOPE
 

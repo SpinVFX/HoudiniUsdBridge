@@ -745,3 +745,9 @@ HUSD_DataHandle::release() const
     }
 }
 
+void
+HUSD_DataHandle::clearAllMirroredData()
+{
+    XUSD_Data::clearAllMirroredData();
+}
+

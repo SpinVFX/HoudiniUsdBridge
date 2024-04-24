@@ -171,6 +171,10 @@ public:
                                         bool create_change_block) const;
     void			 release() const;
 
+    // Clear out all mirrored stages completely. They must be rebuilt from
+    // scratch the next time they are asked to mirror a stage.
+    static void                  clearAllMirroredData();
+
 private:
     HUSD_ConstOverridesPtr	 currentOverrides() const;
     HUSD_ConstPostLayersPtr	 currentPostLayers() const;

@@ -278,6 +278,10 @@ public:
 					const HUSD_LockedStageSet &stages);
     const HUSD_LockedStageSet	&lockedStages() const;
 
+    // Clear out all mirrored stages completely. They must be rebuilt from
+    // scratch the next time they are asked to mirror a stage.
+    static void                  clearAllMirroredData();
+
 private:
     void		 reset();
     void		 createNewData(const HUSD_LoadMasksPtr &load_masks,

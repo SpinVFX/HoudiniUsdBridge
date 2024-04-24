@@ -65,19 +65,6 @@ namespace
         if (attrspec)
             attrspec->SetDefaultValue(VtValue(value));
     }
-
-    void
-    clearSdfAttribute(const SdfPrimSpecHandle &primspec,
-                      const TfToken &attrname)
-    {
-        SdfPath attrpath = SdfPath::ReflexiveRelativePath().
-            AppendProperty(attrname);
-
-        SdfAttributeSpecHandle attrspec = primspec->
-            GetAttributeAtPath(attrpath);
-        if (attrspec)
-            primspec->RemoveProperty(attrspec);
-    }
 }
 
 HUSD_MirrorRootLayer::HUSD_MirrorRootLayer(
@@ -114,6 +101,7 @@ HUSD_MirrorRootLayer::CameraParms::dump(UT_JSONWriter &w) const
     w.jsonKeyValue("myIsOrtho", myIsOrtho);
     w.jsonKeyValue("mySetCamParms", mySetCamParms);
     w.jsonKeyValue("mySetCropParms", mySetCropParms);
+    w.jsonKeyValue("myPreserveDepthOfField", myPreserveDepthOfField);
     w.jsonEndMap();
 }
 
@@ -202,14 +190,15 @@ HUSD_MirrorRootLayer::createViewportCamera(
                             theSkipAttributes.end())
                             continue;
 
-                        // If mySetCamParms is false and mySetCropParms is
-                        // true, then we're doing a render region from the
-                        // camera and want to keep DOF. Otherwise we're
-                        // tumbling free and need to clear fStop.
-                        bool forcezero =
+                        // We force a zero fStop to eliminate depth of field
+                        // unless we have been explicitly instructed not to.
+                        // This happens in the case of render regions, or
+                        // active manipulation of a view locked to the current
+                        // camera. Otherwise we're tumbling free and need to
+                        // clear the fStop.
+                        bool force_zero_fstop =
                             attr.GetName() == UsdGeomTokens->fStop &&
-                            (camparms.mySetCamParms ||
-                            !camparms.mySetCropParms);
+                            !camparms.myPreserveDepthOfField;
 
                         SdfPath attrpath = SdfPath::ReflexiveRelativePath().
                             AppendProperty(attr.GetName());
@@ -246,22 +235,14 @@ HUSD_MirrorRootLayer::createViewportCamera(
                                         attr.GetVariability(),
                                         attr.IsCustom());
 
-                                if (forcezero)
-                                {
-                                    // Need to clear stashed fstop as well,
-                                    // otherwise after render region, the
-                                    // subsequent free camera may pick up
-                                    // stashed/non-zero value even after render
-                                    // region is cleared.
-                                    stashattrspec->SetDefaultValue(
-                                        VtValue(0.0f));
-                                }
-                                else
-                                {
-                                    stashattrspec->SetDefaultValue(value);
-                                }
-
-                                if (camparms.myDoCamEffects && !forcezero)
+                                // Stash the value most recently pulled from a
+                                // real camera so we can continue to use it
+                                // even if camera effects get turned off (which
+                                // will clear the most recent values) then
+                                // turned on again (when we no longer have a
+                                // link back to the most recent camera).
+                                stashattrspec->SetDefaultValue(value);
+                                if (camparms.myDoCamEffects && !force_zero_fstop)
                                     attrspec->SetDefaultValue(value);
                                 else
                                     attrspec->SetDefaultValue(VtValue(0.0f));
@@ -313,7 +294,21 @@ HUSD_MirrorRootLayer::createViewportCamera(
 
                 if (attrspec && stashattrspec)
                 {
-                    VtValue value = stashattrspec->GetDefaultValue();
+                    // We force a zero fStop to eliminate depth of field
+                    // unless we have been explicitly instructed not to.
+                    // This happens in the case of render regions, or
+                    // active manipulation of a view locked to the current
+                    // camera. Otherwise we're tumbling free and need to
+                    // clear the fStop.
+                    bool force_zero_fstop =
+                        attrpath.GetName() == UsdGeomTokens->fStop &&
+                        !camparms.myPreserveDepthOfField;
+
+                    VtValue value;
+                    if (force_zero_fstop)
+                        value = VtValue(0.0f);
+                    else
+                        value = stashattrspec->GetDefaultValue();
                     attrspec->SetDefaultValue(value);
                 }
             }

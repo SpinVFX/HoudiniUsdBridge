@@ -76,6 +76,7 @@ public:
         bool                     mySetCamParms = true;
         bool                     myDoCamEffects = true;
         bool                     mySetCropParms = false;
+        bool                     myPreserveDepthOfField = false;
 
         void            dump() const;
         void            dump(UT_JSONWriter &w) const;
