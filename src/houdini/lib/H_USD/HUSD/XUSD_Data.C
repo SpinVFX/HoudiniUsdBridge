@@ -883,7 +883,7 @@ XUSD_Data::mirror(const XUSD_Data &src,
     // mirror stage from scratch.
     bool mirror_stage_is_new = false;
 
-    if (!myStage ||
+    if (!myStage || !src.myStage ||
         (myMirrorLoadRules == UsdStageLoadRules::LoadAll()) !=
             (myStage->GetLoadRules() == UsdStageLoadRules::LoadAll()) ||
 	stage_mask != myStage->GetPopulationMask() ||

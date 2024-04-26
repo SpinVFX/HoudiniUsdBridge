@@ -2390,7 +2390,14 @@ XUSD_HydraGeoCurves::Sync(HdSceneDelegate *scene_delegate,
 	    myCounts=XUSD_HydraUtils::createGTArray(top.GetCurveVertexCounts());
 	else
 	{
-	    int num = top.CalculateNeededNumberOfControlPoints();
+            // This is a very special case of topology which is technically
+            // "unsupported" according to the HdBasisCurvesTopology docs. But
+            // the standard Pixar Draw Mode adapter uses it for bounding boxes,
+            // and both the Pixar and our draw mode adapter use it for
+            // "origin axes" draw mode.
+            int num = 0;
+            for (auto &&count : top.GetCurveVertexCounts())
+                num += count / 2;
 	    myCounts = new GT_DAConstantValue<int32>(num, 2, 1);
 	}
 

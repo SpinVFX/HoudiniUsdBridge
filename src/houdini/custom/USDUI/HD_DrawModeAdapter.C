@@ -179,6 +179,7 @@ _GetAxesMask(UsdPrim const& prim, UsdTimeCode time) {
 HD_DrawModeAdapter::HD_DrawModeAdapter()
     : UsdImagingPrimAdapter()
     , _schemaColor(0)
+    , _boundingBoxSupported(false)
 {
     // Look up the default color in the schema registry.
     const UsdPrimDefinition *primDef =
