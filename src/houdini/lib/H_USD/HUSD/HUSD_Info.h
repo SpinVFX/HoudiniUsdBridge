@@ -31,6 +31,7 @@
 #include <UT/UT_StringMap.h>
 #include <UT/UT_ArrayStringSet.h>
 
+class husd_InfoPrivate;
 class HUSD_TimeCode;
 class HUSD_Path;
 enum class HUSD_XformType;
@@ -240,9 +241,6 @@ public:
     UT_Matrix4D		 getWorldXform(const UT_StringRef &primpath,
 				const HUSD_TimeCode &time_code,
 				HUSD_TimeSampling *time_sampling=nullptr) const;
-    UT_Matrix4D		 getParentXform(const UT_StringRef &primpath,
-				const HUSD_TimeCode &time_code,
-				HUSD_TimeSampling *time_sampling=nullptr) const;
     bool		 getXformOrder(const UT_StringRef &primpath,
 				UT_StringArray &xform_order) const;
     bool		 isXformReset(const UT_StringRef &primpath ) const;
@@ -409,7 +407,8 @@ public:
                                 UtValueType &value) const;
 
 private:
-    HUSD_AutoAnyLock	&myAnyLock;
+    UT_UniquePtr<husd_InfoPrivate>	 myPrivate;
+    HUSD_AutoAnyLock	                &myAnyLock;
 };
 
 #endif
