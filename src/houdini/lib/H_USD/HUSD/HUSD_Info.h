@@ -30,6 +30,7 @@
 #include "HUSD_Utils.h"
 #include <UT/UT_StringMap.h>
 #include <UT/UT_ArrayStringSet.h>
+#include <UT/UT_UniquePtr.h>
 
 class husd_InfoPrivate;
 class HUSD_TimeCode;
