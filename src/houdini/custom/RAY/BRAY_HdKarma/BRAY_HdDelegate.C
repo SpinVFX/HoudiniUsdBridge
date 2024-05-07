@@ -315,7 +315,7 @@ bray_stopRequested(void *p)
     if (!p)
 	return false;
     auto thread = (PXR_INTERNAL_NS::HdRenderThread *)p;
-    return thread->IsStopRequested() && thread->IsRendering();
+    return thread->IsRendering() && thread->IsStopRequested();
 }
 
 enum BRAY_HD_RENDER_SETTING

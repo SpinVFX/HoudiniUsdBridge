@@ -611,6 +611,11 @@ BRAY_HdPointPrim::Sync(HdSceneDelegate *sd,
     // Handle dirty topology
     bool topo_dirty = HdChangeTracker::IsTopologyDirty(*dirtyBits, id);
     static const TfToken &primType = HdPrimTypeTokens->points;
+    static constexpr HdInterpolation    thePtInterp[] = {
+        HdInterpolationVarying,
+        HdInterpolationVertex,
+        HdInterpolationFaceVarying
+    };
     if (!topo_dirty && (myPrims.size() && myPrims[0]) && !myIsProcedural)
     {
         // When we match attributes, hopefully we've added the "ids" primvar to
@@ -627,7 +632,7 @@ BRAY_HdPointPrim::Sync(HdSceneDelegate *sd,
 	if (!BRAY_HdUtil::matchAttributes(sd, id, primType,
 		    HdInterpolationConstant, pmesh->getUniform())
 	    || !BRAY_HdUtil::matchAttributes(sd, id, primType,
-		    HdInterpolationVertex, pmesh->getPoints(), &theSkipIds)
+		    thePtInterp, SYSarraySize(thePtInterp), pmesh->getPoints(), &theSkipIds)
             || (P && P->getTupleSize() != 3))
 	{
 	    topo_dirty = true;
@@ -659,7 +664,7 @@ BRAY_HdPointPrim::Sync(HdSceneDelegate *sd,
 		       | BRAY_EVENT_ATTRIB_P);
 
 	alist[0] = BRAY_HdUtil::makeAttributes(sd, *rparm, id,
-		primType, -1, props, HdInterpolationVertex);
+		primType, -1, props, thePtInterp, SYSarraySize(thePtInterp));
 	alist[1] = BRAY_HdUtil::makeAttributes(sd, *rparm, id,
 		primType, 1, props, HdInterpolationConstant);
 
@@ -687,7 +692,7 @@ BRAY_HdPointPrim::Sync(HdSceneDelegate *sd,
 	    const GT_AttributeListHandle& cattribs)
 	{
 	    updated |= BRAY_HdUtil::updateAttributes(sd, *rparm, dirtyBits, id,
-		pattribs, alist[0], event, props, HdInterpolationVertex);
+		pattribs, alist[0], event, props, thePtInterp, SYSarraySize(thePtInterp));
 	    updated |= BRAY_HdUtil::updateAttributes(sd, *rparm, dirtyBits, id,
 		cattribs, alist[1], event, props, HdInterpolationConstant);
 

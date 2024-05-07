@@ -132,6 +132,16 @@ BRAY_HdParam::dump(UT_JSONWriter &w) const
     w.jsonEndMap();
 }
 
+void
+BRAY_HdParam::stopRendering()
+{
+    myRenderer.prepareForStop();
+    myThread.StopRender();
+    UT_ASSERT(!myRenderer.isRendering());
+    clearRenderStats();
+}
+
+
 BRAY::ScenePtr &
 BRAY_HdParam::getSceneForEdit()
 {

@@ -82,14 +82,6 @@ public:
 	    SYS_AtomicInt32 &version);
     ~BRAY_HdParam() override = default;
 
-    void		stopRendering()
-    {
-	myRenderer.prepareForStop();
-	myThread.StopRender();
-	UT_ASSERT(!myRenderer.isRendering());
-        clearRenderStats();
-    }
-
     BRAY::ScenePtr	&getSceneForEdit();
 
     void	queueInstancer(HdSceneDelegate *sd, BRAY_HdInstancer *inst);
@@ -195,7 +187,8 @@ public:
     void                 setInteractiveStats() { myStatsUpdateTime = 1; }
 
 private:
-    exint	getQueueCount() const;
+    void        stopRendering();
+    exint       getQueueCount() const;
     void        updateStats();
 
     using QueuedInstances = UT_Set<BRAY_HdInstancer *>;
