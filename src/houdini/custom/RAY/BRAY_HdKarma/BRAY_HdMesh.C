@@ -523,8 +523,11 @@ BRAY_HdMesh::Sync(HdSceneDelegate *sceneDelegate,
             }
 	}
     }
+    // subd tag content changes come through as dirty topology in the change
+    // tracker, not dirty subd tag
     if (myRefineLevel > 0
-            && (subd_changed || HdChangeTracker::IsSubdivTagsDirty(*dirtyBits, id)))
+            && (top_dirty || subd_changed ||
+                HdChangeTracker::IsSubdivTagsDirty(*dirtyBits, id)))
     {
 	UT_ASSERT(top_dirty && "The scheme might not be set?");
 	if (gtScheme(scheme) != GT_SCHEME_INVALID)
