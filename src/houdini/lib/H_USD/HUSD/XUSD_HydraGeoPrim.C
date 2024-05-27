@@ -26,6 +26,7 @@
  */
 
 #include "XUSD_HydraGeoPrim.h"
+#include "XUSD_HydraExtComputation.h"
 #include "XUSD_HydraInstancer.h"
 #include "XUSD_HydraField.h"
 #include "XUSD_HydraUtils.h"
@@ -37,6 +38,7 @@
 #include "HUSD_Path.h"
 #include "HUSD_Scene.h"
 
+#include <pxr/imaging/hd/tokens.h>
 #include <pxr/imaging/hd/sceneDelegate.h>
 #include <pxr/imaging/hd/enums.h>
 #include <pxr/imaging/hd/extComputationUtils.h>
@@ -45,12 +47,14 @@
 
 #include <GT/GT_AttributeList.h>
 #include <GT/GT_CatPolygonMesh.h>
+#include <GT/GT_DAClampedArray.h>
 #include <GT/GT_DAConstant.h>
 #include <GT/GT_DAConstantValue.h>
 #include <GT/GT_DAIndexedString.h>
 #include <GT/GT_DAIndirect.h>
 #include <GT/GT_DANumeric.h>
 #include <GT/GT_DASubArray.h>
+#include <GT/GT_MikkT.h>
 #include <GT/GT_Names.h>
 #include <GT/GT_Primitive.h>
 #include <GT/GT_PrimPointMesh.h>
@@ -66,21 +70,37 @@
 #include <UT/UT_Debug.h>
 #include "HUSD_GetAttributes.h"
 
+// NOTE: Consolidated mesh parameters are now in HUSD_Scene.
 
-#define CONSOLIDATE_SMALL_MESHES
-#define SMALL_MESH_MAX_VERTS       4000
-#define SMALL_MESH_INSTANCE_LIMIT 40000
+// Perform the mesh deformations for skinning operations on the GPU
+//#define GPU_MESH_DEFORMATION
 
 using namespace UT::Literal;
 
+namespace
+{
+static UT_StringHolder theHydraDisplayColor("displayColor");
+};
+
+
 PXR_NAMESPACE_OPEN_SCOPE
+
+static int64 XUSDgetIntValue(const VtValue &value, int64 default_value)
+{
+    if(value.IsHolding<int32>())
+        return value.Get<int32>();
+    else if(value.IsHolding<int64>())
+        return value.Get<int64>();
+    else if(value.IsHolding<float>())
+        return value.Get<float>();
+    return default_value;
+}    
 
 
 XUSD_HydraGeoPrim::XUSD_HydraGeoPrim(TfToken const& type_id,
 				     SdfPath const& prim_id,
-				     SdfPath const& instancer_id,
 				     HUSD_Scene &scene)
-    : HUSD_HydraGeoPrim(scene, HUSD_Path(prim_id).pathStr()),
+    : HUSD_HydraGeoPrim(scene, prim_id),
       myHydraPrim(nullptr),
       myPrimBase(nullptr),
       myTypeID(type_id)
@@ -88,7 +108,7 @@ XUSD_HydraGeoPrim::XUSD_HydraGeoPrim(TfToken const& type_id,
     if(type_id == HdPrimTypeTokens->mesh)
     {
 	auto prim = 
-	    new XUSD_HydraGeoMesh(type_id, prim_id, instancer_id,
+	    new XUSD_HydraGeoMesh(type_id, prim_id,
 				  myGTPrim, myInstance, myDirtyMask, *this);
 	myHydraPrim = prim;
 	myPrimBase = prim;
@@ -96,15 +116,23 @@ XUSD_HydraGeoPrim::XUSD_HydraGeoPrim(TfToken const& type_id,
     else if(type_id == HdPrimTypeTokens->basisCurves)
     {
 	auto prim = 
-	    new XUSD_HydraGeoCurves(type_id, prim_id, instancer_id,
+	    new XUSD_HydraGeoCurves(type_id, prim_id,
 				    myGTPrim, myInstance, myDirtyMask, *this);
 	myHydraPrim = prim;
 	myPrimBase = prim;
     }
+    else if(type_id == HusdHdPrimTypeTokens->metaCurves)
+    {
+        auto prim =
+            new XUSD_HydraGeoCurves(type_id, prim_id,
+                myGTPrim, myInstance, myDirtyMask, *this);
+        myHydraPrim = prim;
+        myPrimBase = prim;
+    }
     else if(type_id == HdPrimTypeTokens->volume)
     {
 	auto prim = 
-	    new XUSD_HydraGeoVolume(type_id, prim_id, instancer_id,
+	    new XUSD_HydraGeoVolume(type_id, prim_id,
 				    myGTPrim, myInstance, myDirtyMask, *this);
 	myHydraPrim = prim;
 	myPrimBase = prim;
@@ -112,15 +140,15 @@ XUSD_HydraGeoPrim::XUSD_HydraGeoPrim(TfToken const& type_id,
     else if(type_id == HdPrimTypeTokens->points)
     {
 	auto prim = 
-	    new XUSD_HydraGeoPoints(type_id, prim_id, instancer_id,
+	    new XUSD_HydraGeoPoints(type_id, prim_id,
 				    myGTPrim, myInstance, myDirtyMask, *this);
 	myHydraPrim = prim;
 	myPrimBase = prim;
     }
-    else if(type_id == HusdHdPrimTypeTokens()->boundingBox)
+    else if(type_id == HusdHdPrimTypeTokens->boundingBox)
     {
 	auto prim = 
-	    new XUSD_HydraGeoBounds(type_id, prim_id, instancer_id,
+	    new XUSD_HydraGeoBounds(type_id, prim_id,
 				    myGTPrim, myInstance, myDirtyMask, *this);
 	myHydraPrim = prim;
 	myPrimBase = prim;
@@ -132,54 +160,30 @@ XUSD_HydraGeoPrim::~XUSD_HydraGeoPrim()
     delete myHydraPrim;
 }
 
-UT_StringHolder
+HUSD_Path
 XUSD_HydraGeoPrim::getTopLevelPath(HdSceneDelegate *sdel,
                                    SdfPath const& prim_id,
                                    SdfPath const& instancer_id)
 {
     if(instancer_id.IsEmpty())
-        return HUSD_Path(prim_id).pathStr();
+        return prim_id;
     
     auto instancer= sdel->GetRenderIndex().GetInstancer(instancer_id);
     while(instancer)
     {
         if(instancer->GetParentId().IsEmpty())
-            return HUSD_Path(instancer->GetId()).pathStr();
+            return instancer->GetId();
         
         instancer=sdel->GetRenderIndex().GetInstancer(instancer->GetParentId());
     }
 
-    return HUSD_Path(prim_id).pathStr();
+    return prim_id;
 }
 
-bool
-XUSD_HydraGeoPrim::updateGTSelection(bool *has_selection)
-{
-    if(myPrimBase)
-	return myPrimBase->updateGTSelection(has_selection);
-
-    return false;
-}
-
-void
-XUSD_HydraGeoPrim::clearGTSelection()
-{
-    if(myPrimBase)
-	myPrimBase->clearGTSelection();
-}
-
-const UT_StringArray &
+const UT_Array<HUSD_Path> &
 XUSD_HydraGeoPrim::materials() const
 {
     return myPrimBase->materials();
-}
-
-bool
-XUSD_HydraGeoPrim::getSelectedBBox(UT_BoundingBox &bbox) const
-{
-    if(isInstanced())
-        return myPrimBase->getSelectedBBox(bbox);
-    return false;
 }
 
 // ------------------------------------------------------------------------
@@ -191,10 +195,12 @@ XUSD_HydraGeoBase::XUSD_HydraGeoBase(GT_PrimitiveHandle &prim,
     : myGTPrim(prim),
       myInstance(instance),
       myDirtyMask(dirty),
+      myPrevDirtyBits(0),
       myInstanceId(0),
       myPrimTransform(1.0),
       myHydraPrim(hprim),
-      myMaterialID(-1)
+      myMaterialID(-1),
+      myHasSelection(false)
 {
     myGTPrimTransform = new GT_Transform();
     myGTPrimTransform->alloc(1);
@@ -205,26 +211,22 @@ XUSD_HydraGeoBase::resetPrim()
 {
     myGTPrim.reset();
 
-    for(auto it : myAttribMap)
-    {
-        GT_Owner attrib_owner;
-        int interp;
-        bool computed;
-        void *data;
-        UTlhsTuple(attrib_owner, interp, computed, data) = it.second;
-        if(data)
-            delete (HdExtComputationPrimvarDescriptor *)data;
-    }
     myAttribMap.clear();
     myInstanceTransforms.reset();
 }
 
 void
-XUSD_HydraGeoBase::clearDirty(HdDirtyBits *dirty_bits) const
+XUSD_HydraGeoBase::clearDirty(HdDirtyBits *dirty_bits,
+                              DirtyClear clear)
 {
     if(*dirty_bits)
 	myHydraPrim.bumpVersion();
-    
+
+    if(clear == HOLD_DIRTY_BITS)
+        myPrevDirtyBits = *dirty_bits;
+    else
+        myPrevDirtyBits = 0;
+
     *dirty_bits = (*dirty_bits & HdChangeTracker::Varying);
     myHydraPrim.setInitialized();
 }
@@ -237,8 +239,6 @@ XUSD_HydraGeoBase::isDeferred(const SdfPath &id,
 {
     auto srparm = static_cast<XUSD_ViewerRenderParam *>(rparm);
 
-    srparm->scene().bumpModSerial();
-    
     if(srparm->scene().isDeferredUpdate())
     {
         // Always set the tag so t
@@ -303,9 +303,12 @@ bool
 XUSD_HydraGeoBase::addBBoxAttrib(HdSceneDelegate* sceneDelegate,
 				 const SdfPath		&id,
 				 GT_AttributeListHandle &detail,
-				 const GT_Primitive	*gt_prim) const
+				 const GT_Primitive	*gt_prim,
+                                 const GfRange3d        *known_extents) const
 {
-    GfRange3d extents = sceneDelegate->GetExtent(id);
+    GfRange3d extents = known_extents
+        ? *known_extents
+        : sceneDelegate->GetExtent(id);
     UT_BoundingBox bbox(extents.GetMin()[0],
 			extents.GetMin()[1],
 			extents.GetMin()[2],
@@ -334,6 +337,7 @@ XUSD_HydraGeoBase::addBBoxAttrib(HdSceneDelegate* sceneDelegate,
 bool
 XUSD_HydraGeoBase::processInstancerOverrides(
     HdSceneDelegate         *sd,
+    HdRenderParam           *rparm,
     const SdfPath           &inst_id,
     const SdfPath           &proto_id,
     HdDirtyBits             *dirty_bits,
@@ -345,10 +349,9 @@ XUSD_HydraGeoBase::processInstancerOverrides(
     if (!xinst)
         return false;
 
-    xinst->syncPrimvars(true);
-
-    const auto	&descs = sd->GetPrimvarDescriptors(inst_id,
-                                                   HdInterpolationInstance);
+    auto descs = sd->GetPrimvarDescriptors(inst_id, HdInterpolationInstance);
+    auto cdescs = sd->GetPrimvarDescriptors(inst_id, HdInterpolationConstant);
+    descs.insert(descs.end(), cdescs.begin(), cdescs.end());
     
     VtIntArray instanceIndices = sd->GetInstanceIndices(inst_id, proto_id);
     ninst = instanceIndices.size();
@@ -522,6 +525,7 @@ XUSD_HydraGeoBase::processInstancerOverrides(
 void
 XUSD_HydraGeoBase::buildShaderInstanceOverrides(
     HdSceneDelegate         *sd,
+    HdRenderParam           *rparm,
     const SdfPath           &inst_id,
     const SdfPath           &proto_id,
     HdDirtyBits             *dirty_bits)
@@ -537,7 +541,7 @@ XUSD_HydraGeoBase::buildShaderInstanceOverrides(
     while(xinst)
     {
         int num;
-        if(processInstancerOverrides(sd, id, pid, dirty_bits, lvl, num))
+        if(processInstancerOverrides(sd, rparm, id, pid, dirty_bits, lvl, num))
             has_overrides = true;
         
         ninst *= num;
@@ -650,17 +654,20 @@ XUSD_HydraGeoBase::assignOverride(const UT_Options *options,
 
 void
 XUSD_HydraGeoBase::buildTransforms(HdSceneDelegate *scene_delegate,
+                                   HdRenderParam   *rparm,
 				   const SdfPath  &proto_id,
 				   const SdfPath  &instr_id,
 				   HdDirtyBits    *dirty_bits,
                                    int             hou_proto_id)
 {
     bool only_prim_transform = instr_id.IsEmpty();
-
-    if(!instr_id.IsEmpty() &&
+    const bool dirty_indices =
+        HdChangeTracker::IsInstanceIndexDirty(*dirty_bits, proto_id);
+    
+    if(!only_prim_transform &&
 	(HdChangeTracker::IsInstancerDirty(*dirty_bits, proto_id) ||
          HdChangeTracker::IsTransformDirty(*dirty_bits, proto_id) ||
-	 HdChangeTracker::IsInstanceIndexDirty(*dirty_bits, proto_id)))
+	 dirty_indices))
     {
 	// Instance transforms
 	auto xinst = UTverify_cast<XUSD_HydraInstancer *>(
@@ -672,63 +679,20 @@ XUSD_HydraGeoBase::buildTransforms(HdSceneDelegate *scene_delegate,
             int levels = xinst->GetInstancerNumLevels(
                                 scene_delegate->GetRenderIndex(),
                                 *myHydraPrim.rprim());
-            if(levels > 1 && 0) // TODO - enable nested instancing
-            {
-                SdfPath id  = instr_id;
-                SdfPath pid = proto_id;
-                auto inst   = xinst;
-                myHydraPrim.instanceIDs().entries(0);
-                myInstanceTransforms = XUSD_HydraUtils::createTransformArray(
-                    xinst->computeTransformsAndIDs(proto_id, true, nullptr,
-                                                   levels-1,
-                                                   myHydraPrim.instanceIDs(),
-                                                   &myHydraPrim.scene(), 0.0,
-                                                   hou_proto_id));
-                
-                if(myInstanceTransforms)
-                    myInstanceTransforms->setEntries(0);
-                
-                do
-                {
-                    inst->syncPrimvars(false);
-                    
-                    auto array = inst->computeTransforms(pid, false, nullptr);
-                    auto gt_array =
-                        XUSD_HydraUtils::createTransformArray(array);
+            myHydraPrim.instanceIDs().entries(0);
+            auto array =
+                xinst->computeTransformsAndIDs(proto_id, true,
+                                               levels-1,
+                                               myHydraPrim.instanceIDs(),
+                                               &myHydraPrim.scene(),
+                                               hou_proto_id, dirty_indices);
+            // UTdebugPrint("#ids",myHydraPrim.instanceIDs().entries(),
+            //              array.size(), "IDs:", myHydraPrim.instanceIDs());
 
-                    myInstanceLevels.append(gt_array->entries());
-                    
-                    if(!myInstanceTransforms)
-                        myInstanceTransforms = gt_array;
-                    else
-                        myInstanceTransforms->append(gt_array);
-
-                    pid = id;
-                    id = inst->GetParentId();
-                    inst = UTverify_cast<XUSD_HydraInstancer *>(
-                        scene_delegate->GetRenderIndex().GetInstancer(id));
-                }
-                while(inst);
-            }
-            else
-            {
-                xinst->syncPrimvars(true);
-
-                myHydraPrim.instanceIDs().entries(0);
-                auto array =
-                    xinst->computeTransformsAndIDs(proto_id, true, nullptr,
-                                                   levels-1,
-                                                   myHydraPrim.instanceIDs(),
-                                                   &myHydraPrim.scene(), 0.0,
-                                                   hou_proto_id);
-                // UTdebugPrint("#ids",myHydraPrim.instanceIDs().entries(),
-                //              array.size(), "IDs:", myHydraPrim.instanceIDs());
-
-                myInstanceTransforms =
-                    XUSD_HydraUtils::createTransformArray(array);
-                myInstanceLevels.clear();
-                //UTdebugPrint("#ids", myHydraPrim.instanceIDs().entries());
-            }
+            myInstanceTransforms =
+                XUSD_HydraUtils::createTransformArray(array);
+            myInstanceLevels.clear();
+            //UTdebugPrint("#ids", myHydraPrim.instanceIDs().entries());
 
 	    myInstanceId++;
             
@@ -743,17 +707,7 @@ XUSD_HydraGeoBase::buildTransforms(HdSceneDelegate *scene_delegate,
     }
 
     if(instr_id.IsEmpty() && !myInstancerPath.IsEmpty())
-    {
-	auto xinst = UTverify_cast<XUSD_HydraInstancer *>(
-	    scene_delegate->GetRenderIndex().GetInstancer(myInstancerPath));
-	if(xinst)
-        {
-            HUSD_Path hpath(proto_id);
-            xinst->removePrototype(UT_StringRef(hpath.pathStr()),
-                                   hou_proto_id);
-        }
         myInstancerPath = SdfPath::EmptyPath();
-    }
 
     if (only_prim_transform)
     {
@@ -766,19 +720,64 @@ XUSD_HydraGeoBase::buildTransforms(HdSceneDelegate *scene_delegate,
     }
 }
 
+static void
+husdUpdateAttribList(GT_AttributeListHandle& attrib_list,
+                     UT_StringHolder key,
+                     const GT_DataArrayHandle& attr)
+{
+    if (attrib_list)
+    {
+        attrib_list = attrib_list->
+            addAttribute(key, attr, true);
+    }
+    else
+    {
+        attrib_list =
+            GT_AttributeList::createAttributeList(key, attr);
+    }
+}
+
+void
+XUSD_HydraGeoBase::performCPUComputation(
+    const HdExtComputationPrimvarDescriptor &primd,
+    HdSceneDelegate *scene_delegate,
+    const TfToken &usd_attrib,
+    GT_Type gt_type,
+    const SdfPath &id,
+    GT_DataArrayHandle &attr)
+{
+    HdExtComputationPrimvarDescriptorVector cvar;
+    cvar.emplace_back(primd);
+                 
+    HdExtComputationUtils::ValueStore value_store
+        = HdExtComputationUtils::GetComputedPrimvarValues(
+            cvar, scene_delegate);
+    auto val = value_store.find(usd_attrib);
+    if (val != value_store.end())
+    {
+        auto id = XUSD_HydraUtils::newDataId();
+        attr = XUSD_HydraUtils::attribGT(val->second,
+                                         gt_type, id);
+    }
+}
+
+
 bool
-XUSD_HydraGeoBase::updateAttrib(const TfToken	         &usd_attrib,
-				const UT_StringRef       &gt_attrib,
-				HdSceneDelegate	         *scene_delegate,
-				const SdfPath	         &id,
-				HdDirtyBits	         *dirty_bits,
-				GT_Primitive		 *gt_prim,
-				GT_AttributeListHandle   (&attrib_list)[4],
-                                GT_Type                   gt_type,
-				int			 *point_freq_num,
-				bool			  set_point_freq,
-				bool			 *exists,
-                                GT_DataArrayHandle       vert_index)
+XUSD_HydraGeoBase::updateAttrib(
+    const TfToken       &usd_attrib,
+    const UT_StringRef  &gt_attrib,
+    HdSceneDelegate     *sd,
+    const SdfPath       &id,
+    HdDirtyBits         *dirty_bits,
+    GT_Primitive        *gt_prim,
+    GT_AttributeListHandle (&attrib_list)[4],
+    GT_Type              gt_type,
+    int                 *point_freq_num,
+    bool                set_point_freq,
+    bool                *exists,
+    GT_DataArrayHandle  vert_index,
+    bool                perform_gpu_skinning,
+    bool                *computed_retval)
 {
     if(exists)
 	*exists = false;
@@ -787,50 +786,71 @@ XUSD_HydraGeoBase::updateAttrib(const TfToken	         &usd_attrib,
     if(entry == myAttribMap.end())
 	return false;
 	
-    GT_Owner attrib_owner;
-    int interp;
-    bool computed;
-    void *data;
-    UTlhsTuple(attrib_owner, interp, computed, data) = entry->second;
+    GT_Owner attrib_owner = entry->second.myOwner;
     if(attrib_owner == GT_OWNER_INVALID)
 	return false;
 
+    const HdExtComputationPrimvarDescriptor *computation_info
+            = entry->second.myComputationInfo.get();
+    const bool computed = (computation_info != nullptr);
+
     bool changed = false;
-    GT_DataArrayHandle attr; 
+    bool no_op = false;
+    GT_DataArrayHandle attr;
 
-    if(HdChangeTracker::IsPrimvarDirty(*dirty_bits, id, usd_attrib))
+    if (HdChangeTracker::IsPrimvarDirty(*dirty_bits, id, usd_attrib))
     {
-	if(computed)
-	{
-            auto primd = (HdExtComputationPrimvarDescriptor *) data;
-            HdExtComputationPrimvarDescriptorVector cvar;
-            cvar.emplace_back(*primd);
-                         
-            HdExtComputationUtils::ValueStore value_store
-                = HdExtComputationUtils::GetComputedPrimvarValues(
-                    cvar, scene_delegate);
-            auto val = value_store.find(usd_attrib);
-            if(val != value_store.end())
+    	if (computed)
+    	{
+            XUSD_HydraExtComputation *source_comp =
+                UTverify_cast<XUSD_HydraExtComputation*>(
+                sd->GetRenderIndex().GetSprim(HdPrimTypeTokens->extComputation,
+                computation_info->sourceComputationId));
+            if (perform_gpu_skinning)
             {
-                auto id = XUSD_HydraUtils::newDataId();
-                attr = XUSD_HydraUtils::attribGT(val->second,
-                                                 gt_type, id);
+                if (source_comp->isSkinning(sd))
+                {
+                    husdUpdateAttribList(attrib_list[GT_OWNER_CONSTANT],
+                                         GT_Names::rig_transforms,
+                                         source_comp->getSkinningXformAttr());
+                    husdUpdateAttribList(attrib_list[GT_OWNER_POINT],
+                                         GT_Names::boneIndex,
+                                         source_comp->getBoneIdxAttr());
+                    husdUpdateAttribList(attrib_list[GT_OWNER_POINT],
+                                         GT_Names::boneWeight,
+                                         source_comp->getBoneWeightAttr());
+                }
+                if (source_comp->isBlendShape(sd))
+                {
+                    husdUpdateAttribList(attrib_list[GT_OWNER_CONSTANT],
+                                         GT_Names::blend_shape_weights,
+                                         source_comp->getBlendShapeWeightAttr());
+                    husdUpdateAttribList(attrib_list[GT_OWNER_POINT],
+                                         GT_Names::blend_shape_offsets,
+                                         source_comp->getBlendShapeOffsetsAttr());
+                }
+                attr = source_comp->getRestPointsAttr();
             }
-            
+            else
+            {
+                // UTdebugPrint("CPU");
+                performCPUComputation(*computation_info, sd, usd_attrib,
+                                      gt_type, id, attr);
+            }
             changed = true;
-	}
-	else
-	{
-	    attr = XUSD_HydraUtils::attribGT(scene_delegate->Get(id,usd_attrib),
-					     gt_type,
-					     XUSD_HydraUtils::newDataId());
-	}
+    	}
+    	else
+    	{
+    	    attr = XUSD_HydraUtils::attribGT(sd->Get(id,usd_attrib),
+    					     gt_type,
+    					     XUSD_HydraUtils::newDataId());
+    	}
 
-	if(attr)
-	{
-	    myDirtyMask = myDirtyMask | HUSD_HydraGeoPrim::GEO_CHANGE;
-	    changed = true;
-	}
+    	if(attr)
+    	{
+    	    myDirtyMask = myDirtyMask | HUSD_HydraGeoPrim::GEO_CHANGE;
+    	    changed = true;
+    	}
     }
 
     if(!attr)
@@ -841,7 +861,21 @@ XUSD_HydraGeoBase::updateAttrib(const TfToken	         &usd_attrib,
             attrib_owner = GT_OWNER_VERTEX;
         
         if(gt_prim && gt_prim->getAttributeList(attrib_owner))
+        {
             attr = gt_prim->getAttributeList(attrib_owner)->get(gt_attrib);
+
+            // Unroll to the original attribute, if there was an indirection
+            // added later on in Sync().
+            GT_DAIndirect *itr = nullptr;
+            do
+            {
+                itr = dynamic_cast<GT_DAIndirect*>(attr.get());
+                if(itr)
+                  attr = itr->referencedData();
+            } while(itr);
+
+            no_op = true;
+        }
     }
     
 
@@ -861,24 +895,33 @@ XUSD_HydraGeoBase::updateAttrib(const TfToken	         &usd_attrib,
             }
             else if(vert_index->entries() < attr->entries() )
             {
-                // UTdebugPrint("Sub ", vert_index->entries(),
-                //              "for", attr->entries());
-                attr = new GT_DASubArray(attr, 0, vert_index->entries());
+                // possibly due to convexing, so unroll it to get the original
+                GT_DAInherit *inh = dynamic_cast<GT_DAInherit*>(attr.get());
+                while(inh)
+                {
+                    attr = inh->referencedData();
+                    inh = dynamic_cast<GT_DAInherit*>(attr.get());
+                }
+                
+                if(vert_index->entries() < attr->entries() )
+                {
+                    // some other issue; array is too long.
+                    attr = new GT_DASubArray(attr, 0, vert_index->entries());
+                    attr = attr->harden();
+                }
             }
         }
 
-	if(!computed)
-	    attr = attr->harden();
+        if(!computed && !no_op)
+            attr = attr->harden();
 	
-	if(attrib_list[attrib_owner])
-	    attrib_list[attrib_owner] = attrib_list[attrib_owner]->
-		addAttribute(gt_attrib, attr, true);
-	else
-	    attrib_list[attrib_owner] =
-		GT_AttributeList::createAttributeList(gt_attrib, attr);
+        husdUpdateAttribList(attrib_list[attrib_owner], gt_attrib, attr);
 
 	if(exists)
 	    *exists = true;
+        if(computed_retval)
+            *computed_retval = computed;
+
     }
     return changed;
 }
@@ -889,9 +932,11 @@ XUSD_HydraGeoBase::createInstance(HdSceneDelegate          *scene_delegate,
 				  const SdfPath		   &inst_id,
 				  HdDirtyBits		   *dirty_bits,
 				  GT_Primitive		   *geo,
+                                  const GfRange3d          *extents,
 				  GEO_ViewportLOD	    lod,
 				  int			    mat_id,
-				  bool			    instance_change)
+				  bool			    instance_change,
+                                  bool                      add_bbox)
 {
 #if 0
     static UT_Lock theLock;
@@ -932,9 +977,9 @@ XUSD_HydraGeoBase::createInstance(HdSceneDelegate          *scene_delegate,
     auto &&inames = myHydraPrim.instanceIDs();
 
     myHydraPrim.setInstanced(nt > 1);
-    
+
     // Prim IDs
-    if(instance_change)
+    if(instance_change || !myPickIDArray)
     {
 	if(inames.entries() == 0)
 	{
@@ -950,7 +995,7 @@ XUSD_HydraGeoBase::createInstance(HdSceneDelegate          *scene_delegate,
 	    mySelection = sel;
 	}
     }
-
+    
     detail = detail->addAttribute(GT_Names::lop_pick_id, myPickIDArray, true);
     uniform = uniform->addAttribute(GT_Names::selection, mySelection, true);
     if(myInstanceOverridesAttrib)
@@ -963,15 +1008,17 @@ XUSD_HydraGeoBase::createInstance(HdSceneDelegate          *scene_delegate,
 
     
     // BBox
-    if(*dirty_bits & HdChangeTracker::DirtyExtent)
-	if(!addBBoxAttrib(scene_delegate, proto_id, detail, geo))
-	    addBBoxAttrib(scene_delegate, inst_id, detail, geo);
-
-    if(mat_id != -1)
+    if(add_bbox)
+    {
+        if(!addBBoxAttrib(scene_delegate, proto_id, detail, geo, extents))
+            addBBoxAttrib(scene_delegate, inst_id, detail, geo, extents);
+    }
+    
+    const int def_mat_id = myHydraPrim.scene().getDefaultMaterialID();
+    if(mat_id != def_mat_id)
     {
 	auto matda = new GT_DAConstantValue<int>(1, mat_id);
 	detail = detail->addAttribute("MatID", matda, true);
-	//UTdebugPrint("assign material", mat_id);
     }
 
     // Check light categories. MaterialId seems to get sent intstead of
@@ -1022,7 +1069,7 @@ XUSD_HydraGeoBase::createInstance(HdSceneDelegate          *scene_delegate,
         slda->setString(i, 0, myShadowLink(i));
     
     detail = detail->addAttribute("__shadowlink", slda, true);
-    
+
     // create the container packed prim.
     myInstance = new GT_PrimInstance(geo, myInstanceTransforms,
 				     GT_GEOOffsetList(), // no offsets exist.
@@ -1044,172 +1091,28 @@ XUSD_HydraGeoBase::removeFromDisplay(HdSceneDelegate *scene_delegate,
     if(myHydraPrim.isConsolidated())
         myHydraPrim.scene().removeConsolidatedPrim(myHydraPrim.id());
     
-    if(!instr_id.IsEmpty())
-    {
-        auto xinst = UTverify_cast<XUSD_HydraInstancer *>(
-            scene_delegate->GetRenderIndex().GetInstancer(instr_id));
-
-        HUSD_Path proto_path(proto_id);
-
-        //UTdebugPrint("Remove ", xinst->id(), proto_path.pathStr());
-        myHydraPrim.scene().clearInstances(xinst->id(),
-                                           proto_path.pathStr());
-    }
-    
     if(myHydraPrim.index() != -1)
 	myHydraPrim.scene().removeDisplayGeometry(&myHydraPrim);
 }
-
-
-bool
-XUSD_HydraGeoBase::updateGTSelection(bool *has_selection)
-{
-    auto &scene = myHydraPrim.scene();
-    auto &ipaths = myHydraPrim.instanceIDs();
-    const int ni = ipaths.entries();
-    bool selected = false;
-    bool changed =false;
-    if(ni > 0)
-    {
-	auto sel_da = static_cast<GT_DANumeric<int> *>(mySelection.get());
-	if(sel_da)
-	{
-	    if(scene.hasSelection())
-	    {
-                const int pid = scene.getParentInstancer(ipaths(0), true);
-                const bool prim_select = (pid!=-1) ? scene.isSelected(pid):false;
-                for(int i=0; i<ni; i++)
-                {
-                    const bool sel =(prim_select || scene.isSelected(ipaths(i)));
-                    const int  s = sel ? 1 : 0;
-                    if(sel_da->getI32(i,0) != s)
-                    {
-                        sel_da->set(s, i);
-                        changed = true;
-                    }
-                    selected |= sel;
-                }
-	    }
-	    else
-	    {
-		for(int i=0; i<ni; i++)
-                {
-                    if(sel_da->getI32(i,0) != 0)
-                    {
-                        selected = true;
-                        changed =true;
-                    }
-		    sel_da->set(0, i);
-                }
-	    }
-	}
-    }
-    else
-    {
-	auto sel_da = static_cast<GT_DAConstantValue<int> *>(mySelection.get());
-	if(sel_da)
-	{
-	    if(myHydraPrim.scene().hasSelection())
-	    {
-                selected = myHydraPrim.scene().isSelected(&myHydraPrim);
-                const int val = selected ? 1 :0;
-
-                changed = (sel_da->getI32(0,0) != val);
-		sel_da->set(val);
-	    }
-	    else
-            {
-                changed = (sel_da->getI32(0,0) != 0);
-		sel_da->set(0);
-            }
-	}
-    }
-    
-    if(has_selection)
-        *has_selection = selected;
-
-    return changed;
-}
-
-void
-XUSD_HydraGeoBase::clearGTSelection()
-{
-    const int ni =  myHydraPrim.instanceIDs().entries();
-    if(ni > 0)
-    {
-	auto sel_da = static_cast<GT_DANumeric<int> *>(mySelection.get());
-	if(sel_da)
-            for(int i=0; i<ni; i++)
-                sel_da->set(0, i);
-    }
-    else
-    {
-	auto sel_da = static_cast<GT_DAConstantValue<int> *>(mySelection.get());
-	if(sel_da)
-            sel_da->set(0);
-    }
-}
-
-bool
-XUSD_HydraGeoBase::getSelectedBBox(UT_BoundingBox &bbox) const
-{
-    auto &scene = myHydraPrim.scene();
-    if(!scene.hasSelection())
-        return false;
-    
-    UT_BoundingBox lbox;
-    if(!myHydraPrim.getLocalBounds(lbox))
-        return false;
-
-    auto &ipaths = myHydraPrim.instanceIDs();
-    const int ni = ipaths.entries();
-    bool selected = false;
-    if(ni > 0)
-    {
-	auto sel_da = static_cast<GT_DANumeric<int> *>(mySelection.get());
-	if(sel_da)
-	{
-            bbox.makeInvalid();
-            
-            const int pid = scene.getParentInstancer(ipaths(0), true);
-            const bool prim_select = scene.isSelected(pid);
-            for(int i=0; i<ni; i++)
-            {
-                const bool sel =(prim_select || scene.isSelected(ipaths(i)));
-                if(sel)
-                {
-                    selected = true;
-
-                    UT_BoundingBox ibox(lbox);
-                    UT_Matrix4F imat;
-                    myInstanceTransforms->get(i)->getMatrix(imat);
-                    ibox.transform(imat);
-		    
-                    bbox.enlargeBounds(ibox);
-                }
-            }
-        }
-    }
-
-    return selected; 
-}
-
 
 // -------------------------------------------------------------------------
 
 XUSD_HydraGeoMesh::XUSD_HydraGeoMesh(TfToken const& type_id,
 				     SdfPath const& prim_id,
-				     SdfPath const& instancer_id,
 				     GT_PrimitiveHandle &gt_prim,
 				     GT_PrimitiveHandle &instance,
 				     int &dirty,
 				     XUSD_HydraGeoPrim &hprim)
-    : HdMesh(prim_id, instancer_id),
+    : HdMesh(prim_id),
       XUSD_HydraGeoBase(gt_prim, instance, dirty, hprim),
       myTopHash(0),
       myIsSubD(false),
       myIsLeftHanded(true),
-      myRefineLevel(0)
+      myVaryingPrim(false),
+      myMaterialsNeedTangents(false),
+      myGeometryNeedTangents(false),
+      myRefineLevel(0),
+      myTangentDataID(-1)
 {
 }
 
@@ -1227,27 +1130,15 @@ XUSD_HydraGeoMesh::Finalize(HdRenderParam *renderParam)
         myHydraPrim.setConsolidated(false);
     }
     if(!myInstancerPath.IsEmpty())
-    {
-        HUSD_Path hpath(myInstancerPath);
-	auto xinst = myHydraPrim.scene().getInstancer(hpath.pathStr());
-	if(xinst)
-        {
-            HUSD_Path hipath(myInstancerPath);
-            xinst->removePrototype(hipath.pathStr(), myHydraPrim.id());
-        }
         myInstancerPath = SdfPath::EmptyPath();
-    }
 
     HdRprim::Finalize(renderParam);
 }
 
-
 HdDirtyBits
 XUSD_HydraGeoMesh::GetInitialDirtyBitsMask() const
 {
-    static const int	mask 	= HdChangeTracker::AllDirty;
-
-    return (HdDirtyBits)mask;
+    return HdChangeTracker::AllDirty;
 }
 
 HdDirtyBits
@@ -1280,10 +1171,12 @@ XUSD_HydraGeoMesh::Sync(HdSceneDelegate *scene_delegate,
     UT_AutoLock prim_lock(myHydraPrim.lock());
     
     myDirtyMask = 0;
+    *dirty_bits |= myPrevDirtyBits;
     
     GEO_ViewportLOD lod = checkVisibility(scene_delegate, id, dirty_bits);
     if(lod == GEO_VIEWPORT_HIDDEN)
     {
+        clearDirty(dirty_bits, HOLD_DIRTY_BITS);
 	removeFromDisplay(scene_delegate, id, GetInstancerId());
 	return;
     }
@@ -1292,11 +1185,19 @@ XUSD_HydraGeoMesh::Sync(HdSceneDelegate *scene_delegate,
     static UT_Lock theDebugLock;
     UT_AutoLock locker(theDebugLock);
     UTdebugPrint("Sync", id.GetText(), myHydraPrim.id(),
-       		 GetInstancerId().IsEmpty() ? "" : "instanced",
-                 GetInstancerId().GetText());
+                  GetInstancerId().IsEmpty() ? "" : "instanced",
+                  GetInstancerId().GetText());
     HdChangeTracker::DumpDirtyBits(*dirty_bits);
 #endif
-    
+
+    if(!myHydraPrim.isInitialized())
+    {
+        // Cache the varying bit as Hydra will send Varying on subsequent updates
+        // and remove meshes from the consolidated mesh, degrading performance
+        // over time.
+        myVaryingPrim = HdChangeTracker::IsVarying(*dirty_bits);
+    }
+     
     GT_Primitive       *gt_prim = myGTPrim.get();
     int64		top_id = 1;
     UT_Array<GT_PrimSubdivisionMesh::Tag> subd_tags;
@@ -1308,43 +1209,58 @@ XUSD_HydraGeoMesh::Sync(HdSceneDelegate *scene_delegate,
     {
 	SdfPath mat_id = scene_delegate->GetMaterialId(GetId());
 
-	_SetMaterialId(scene_delegate->GetRenderIndex().GetChangeTracker(),
-		       mat_id);
+	SetMaterialId(mat_id);
 
+        // Clear out all materials and material parms
         myExtraAttribs.clear();
         myExtraUVAttribs.clear();
+
+        for(auto matref : myHydraPrim.materialReferences())
+        {
+            auto entry = myHydraPrim.scene().materials().find(matref);
+            if(entry != myHydraPrim.scene().materials().end())
+                entry->second->removePrimRef(myHydraPrim.id());
+        }
         
+        myHydraPrim.clearMaterials();
+        
+        const int def_mat_id = myHydraPrim.scene().getDefaultMaterialID();
         const int prev_mat = myMaterialID;
-        myMaterialID = -1;
+        myMaterialID = def_mat_id;
         myMaterials.clear();
+        myMaterialsNeedTangents = false;
+        myMaterialsNeedObjectSpace = false;
 
         if(!mat_id.IsEmpty())
         {
-            HUSD_Path hpath(mat_id);
-            UT_StringHolder path(hpath.pathStr());
+            HUSD_Path path(mat_id);
             auto entry = myHydraPrim.scene().materials().find(path);
             if(entry != myHydraPrim.scene().materials().end())
             {
                 auto &hmat = entry->second;
-                if(hmat->isValid())
-                {
-                    // ensure these attribs are present on the geometry.
-                    for(auto &it : hmat->requiredUVs())
-                        myExtraUVAttribs[it.first] = it.first;
-                    for(auto &it : hmat->shaderParms())
-                        myExtraAttribs[it.second] = it.first;
+                // ensure these attribs are present on the geometry.
+                for(auto &it : hmat->requiredUVs())
+                    myExtraUVAttribs[it.first] = it.first;
+                for(auto &it : hmat->shaderParms())
+                    myExtraAttribs[it.second] = it.first;
                 
-                    myMaterialID = hmat->getMaterialID();
-                    myMaterials.append(path);
-                }
+                myMaterialID = hmat->getMaterialID();
+                myMaterials.append(path);
+                    
+                if(hmat->needsTangents())
+                    myMaterialsNeedTangents = true;
+                if(hmat->needsObjectSpace())
+                    myMaterialsNeedObjectSpace = true;
+
+                // Link the material and the prim
+                hmat->addPrimRef(myHydraPrim.id());
+                myHydraPrim.addMaterialRef(hmat->path());
             }
         }
 
         if(myMaterialID != prev_mat)
-        {
-            //UTdebugPrint("Material ID", myMaterialID);
             myDirtyMask = myDirtyMask | HUSD_HydraGeoPrim::MAT_CHANGE;
-        }
+        
 	dirty_materials = true;
     }
 
@@ -1355,6 +1271,7 @@ XUSD_HydraGeoMesh::Sync(HdSceneDelegate *scene_delegate,
     {
 	XUSD_HydraUtils::buildAttribMap(scene_delegate, id, myAttribMap);
     }
+
 
     // Instancing
     GT_TransformHandle th;
@@ -1375,7 +1292,7 @@ XUSD_HydraGeoMesh::Sync(HdSceneDelegate *scene_delegate,
 	    top_id = top->getI64(0);
     }
 
-    bool need_gt_update = (!myCounts || !myVertex || !gt_prim);
+    bool need_gt_update = (!myVertex || !gt_prim || myCounts.entries()==0);
 
     if (need_gt_update || dirty_materials ||
 	HdChangeTracker::IsTopologyDirty(*dirty_bits, id))
@@ -1390,17 +1307,65 @@ XUSD_HydraGeoMesh::Sync(HdSceneDelegate *scene_delegate,
 	    int64 top_hash = top.ComputeHash();
 
 	    myIsLeftHanded = (top.GetOrientation() != HdTokens->rightHanded);
-	
+            myCachedNormals.reset();
+
 	    if(need_gt_update || top_hash != myTopHash)
 	    {
 		myTopHash = top_hash;
 		if(top.GetNumPoints() > 0)
 		{
-		    myCounts =
-		     XUSD_HydraUtils::createGTArray(top.GetFaceVertexCounts());
-		    myVertex =
-		     XUSD_HydraUtils::createGTArray(top.GetFaceVertexIndices());
+                    auto &&fcount = top.GetFaceVertexCounts();
+                    auto &&vcount = top.GetFaceVertexIndices();
+                    const exint max_pnt_idx = top.GetNumPoints()-1;
+                    const exint max_vert = top.GetNumFaceVaryings();
 
+                    if(top.GetHoleIndices().size() == 0)
+                    {
+                        myCounts.init(new GT_DAClampedArray(
+                          XUSD_HydraUtils::createGTArray(fcount),0,max_vert));
+                        myVertex = new GT_DAClampedArray(
+                          XUSD_HydraUtils::createGTArray(vcount),0,max_pnt_idx);
+                        myVertexIndirect.reset();
+                        myPrimIndirect.reset();
+                    }
+                    else // Missing faces due to holes
+                    {
+                        const exint nfaces = top.GetNumFaces();
+                        UT_IntArray hide_faces(nfaces, nfaces);
+                        hide_faces.zero();
+
+                        for(auto idx : top.GetHoleIndices())
+                            if(idx >= 0 && idx < nfaces)
+                                hide_faces(idx) = 1;
+
+                        auto counts = new GT_DANumeric<int>(0,1);
+                        auto verts  = new GT_DANumeric<int>(0,1);
+                        auto vindirect = new GT_DANumeric<int>(0,1);
+                        auto pindirect = new GT_DANumeric<int>(0,1);
+
+                        exint vidx = 0;
+                        for(exint i=0; i<nfaces; i++)
+                        {
+                            const exint nverts = fcount[i];
+                            if(!hide_faces(i))
+                            {
+                                counts->append(nverts);
+                                pindirect->append(i);
+                                for(exint v = 0; v<nverts; v++, vidx++)
+                                {
+                                    verts->append(vcount[vidx]);
+                                    vindirect->append(vidx);
+                                }
+                            }
+                            else
+                                vidx += nverts;
+                        }
+                        myCounts.init(counts);
+                        myVertex = verts;
+                        myVertexIndirect = vindirect;
+                        myPrimIndirect = pindirect;
+                    }
+                    
 		    if (top.GetScheme()==PxOsdOpenSubdivTokens->catmullClark)
 			myIsSubD = true;
 		    else
@@ -1408,11 +1373,25 @@ XUSD_HydraGeoMesh::Sync(HdSceneDelegate *scene_delegate,
 		}
 		else
 		{
-		    myCounts.reset();
+		    myCounts.clear();
 		    myVertex.reset();
+                    myVertexIndirect.reset();
+                    myPrimIndirect.reset();
 		    myIsSubD = false;
 		}
 		top_id = XUSD_HydraUtils::newDataId();
+                if(gt_prim && gt_prim->getDetailAttributes())
+                {
+                    auto top = gt_prim->getDetailAttributes()->get(GT_Names::topology);
+                    if(top)
+                    {
+                        auto top_da = dynamic_cast<GT_DAConstantValue<int64> *>
+                            (top.get());
+                        if(top_da)
+                            top_da->set(top_id);
+                    }
+                }
+                    
 		myDirtyMask = myDirtyMask | HUSD_HydraGeoPrim::TOP_CHANGE;
 	    }
 	}
@@ -1423,13 +1402,13 @@ XUSD_HydraGeoMesh::Sync(HdSceneDelegate *scene_delegate,
 	    if(subsets.size() > 0)
 	    {
                 UT_Map<int,int> materials;
+
 		auto matid_da = new GT_DANumeric<int>(top.GetNumFaces(), 1);
 		memset(matid_da->data(), 0xFF, matid_da->entries()*sizeof(int));
 		
 		for(auto &subset : subsets)
 		{
-                    HUSD_Path mpath(subset.materialId);
-		    UT_StringHolder matname(mpath.pathStr());
+                    HUSD_Path matname(subset.materialId);
 
 		    // UTdebugPrint("Subset name", subset.id.GetText());
 		    // UTdebugPrint("Material =", mapname);
@@ -1445,12 +1424,22 @@ XUSD_HydraGeoMesh::Sync(HdSceneDelegate *scene_delegate,
                         for(auto &it : hmat->shaderParms())
                             myExtraAttribs[it.second] = it.first;
                         
-			int matid = hmat->isValid() ? hmat->getMaterialID() : -1;
+			int matid = hmat->getMaterialID();
 			for(auto index : subset.indices)
-			    matid_da->set(matid, index);
+                        {
+                            if(index < matid_da->entries())
+                                matid_da->set(matid, index);
+                        }
+                        // Link the mateiral and the prim
+                        hmat->addPrimRef(myHydraPrim.id());
+                        myHydraPrim.addMaterialRef(hmat->path());
 
                         materials[ matid] = 1;
                         myMaterials.append(matname);
+                        if(hmat->needsTangents())
+                            myMaterialsNeedTangents = true;
+                        if(hmat->needsObjectSpace())
+                            myMaterialsNeedObjectSpace = true;
 		    }
 		}
                 auto mats_da = new GT_DANumeric<int>(materials.size(), 1);
@@ -1474,18 +1463,24 @@ XUSD_HydraGeoMesh::Sync(HdSceneDelegate *scene_delegate,
 	}
     }
 
-    if(!myCounts || !myVertex)
+    if(!myVertex || myCounts.entries() == 0)
     {
 	myInstance.reset();
 	myGTPrim.reset();
-	clearDirty(dirty_bits);
+	clearDirty(dirty_bits, HOLD_DIRTY_BITS);
 	removeFromDisplay(scene_delegate, id, GetInstancerId());
 	return;
     }
 
+    // Make sure our instancer and it's parent instancers are synced.
+    _UpdateInstancer(scene_delegate, dirty_bits);
+    HdInstancer::_SyncInstancerAndParents(
+        scene_delegate->GetRenderIndex(), GetInstancerId());
+
     if(!GetInstancerId().IsEmpty())
     {
         buildShaderInstanceOverrides(scene_delegate,
+                                     rparm,
                                      GetInstancerId(),
                                      id, dirty_bits);
     }
@@ -1498,17 +1493,21 @@ XUSD_HydraGeoMesh::Sync(HdSceneDelegate *scene_delegate,
         myInstanceTransforms = nullptr;
     }
 
-    buildTransforms(scene_delegate, id, GetInstancerId(), dirty_bits,
+    buildTransforms(scene_delegate, rparm, id, GetInstancerId(), dirty_bits,
                     myHydraPrim.id());
     if(myInstanceTransforms && myInstanceTransforms->entries() == 0)
     {
         // zero instance transforms means nothing should be displayed.
         removeFromDisplay(scene_delegate, id, GetInstancerId());
+        clearDirty(dirty_bits, HOLD_DIRTY_BITS);
         return;
     }
         
     if(*dirty_bits & HdChangeTracker::DirtyDisplayStyle)
 	myRefineLevel = scene_delegate->GetDisplayStyle(id).refineLevel;
+    
+    if(*dirty_bits & HdChangeTracker::DirtyExtent)
+        myExtents = scene_delegate->GetExtent(id);
 
     if (HdChangeTracker::IsSubdivTagsDirty(*dirty_bits, id) &&
 	myIsSubD &&
@@ -1517,42 +1516,85 @@ XUSD_HydraGeoMesh::Sync(HdSceneDelegate *scene_delegate,
 	XUSD_HydraUtils::processSubdivTags(
 	    scene_delegate->GetSubdivTags(id), subd_tags);
     }
-    
-#ifdef CONSOLIDATE_SMALL_MESHES
+
     bool consolidate_mesh = false;
-    if(myMaterials.entries() <= 1 &&
-       myVertex->entries() < SMALL_MESH_MAX_VERTS)
-    {
-        if(myInstanceTransforms)
+    
+    if(myHydraPrim.scene().isConsolidatingMeshes())
+    {        
+        if(!myVaryingPrim &&
+           !myMaterialsNeedObjectSpace &&
+           myMaterials.entries() <= 1 &&
+           myVertex->entries() < myHydraPrim.scene().getMeshMaxVertices())
         {
-            if(myInstanceTransforms->entries() == 1)
+            if(myInstanceTransforms)
+            {
+                if(myInstanceTransforms->entries() == 1)
+                    consolidate_mesh = true;
+                else 
+                {
+                    exint verts = myVertex->entries();
+                    exint total = (myInstanceTransforms->entries() * verts);
+
+                    if(total < myHydraPrim.scene().getInstanceMaxVertices())
+                    {
+                        if(fpreal(total)/fpreal(verts) <
+                              myHydraPrim.scene().getInstanceMaxCount())
+                        {
+                            // UTdebugPrint("#inst",myInstanceTransforms->entries(),
+                            //               myVertex->entries());
+                            consolidate_mesh = true;
+                        }
+                        // else
+                        //     UTdebugPrint(total, "Exceeded",
+                        //                  fpreal(total)/fpreal(verts));
+                    }
+                }
+            }
+            else
                 consolidate_mesh = true;
-            else if(myInstanceTransforms->entries() * myVertex->entries()
-                    < SMALL_MESH_INSTANCE_LIMIT)
-                consolidate_mesh = true;
-            // else
-            //     UTdebugPrint("Too many instances", myInstanceTransforms->entries(), myVertex->entries());
         }
-        else
-            consolidate_mesh = true;
+        // else if(myMaterials.entries() > 1)
+        //     UTdebugPrint("Too many materials");
+        // else if(myVaryingPrim)
+        //     UTdebugPrint("Varying");
+        // else
+        //     UTdebugPrint("Too many verts", myVertex->entries());
     }
-    // else if(myMaterials.entries() > 1)
-    //     UTdebugPrint("Too many materials");
-    // else
-    //     UTdebugPrint("Too many verts", myVertex->entries());
-         
+
+#ifdef GPU_MESH_DEFORMATION
+    bool perform_gpu_skinning = true;
 #else
-    const bool consolidate_mesh = false;
+    bool perform_gpu_skinning = false;
 #endif
-    
-    
+
+    XUSD_HydraExtComputation *skinning_comp = nullptr;
+    if (auto it = myAttribMap.find(HdTokens->points.GetText());
+        it != myAttribMap.end() &&
+        perform_gpu_skinning &&
+        it->second.myComputationInfo != nullptr)
+    {
+        auto points_comp = UTverify_cast<XUSD_HydraExtComputation *>(
+                scene_delegate->GetRenderIndex().GetSprim(
+                        HdPrimTypeTokens->extComputation,
+                        it->second.myComputationInfo->sourceComputationId));
+
+        perform_gpu_skinning = points_comp->isSkinning(scene_delegate)
+                               || points_comp->isBlendShape(scene_delegate);
+        consolidate_mesh = consolidate_mesh && !perform_gpu_skinning;
+
+        if (perform_gpu_skinning)
+            skinning_comp = points_comp;
+    }
+    else
+	perform_gpu_skinning = false;
+
     // Populate attributes
     GT_AttributeListHandle attrib_list[GT_OWNER_MAX];
 
     const bool has_n = (myAttribMap.find(HdTokens->normals.GetText()) !=
                         myAttribMap.end());
-    
-    if(!consolidate_mesh)
+
+    if (!consolidate_mesh)
     {
         auto wnd = new GT_DAConstantValue<int>(1, myIsLeftHanded?0:1, 1);
         auto top = new GT_DAConstantValue<int64>(1, top_id, 1);
@@ -1565,15 +1607,29 @@ XUSD_HydraGeoMesh::Sync(HdSceneDelegate *scene_delegate,
     
     int point_freq = 0;
     bool pnt_exists = false;
-    updateAttrib(HdTokens->points, "P"_sh, scene_delegate, id, dirty_bits,
-		 gt_prim, attrib_list, GT_TYPE_POINT, &point_freq, true,
-                 &pnt_exists, myVertex);
+    bool computed_P = false;
+    
+    if(updateAttrib(HdTokens->points, "P"_sh, scene_delegate, id, dirty_bits,
+                    gt_prim, attrib_list, GT_TYPE_POINT, &point_freq, true,
+                    &pnt_exists, myVertex, perform_gpu_skinning, &computed_P))
+        myCachedNormals.reset();
 
     if(!pnt_exists)
     {
 	myInstance.reset();
 	myGTPrim.reset();
-	clearDirty(dirty_bits);
+	clearDirty(dirty_bits, HOLD_DIRTY_BITS);
+	removeFromDisplay(scene_delegate, id, GetInstancerId());
+	return;
+    }
+
+    // Mesh Sanity check.
+    const GT_DataArrayHandle &pdata = attrib_list[GT_OWNER_POINT]->get("P");
+    if(pdata->entries() < 3)
+    {
+	myInstance.reset();
+	myGTPrim.reset();
+	clearDirty(dirty_bits, HOLD_DIRTY_BITS);
 	removeFromDisplay(scene_delegate, id, GetInstancerId());
 	return;
     }
@@ -1582,26 +1638,71 @@ XUSD_HydraGeoMesh::Sync(HdSceneDelegate *scene_delegate,
     updateAttrib(HdTokens->displayColor, "Cd"_sh,
 		 scene_delegate, id, dirty_bits, gt_prim, attrib_list,
 		 GT_TYPE_COLOR, &point_freq, false, nullptr, myVertex);
+    bool normal_exists = false;
     updateAttrib(HdTokens->normals, "N"_sh,
 		 scene_delegate, id, dirty_bits, gt_prim, attrib_list,
-		 GT_TYPE_NORMAL, &point_freq, false, nullptr, myVertex);
+		 GT_TYPE_NORMAL, &point_freq, false, &normal_exists, myVertex);
     updateAttrib(HdTokens->displayOpacity, "Alpha"_sh,
 		 scene_delegate, id, dirty_bits, gt_prim, attrib_list,
                  GT_TYPE_NONE, &point_freq, false, nullptr, myVertex);
-#if 0
-    if(myAttribMap.find("cardsUv"_sh) != myAttribMap.end())
+    static TfToken tangentu("tangentu");
+    static TfToken tangentv("tangentv");
+    bool tanu_exists =false, tanv_exists = false;
+    updateAttrib(tangentu, GT_Names::tangentu,
+		 scene_delegate, id, dirty_bits, gt_prim, attrib_list,
+                 GT_TYPE_NONE, &point_freq, false, &tanu_exists, myVertex);
+    updateAttrib(tangentv, GT_Names::tangentv,
+		 scene_delegate, id, dirty_bits, gt_prim, attrib_list,
+                 GT_TYPE_NONE, &point_freq, false, &tanv_exists, myVertex);
+
+    GfRange3d extents = myExtents;
+
+    // If P is a computed primvar, the authored extents are not expected to
+    // reflect the new point positions and should be recomputed.
+    // For GPU skinning this would compute the extents of the rest points, so we
+    // instead provide approximate bounds for the skinned result.
+    // TODO - use the SkelRoot prim's extents if available, following
+    // https://openusd.org//dev/api/_usd_skel__schemas.html#UsdSkel_SkelRoot
+    bool add_bbox = !computed_P;
+    if (perform_gpu_skinning)
     {
-        updateAttrib(TfToken("cardsUv"), "uv"_sh,
-                     scene_delegate, id, dirty_bits, gt_prim, attrib_list,
-                     GT_TYPE_TEXTURE, nullptr, true);
-        updateAttrib(TfToken("cardsTexAssign"), "tex"_sh,
-                     scene_delegate, id, dirty_bits, gt_prim, attrib_list,
-                     GT_TYPE_NONE, nullptr, true);
+        UT_ASSERT(skinning_comp);
+        const UT_BoundingBox &skinned_bounds
+                = skinning_comp->getSkinnedBounds();
+
+        extents = GfRange3d(
+                GusdUT_Gf::Cast(skinned_bounds.minvec()),
+                GusdUT_Gf::Cast(skinned_bounds.maxvec()));
+        add_bbox = true;
     }
-#endif
+
+    // If we are performing gpu skinning, and the rest points and topology have
+    // not changed, we may be able to reuse the normals from the previous frame
+    if (gt_prim && perform_gpu_skinning
+	&& attrib_list[GT_OWNER_POINT]->get(GA_Names::P)->getDataId()
+           == gt_prim->getPointAttributes()->get(GA_Names::P)->getDataId()
+    	&& gt_prim->getDetailAttributes()->get(GT_Names::topology)->getI64(0)
+           == top_id)
+    {
+	// check to see if we can reuse the normals
+	if (!normal_exists
+	    && gt_prim->getPointAttributes()
+	    && gt_prim->getPointAttributes()->get(GA_Names::N))
+	{
+	    auto normal = gt_prim->getPointAttributes()->get(GA_Names::N);
+    	    husdUpdateAttribList(attrib_list[GT_OWNER_POINT], GA_Names::N, normal);
+	}
+    }
+
+
+    myGeometryNeedTangents = (!tanu_exists && !tanv_exists);
+    
     for(auto &itr : myExtraAttribs)
     {
 	auto &attrib = itr.first;
+
+        if(attrib == theHydraDisplayColor)
+            continue;
 	auto entry = myAttribMap.find(attrib);
 	if(entry != myAttribMap.end())
 	{
@@ -1611,14 +1712,16 @@ XUSD_HydraGeoMesh::Sync(HdSceneDelegate *scene_delegate,
                          &point_freq, false, nullptr, myVertex);
 	}
     }
+    
     bool uv_attempted = false;
+    bool st_attempted = false;
     for(auto &itr : myExtraUVAttribs)
     {
 	auto &attrib = itr.first;
         // Don't attempt to refill if this attrib was already in myExtraAttribs.
         if(myExtraAttribs.find(attrib) != myExtraAttribs.end())
             continue;
-        
+
 	auto entry = myAttribMap.find(attrib);
 	if(entry != myAttribMap.end())
 	{
@@ -1627,16 +1730,30 @@ XUSD_HydraGeoMesh::Sync(HdSceneDelegate *scene_delegate,
 			 dirty_bits, gt_prim, attrib_list, GT_TYPE_NONE,
                          &point_freq, false, nullptr, myVertex);
 	}
-        else if(!uv_attempted) // try uv.
+        else 
         {
-	    TfToken htoken("uv");
-	    updateAttrib(htoken, attrib, scene_delegate, id,
-			 dirty_bits, gt_prim, attrib_list, GT_TYPE_NONE,
-                         &point_freq, false, nullptr, myVertex);
-            uv_attempted = true;
-        }
+            UT_StringHolder gt_attrib;
+            if(attrib == "uv" && !st_attempted)
+            {
+                TfToken htoken("st");
+                gt_attrib = "st";
+                st_attempted = true;
+                updateAttrib(htoken, gt_attrib, scene_delegate, id,
+                             dirty_bits, gt_prim, attrib_list, GT_TYPE_NONE,
+                             &point_freq, false, nullptr, myVertex);
+            }
+            else if(attrib == "st" && !uv_attempted)
+            {
+                TfToken htoken("uv");
+                gt_attrib = "uv";
+                updateAttrib(htoken, gt_attrib, scene_delegate, id,
+                             dirty_bits, gt_prim, attrib_list, GT_TYPE_NONE,
+                             &point_freq, false, nullptr, myVertex);
+                uv_attempted = true;
+            }
+         }
     }
-
+                 
     if(myMatIDArray)
     {
 	if(attrib_list[GT_OWNER_UNIFORM])
@@ -1661,21 +1778,20 @@ XUSD_HydraGeoMesh::Sync(HdSceneDelegate *scene_delegate,
        attrib_list[GT_OWNER_UNIFORM]->get(GA_Names::N))
     {
 	GT_DataArrayHandle nml=attrib_list[GT_OWNER_UNIFORM]->get(GA_Names::N);
-	const int nprim = myCounts->entries();
+	const int nprim = myCounts.entries();
 	const int nvert = myVertex->entries();
 	auto index = new GT_DANumeric<int>(nvert, 1);
 	int *data = index->data();
 	int idx = 0;
 	for(int i=0; i<nprim; i++)
 	{
-	    const int count = myCounts->getI32(i);
+	    const int count = myCounts.getCount(i);
 	    for(int j=0; j<count && idx<nvert; j++,idx++)
 		data[idx] = i;
 	}
 
 	GT_DataArrayHandle indexh = index;
 	GT_DataArrayHandle nh = new GT_DAIndirect(index, nml);
-
 	if(attrib_list[GT_OWNER_VERTEX])
 	{
 	    attrib_list[GT_OWNER_VERTEX] = 
@@ -1702,9 +1818,16 @@ XUSD_HydraGeoMesh::Sync(HdSceneDelegate *scene_delegate,
 
     }
 
+    if(attrib_list[GT_OWNER_UNIFORM] && myPrimIndirect)
+        attrib_list[GT_OWNER_UNIFORM] = attrib_list[GT_OWNER_UNIFORM]->
+            createIndirect(myPrimIndirect);
+    if(attrib_list[GT_OWNER_VERTEX] && myVertexIndirect)
+        attrib_list[GT_OWNER_VERTEX] = attrib_list[GT_OWNER_VERTEX]->
+            createIndirect(myVertexIndirect);
+
     if(consolidate_mesh)
     {
-        const int nprim = myCounts->entries();
+        const int nprim = myCounts.entries();
 
         if(!myInstanceTransforms)
         {
@@ -1763,7 +1886,7 @@ XUSD_HydraGeoMesh::Sync(HdSceneDelegate *scene_delegate,
 #if 0
     static UT_Lock theLock;
     theLock.lock();
-    UTdebugPrint("Mesh count", myCounts->entries(),
+    UTdebugPrint("Mesh count", myCounts.entries(),
                  "Vert count", myVertex->entries());
     mesh->dumpAttributeLists("XUSD_HydraGeoPrim", false);
     theLock.unlock();
@@ -1779,19 +1902,30 @@ XUSD_HydraGeoMesh::Sync(HdSceneDelegate *scene_delegate,
     }
     else
     {
-        GT_PrimitiveHandle mh = mesh;
-        if(!generatePointNormals(scene_delegate, id, mh))
+        if(myHydraPrim.isConsolidated())
         {
-            clearDirty(dirty_bits);
+            myHydraPrim.scene().removeConsolidatedPrim(myHydraPrim.id());
+            myDirtyMask = HUSD_HydraGeoPrim::ALL_DIRTY;
+        }
+        
+        myHydraPrim.setConsolidated(false);
+        
+        GT_PrimitiveHandle mh = mesh;
+        if(!generateNormals(scene_delegate, id, mh))
+        {
+            clearDirty(dirty_bits, HOLD_DIRTY_BITS);
             return;
         }
-        myHydraPrim.setConsolidated(false);
+
+        if(myMaterialsNeedTangents && myGeometryNeedTangents)
+            mh = generateTangents(mh);
+
         createInstance(scene_delegate, id, GetInstancerId(), dirty_bits,
-                       mh.get(), lod, myMaterialID, 
+                       mh.get(), &extents, lod, myMaterialID, 
                        (*dirty_bits & (HdChangeTracker::DirtyInstancer |
-                                       HdChangeTracker::DirtyInstanceIndex )));
+                                       HdChangeTracker::DirtyInstanceIndex )),
+                       add_bbox);
     }
-    
     clearDirty(dirty_bits);
 }
 
@@ -1810,13 +1944,14 @@ XUSD_HydraGeoMesh::consolidateMesh(HdSceneDelegate    *scene_delegate,
 
     bool det_flip = false;
     bool has_transform = false;
+    bool has_prim_transform = false;
     UT_Matrix4D transform;
     UT_Matrix4DArray itransforms;
     
     if(!myPrimTransform.isIdentity())
     {
         transform = myPrimTransform;
-        has_transform = true;
+        has_prim_transform = true;
     }
     else
         transform.identity();
@@ -1833,7 +1968,7 @@ XUSD_HydraGeoMesh::consolidateMesh(HdSceneDelegate    *scene_delegate,
     }
 
     GT_PrimitiveHandle ph;
-    if(has_transform)
+    if(has_transform || has_prim_transform)
     {
         GT_AttributeListHandle vert, pnt;
 
@@ -1866,12 +2001,16 @@ XUSD_HydraGeoMesh::consolidateMesh(HdSceneDelegate    *scene_delegate,
         }
         else
         {
-            const int nprims = myCounts->entries();
+            const int nprims = myCounts.entries();
             GT_CatPolygonMesh combiner;
             const int nt = itransforms.entries();
             for(int i=0; i<nt; i++)
             {
-                GT_TransformHandle xform = new GT_Transform(&itransforms(i), 1);
+                UT_Matrix4D tr = itransforms(i);
+                if(has_prim_transform)
+                    tr = transform * tr;
+                    
+                GT_TransformHandle xform = new GT_Transform(&tr, 1);
                 GT_PrimPolygonMesh *submesh = nullptr;
             
                 if(has_transform && transform.determinant() < 0.0)
@@ -1922,11 +2061,14 @@ XUSD_HydraGeoMesh::consolidateMesh(HdSceneDelegate    *scene_delegate,
     else
         ph = mesh;
 
-    if(!generatePointNormals(scene_delegate, id, ph))
+    if(!generateNormals(scene_delegate, id, ph))
     {
-        clearDirty(dirty_bits);
+        clearDirty(dirty_bits, HOLD_DIRTY_BITS);
         return;
     }
+
+    if(myMaterialsNeedTangents && myGeometryNeedTangents)
+        ph = generateTangents(ph);
 
     // Compute total bounding box, and per-instance bounding boxes (if any).
     GfRange3d extents = scene_delegate->GetExtent(id);
@@ -1937,17 +2079,15 @@ XUSD_HydraGeoMesh::consolidateMesh(HdSceneDelegate    *scene_delegate,
                          extents.GetMax()[1],
                          extents.GetMax()[2]);
     UT_Array<UT_BoundingBoxF> instance_bbox;
-    
-    if(bbox.isValid())
-    {
-        if(has_transform)
-            bbox.transform(UT_Matrix4F(transform));
-    }
-    else
+
+    if(!bbox.isValid())
     {
         bbox.makeInvalid();
         myGTPrim->enlargeBounds(&bbox, 1);
     }
+
+    if(has_prim_transform)
+        bbox.transform(UT_Matrix4F(transform));
         
     if(itransforms.entries())
     {
@@ -1964,7 +2104,7 @@ XUSD_HydraGeoMesh::consolidateMesh(HdSceneDelegate    *scene_delegate,
         }
         bbox = total_bbox;
     }
-        
+
     myHydraPrim.setConsolidated(true);
     myInstance = nullptr;
         
@@ -1977,13 +2117,90 @@ XUSD_HydraGeoMesh::consolidateMesh(HdSceneDelegate    *scene_delegate,
 }
 
 bool
-XUSD_HydraGeoMesh::generatePointNormals(HdSceneDelegate *scene_delegate,
-                                        const PXR_NS::SdfPath &id,
-                                        GT_PrimitiveHandle &handle)
+XUSD_HydraGeoMesh::generateNormals(HdSceneDelegate *scene_delegate,
+                                   const PXR_NS::SdfPath &id,
+                                   GT_PrimitiveHandle &handle)
 {
     auto *mesh = UTverify_cast<GT_PrimPolygonMesh *>(handle.get());
     bool err = false;
-    auto norm_mesh = mesh->createPointNormalsIfMissing(GA_Names::P, true, &err);
+
+    GT_Owner owner;
+    if(mesh->findAttribute(GA_Names::N, owner, 0))
+    {
+        handle = mesh;
+        return true;
+    }
+    
+    GT_Owner tan_owner = GT_OWNER_VERTEX; // Vertex by default.
+    if(!mesh->findAttribute("tangentu", tan_owner, 0))
+        mesh->findAttribute("tangentv", tan_owner, 0);
+    
+    GT_PrimPolygonMesh *norm_mesh = nullptr;
+    if(myCachedNormals)
+    {
+        if(myHydraPrim.scene().isVulkan())
+        {
+            GT_AttributeListHandle vertex;
+            GT_AttributeListHandle point;
+            if(tan_owner == GT_OWNER_VERTEX)
+            {
+                if(mesh->getVertexAttributes())
+                    vertex = mesh->getVertexAttributes()->
+                        addAttribute(GA_Names::N, myCachedNormals, true);
+                else
+                    vertex = GT_AttributeList::createAttributeList(GA_Names::N,
+                                                                   myCachedNormals);
+                point = mesh->getPointAttributes();
+            }
+            else
+            {
+                if(mesh->getPointAttributes())
+                    point = mesh->getPointAttributes()->
+                        addAttribute(GA_Names::N, myCachedNormals, true);
+                else
+                    point = GT_AttributeList::createAttributeList(GA_Names::N,
+                                                                  myCachedNormals);
+                vertex = mesh->getVertexAttributes();
+
+            }
+            norm_mesh = new GT_PrimPolygonMesh(*mesh, point, vertex,
+                                               mesh->getUniformAttributes(),
+                                               mesh->getDetailAttributes());
+        }
+        else
+        {
+            GT_AttributeListHandle point = mesh->getPointAttributes()->
+                addAttribute(GA_Names::N, myCachedNormals, true);
+            
+            norm_mesh = new GT_PrimPolygonMesh(*mesh,
+                                               point,
+                                               mesh->getVertexAttributes(),
+                                               mesh->getUniformAttributes(),
+                                               mesh->getDetailAttributes());
+        }
+    }
+    else
+    {
+        if(myHydraPrim.scene().isVulkan())
+        {
+            if(tan_owner == GT_OWNER_VERTEX)
+            {
+                norm_mesh = mesh->createVertexNormalsIfMissing(
+                    GA_Names::P, GT_DEFAULT_ADJUSTED_CUSP_ANGLE, true, &err);
+            }
+            else
+            {
+                norm_mesh = mesh->createPointNormalsIfMissing(GA_Names::P,
+                                                              true, &err);
+            }
+        }
+        else
+            norm_mesh = mesh->createPointNormalsIfMissing(GA_Names::P, true,
+                                                          &err);
+        if(norm_mesh)
+            myCachedNormals = norm_mesh->findAttribute(GA_Names::N, owner, 0);
+    }
+    
     if(norm_mesh)
     {
         handle = norm_mesh;
@@ -2002,16 +2219,96 @@ XUSD_HydraGeoMesh::generatePointNormals(HdSceneDelegate *scene_delegate,
 }    
 
 
+GT_PrimitiveHandle
+XUSD_HydraGeoMesh::generateTangents(const GT_PrimitiveHandle &mh)
+{
+    GT_DataArrayHandle ph = mh->getPointAttributes()->get(GA_Names::P);
+    GT_DataArrayHandle nh = mh->getPointAttributes()->get(GA_Names::N);
+    GT_DataArrayHandle uvh=mh->getPointAttributes()->get(GT_Names::st);
+
+    if(mh->getVertexAttributes())
+    {
+        if(!nh)
+            nh = mh->getVertexAttributes()->get(GA_Names::N);
+        if(!uvh)
+            uvh = mh->getVertexAttributes()->get(GT_Names::st);
+    }
+
+    GT_PrimitiveHandle meshh;
+    bool has_tangents = false;
+    
+    int64 tan_v = (ph->getDataId()
+                   + (nh ? nh->getDataId() : 0)
+                   +  (uvh ? uvh->getDataId() : 0));
+    if(myTangentU && myTangentV &&
+       myTangentDataID == tan_v)
+    {
+        meshh = mh;
+        has_tangents = true;
+    }
+    else if(0) // Disable auto-mikkT in the delegate because it's so slow.
+    {
+        auto *mesh = UTverify_cast<GT_PrimPolygonMesh *>(mh.get());
+        if(mesh->getMaxVertexCount() > 4)
+            meshh = mesh->convex(3, false, false);
+        else
+            meshh = mh;
+
+        has_tangents = GT_MikkT::computeTangentsBasic(meshh, GT_Names::st,
+                                                      GA_Names::P, GA_Names::N,
+                                                      0, &myTangentU,
+                                                      &myTangentV, nullptr);
+        myTangentDataID = tan_v;
+    }
+
+    if(has_tangents)
+    {
+        auto vertlist = meshh->getVertexAttributes();
+        if(vertlist)
+        {
+            vertlist=vertlist->addAttribute(GT_Names::tangentu,myTangentU,true);
+            vertlist=vertlist->addAttribute(GT_Names::tangentv,myTangentV,true);
+        }
+        else
+        {
+            vertlist = GT_AttributeList::createAttributeList(
+                GT_Names::tangentu, myTangentU,
+                GT_Names::tangentv, myTangentV);
+        }
+
+        GT_PrimitiveHandle rh;
+        if(mh->getPrimitiveType() == GT_PRIM_POLYGON_MESH)
+            rh= new GT_PrimPolygonMesh(
+                *static_cast<GT_PrimPolygonMesh*>(meshh.get()),
+                meshh->getPointAttributes(),
+                vertlist,
+                meshh->getUniformAttributes(),
+                meshh->getDetailAttributes());
+        else
+            rh= new GT_PrimSubdivisionMesh(
+                *static_cast<GT_PrimSubdivisionMesh*>(meshh.get()),
+                meshh->getPointAttributes(),
+                vertlist,
+                meshh->getUniformAttributes(),
+                meshh->getDetailAttributes());
+
+        return rh;
+    }
+    else
+    {
+        //UTdebugPrint("Could not geneate tangents!");
+        return mh;
+    }
+}
 // -------------------------------------------------------------------------
     
 XUSD_HydraGeoCurves::XUSD_HydraGeoCurves(TfToken const& type_id,
 					 SdfPath const& prim_id,
-					 SdfPath const& instancer_id,
 					 GT_PrimitiveHandle &prim,
 					 GT_PrimitiveHandle &instance,
 					 int &dirty,
 					 XUSD_HydraGeoPrim &hprim)
-    : HdBasisCurves(prim_id, instancer_id),
+    : HdBasisCurves(prim_id),
       XUSD_HydraGeoBase(prim, instance, dirty, hprim),
       myBasis(GT_BASIS_LINEAR),
       myWrap(false)
@@ -2042,10 +2339,10 @@ XUSD_HydraGeoCurves::Sync(HdSceneDelegate *scene_delegate,
     int64		top_id = 1;
 
     // UTdebugPrint("Sync", id.GetText(), myHydraPrim.id(),
-    //     		 GetInstancerId().GetText(),
-    //     		 representation.GetText());
+    //      		 GetInstancerId().GetText(),
+    //       		 representation.GetText());
     // HdChangeTracker::DumpDirtyBits(*dirty_bits);
-    
+
     UT_AutoLock prim_lock(myHydraPrim.lock());
     myDirtyMask = 0;
     
@@ -2056,18 +2353,41 @@ XUSD_HydraGeoCurves::Sync(HdSceneDelegate *scene_delegate,
 	removeFromDisplay(scene_delegate, id, GetInstancerId());
 	return;
     }
-
-    // available attributes
-    if(!gt_prim || myAttribMap.size() == 0 ||
-       (*dirty_bits & HdChangeTracker::DirtyPrimvar) ||
-       	HdChangeTracker::IsTopologyDirty(*dirty_bits, id))
+    
+    if(*dirty_bits & HdChangeTracker::DirtyMaterialId)
     {
-	UT_Map<GT_Owner, GT_Owner> remap;
-	remap[GT_OWNER_POINT] = GT_OWNER_VERTEX;
-	XUSD_HydraUtils::buildAttribMap(scene_delegate, id, myAttribMap,
-					&remap);
+        for(auto matref : myHydraPrim.materialReferences())
+        {
+            auto entry = myHydraPrim.scene().materials().find(matref);
+            if(entry != myHydraPrim.scene().materials().end())
+                entry->second->removePrimRef(myHydraPrim.id());
+        }
+        
+        myHydraPrim.clearMaterials();
+        
+        int prev_mat = myMaterialID;
+        myMaterialID = myHydraPrim.scene().getDefaultMaterialID();
+        
+	SdfPath mat_id = scene_delegate->GetMaterialId(GetId());
+        if(!mat_id.IsEmpty())
+        {
+            HUSD_Path path(mat_id);
+            auto entry = myHydraPrim.scene().materials().find(path);
+            if(entry != myHydraPrim.scene().materials().end())
+            {
+                auto &hmat = entry->second;
+                if(hmat->isValid())
+                {
+                    myMaterialID = hmat->getMaterialID();
+                    hmat->addPrimRef(myHydraPrim.id());
+                    myHydraPrim.addMaterialRef(hmat->path());
+                }
+            }
+        }
+        if(myMaterialID != prev_mat)
+            myDirtyMask = myDirtyMask | HUSD_HydraGeoPrim::MAT_CHANGE;
     }
-
+    
     // Transforms
     if (!gt_prim || HdChangeTracker::IsTransformDirty(*dirty_bits, id))
     {
@@ -2076,8 +2396,13 @@ XUSD_HydraGeoCurves::Sync(HdSceneDelegate *scene_delegate,
 	myDirtyMask = myDirtyMask | HUSD_HydraGeoPrim::INSTANCE_CHANGE;
     }
 
+    // Make sure our instancer and it's parent instancers are synced.
+    _UpdateInstancer(scene_delegate, dirty_bits);
+    HdInstancer::_SyncInstancerAndParents(
+        scene_delegate->GetRenderIndex(), GetInstancerId());
+
     GT_TransformHandle th;
-    buildTransforms(scene_delegate, id, GetInstancerId(), dirty_bits,
+    buildTransforms(scene_delegate, rparm, id, GetInstancerId(), dirty_bits,
                     myHydraPrim.id());
     if(myInstanceTransforms && myInstanceTransforms->entries() == 0)
     {
@@ -2097,7 +2422,20 @@ XUSD_HydraGeoCurves::Sync(HdSceneDelegate *scene_delegate,
     if (!myCounts || !gt_prim || 
 	HdChangeTracker::IsTopologyDirty(*dirty_bits, id))
     {
-	auto top = GetBasisCurvesTopology(scene_delegate);
+        HdBasisCurvesTopology top;
+        // Even though the topology format is the same for metaCurves and
+        // standard USD basis curves, for metacurves we need to query the
+        // topology in a slightly roundabout way because the normal
+        // GetBasisCurvesTopology screens out any non-basisCurves Hd
+        // primitive types.
+        if (myHydraPrim.primType() == HusdHdPrimTypeTokens->metaCurves)
+        {
+            VtValue topvalue = scene_delegate->Get(id, TfToken("topology"));
+            if (topvalue.IsHolding<HdBasisCurvesTopology>())
+                top = topvalue.UncheckedGet<HdBasisCurvesTopology>();
+        }
+        else
+            top = GetBasisCurvesTopology(scene_delegate);
 	top_id ++;
 
 	TfToken ctype = top.GetCurveType();
@@ -2113,14 +2451,21 @@ XUSD_HydraGeoCurves::Sync(HdSceneDelegate *scene_delegate,
 	}
 	else
 	    myBasis = GT_BASIS_LINEAR;
-	    
+        
 	myWrap = (top.GetCurveWrap() == HdTokens->periodic);
 
 	if(top.GetCurveWrap() != HdTokens->segmented)
 	    myCounts=XUSD_HydraUtils::createGTArray(top.GetCurveVertexCounts());
 	else
 	{
-	    int num = top.CalculateNeededNumberOfControlPoints();
+            // This is a very special case of topology which is technically
+            // "unsupported" according to the HdBasisCurvesTopology docs. But
+            // the standard Pixar Draw Mode adapter uses it for bounding boxes,
+            // and both the Pixar and our draw mode adapter use it for
+            // "origin axes" draw mode.
+            int num = 0;
+            for (auto &&count : top.GetCurveVertexCounts())
+                num += count / 2;
 	    myCounts = new GT_DAConstantValue<int32>(num, 2, 1);
 	}
 
@@ -2130,6 +2475,19 @@ XUSD_HydraGeoCurves::Sync(HdSceneDelegate *scene_delegate,
 	    myIndices.reset();
 	
 	myDirtyMask = myDirtyMask | HUSD_HydraGeoPrim::TOP_CHANGE;
+    }
+
+    // available attributes
+    if(!gt_prim || myAttribMap.size() == 0 ||
+       (*dirty_bits & HdChangeTracker::DirtyPrimvar) ||
+       	HdChangeTracker::IsTopologyDirty(*dirty_bits, id))
+    {
+        bool cubic = (myBasis != GT_BASIS_LINEAR);
+	UT_Map<GT_Owner, GT_Owner> remap;
+	remap[GT_OWNER_POINT] = GT_OWNER_VERTEX;
+	XUSD_HydraUtils::buildAttribMap(scene_delegate, id, myAttribMap,
+                                        cubic ? GT_OWNER_UNIFORM:GT_OWNER_POINT,
+					&remap);
     }
 
     GT_AttributeListHandle attrib_list[GT_OWNER_MAX];
@@ -2145,7 +2503,7 @@ XUSD_HydraGeoCurves::Sync(HdSceneDelegate *scene_delegate,
     {
 	myInstance.reset();
 	myGTPrim.reset();
-	clearDirty(dirty_bits);
+	clearDirty(dirty_bits, HOLD_DIRTY_BITS);
 	return;
     }
 
@@ -2155,6 +2513,58 @@ XUSD_HydraGeoCurves::Sync(HdSceneDelegate *scene_delegate,
     updateAttrib(HdTokens->displayOpacity, "Alpha"_sh,
 		 scene_delegate, id, dirty_bits, gt_prim, attrib_list,
                  GT_TYPE_NONE);
+    
+    int curve_style = 1;
+    auto gl_wire = myAttribMap.find(HusdHdPrimvarTokens->glWire.GetText());
+    if(gl_wire != myAttribMap.end())
+    {
+        int wire =
+            XUSDgetIntValue(scene_delegate->Get(id,HusdHdPrimvarTokens->glWire),
+                            0);
+        if(wire)
+            curve_style = 0;
+    }
+    auto curve_style_primvar =
+        myAttribMap.find(HusdHdPrimvarTokens->glCurveStyle.GetText());
+    if(curve_style_primvar != myAttribMap.end())
+    {
+        curve_style = XUSDgetIntValue(scene_delegate->Get(id,HusdHdPrimvarTokens->glCurveStyle), 1);
+    }
+    
+    if(curve_style != 0)    
+    {
+        updateAttrib(HusdHdPrimvarTokens->widths, "width"_sh,
+                     scene_delegate, id, dirty_bits, gt_prim, attrib_list,
+                     GT_TYPE_NONE);
+        if(curve_style == 2)
+        {
+            GT_DataArrayHandle dh = new GT_DAConstantValue<int32>(1, 1, 1);
+            attrib_list[GT_OWNER_DETAIL] = attrib_list[GT_OWNER_DETAIL]->
+                addAttribute("rounded_curves"_sh, dh, true);
+        }
+    }
+    else if(gt_prim)
+    {
+        GT_Owner owner;
+        if(gt_prim->findAttribute("width"_sh, owner, 0))
+        {
+            if(owner == GT_OWNER_DETAIL)
+                gt_prim->getDetailAttributes()->removeAttribute("width"_sh);
+            else if(owner == GT_OWNER_POINT)
+                gt_prim->getPointAttributes()->removeAttribute("width"_sh);
+            else if(owner == GT_OWNER_VERTEX)
+                gt_prim->getVertexAttributes()->removeAttribute("width"_sh);
+            else if(owner == GT_OWNER_UNIFORM)
+                gt_prim->getUniformAttributes()->removeAttribute("width"_sh);
+        }
+        if(gt_prim->findAttribute("rounded_curves"_sh, owner, 0))
+            gt_prim->getDetailAttributes()->removeAttribute("rounded_curves"_sh);
+    }
+        
+        
+    updateAttrib(HdTokens->normals, "N"_sh,
+		 scene_delegate, id, dirty_bits, gt_prim, attrib_list,
+		 GT_TYPE_NORMAL);
 
     GT_PrimitiveHandle ph;
     GT_AttributeListHandle verts;
@@ -2177,9 +2587,9 @@ XUSD_HydraGeoCurves::Sync(HdSceneDelegate *scene_delegate,
     }
     else
 	ph = cmesh;
-    
-    createInstance(scene_delegate, id, GetInstancerId(), dirty_bits, ph.get(),
-		   lod, -1,
+
+    createInstance(scene_delegate, id, GetInstancerId(), dirty_bits,
+                   ph.get(), nullptr, lod, myMaterialID,
 		   (*dirty_bits & (HdChangeTracker::DirtyInstancer |
 				   HdChangeTracker::DirtyInstanceIndex)));
 
@@ -2199,23 +2609,7 @@ XUSD_HydraGeoCurves::Finalize(HdRenderParam *rparms)
 HdDirtyBits
 XUSD_HydraGeoCurves::GetInitialDirtyBitsMask() const
 {
-    static const int	mask
-	= HdChangeTracker::Clean
-	| HdChangeTracker::InitRepr
-	| HdChangeTracker::DirtyPoints
-	| HdChangeTracker::DirtyTopology
-	| HdChangeTracker::DirtyTransform
-	| HdChangeTracker::DirtyVisibility
-	| HdChangeTracker::DirtyDisplayStyle
-	| HdChangeTracker::DirtyCullStyle
-	| HdChangeTracker::DirtyDoubleSided
-	| HdChangeTracker::DirtySubdivTags
-	| HdChangeTracker::DirtyPrimvar
-	| HdChangeTracker::DirtyNormals
-	| HdChangeTracker::DirtyInstanceIndex
-	;
-
-    return (HdDirtyBits)mask;
+    return HdChangeTracker::AllDirty;
 }
 
 HdDirtyBits
@@ -2236,12 +2630,11 @@ XUSD_HydraGeoCurves::_InitRepr(TfToken const &representation,
 
 XUSD_HydraGeoVolume::XUSD_HydraGeoVolume(TfToken const& type_id,
 					 SdfPath const& prim_id,
-					 SdfPath const& instancer_id,
 					 GT_PrimitiveHandle &gt_prim,
 					 GT_PrimitiveHandle &instance,
 					 int &dirty,
 					 XUSD_HydraGeoPrim &hprim)
-    : HdVolume(prim_id, instancer_id),
+    : HdVolume(prim_id),
       XUSD_HydraGeoBase(gt_prim, instance, dirty, hprim)
 {
     hprim.needsGLStateCheck(true);
@@ -2256,7 +2649,7 @@ void
 XUSD_HydraGeoVolume::Finalize(HdRenderParam *rparm)
 {
     // Here we clear out any resources.
-    myHydraPrim.scene().removeVolumeUsingFields(GetId().GetString());
+    myHydraPrim.scene().removeVolumeUsingFields(GetId());
 
     HdRprim::Finalize(rparm);
 }
@@ -2265,15 +2658,7 @@ XUSD_HydraGeoVolume::Finalize(HdRenderParam *rparm)
 HdDirtyBits
 XUSD_HydraGeoVolume::GetInitialDirtyBitsMask() const
 {
-    static const int	mask
-	= HdChangeTracker::Clean
-	| HdChangeTracker::DirtyTransform
-	| HdChangeTracker::DirtyVisibility
-	| HdChangeTracker::DirtyCullStyle
-	| HdChangeTracker::DirtyTopology
-	;
-
-    return (HdDirtyBits)mask;
+    return HdChangeTracker::AllDirty;
 }
 
 HdDirtyBits
@@ -2324,7 +2709,7 @@ XUSD_HydraGeoVolume::Sync(HdSceneDelegate *scene_delegate,
 	UT_Map<GT_Owner, GT_Owner> remap;
 	remap[GT_OWNER_POINT] = GT_OWNER_VERTEX;
 	XUSD_HydraUtils::buildAttribMap(scene_delegate, id, myAttribMap,
-					&remap);
+                                        GT_OWNER_POINT, &remap);
     }
     
     // Transforms
@@ -2334,9 +2719,14 @@ XUSD_HydraGeoVolume::Sync(HdSceneDelegate *scene_delegate,
             GusdUT_Gf::Cast(GfMatrix4d(scene_delegate->GetTransform(id)));
 	myDirtyMask = myDirtyMask | HUSD_HydraGeoPrim::INSTANCE_CHANGE;
     }
-    
+
+    // Make sure our instancer and it's parent instancers are synced.
+    _UpdateInstancer(scene_delegate, dirty_bits);
+    HdInstancer::_SyncInstancerAndParents(
+        scene_delegate->GetRenderIndex(), GetInstancerId());
+
     GT_TransformHandle th;
-    buildTransforms(scene_delegate, id, GetInstancerId(), dirty_bits,
+    buildTransforms(scene_delegate, rparm, id, GetInstancerId(), dirty_bits,
                     myHydraPrim.id());
     if(myInstanceTransforms && myInstanceTransforms->entries() == 0)
     {
@@ -2345,22 +2735,37 @@ XUSD_HydraGeoVolume::Sync(HdSceneDelegate *scene_delegate,
 	return;
     }
 
+    // Favour density, but if not found, use the first field.
+    HdVolumeFieldDescriptor desc;
+    auto fields = scene_delegate->GetVolumeFieldDescriptors(id);
+    bool first = true;
+    for (auto &&itr : fields)
+    {
+        UT_StringHolder field_name( itr.fieldId.GetString() );
+        if(field_name.endsWith("density"))
+        {
+            desc = itr;
+            break;
+        }
+        if(first)
+        {
+            desc = itr;
+            first = false;
+        }
+    }
+    
     // 3D texture for the volume.
-    for (auto &&desc : scene_delegate->GetVolumeFieldDescriptors(id))
+    if(fields.size() > 0)
     {
 	HdBprim const *bprim = scene_delegate->GetRenderIndex().GetBprim(
 	    desc.fieldPrimType, desc.fieldId);
 
 	if (bprim)
 	{
-	    const XUSD_HydraField *field =
-		static_cast<const XUSD_HydraField *>(bprim);
-
+	    auto field = static_cast<const XUSD_HydraField *>(bprim);
 	    gtvolume = field->getGTPrimitive();
-	    myHydraPrim.scene().addVolumeUsingField(
-		id.GetString(), desc.fieldId.GetString());
+	    myHydraPrim.scene().addVolumeUsingField(id, desc.fieldId);
 	    myDirtyMask |= HUSD_HydraGeoPrim::TOP_CHANGE;
-	    break;
 	}
     }
 
@@ -2376,9 +2781,12 @@ XUSD_HydraGeoVolume::Sync(HdSceneDelegate *scene_delegate,
 
     clearDirty(dirty_bits);
 
+    
     // create the container packed prim.
+    const int def_mat_id = myHydraPrim.scene().getDefaultMaterialID();
+
     createInstance(scene_delegate, id, GetInstancerId(), dirty_bits,
-		   gtvolume.get(), lod, -1,
+		   gtvolume.get(), nullptr, lod, def_mat_id,
 		   (*dirty_bits & (HdChangeTracker::DirtyInstancer |
 				   HdChangeTracker::DirtyInstanceIndex)));
 }
@@ -2387,12 +2795,11 @@ XUSD_HydraGeoVolume::Sync(HdSceneDelegate *scene_delegate,
 
 XUSD_HydraGeoPoints::XUSD_HydraGeoPoints(TfToken const& type_id,
 					 SdfPath const& prim_id,
-					 SdfPath const& instancer_id,
 					 GT_PrimitiveHandle &gt_prim,
 					 GT_PrimitiveHandle &instance,
 					 int &dirty,
 					 XUSD_HydraGeoPrim &hprim)
-    : HdPoints(prim_id, instancer_id),
+    : HdPoints(prim_id),
       XUSD_HydraGeoBase(gt_prim, instance, dirty, hprim)
 {
 }
@@ -2445,9 +2852,14 @@ XUSD_HydraGeoPoints::Sync(HdSceneDelegate *scene_delegate,
             GusdUT_Gf::Cast(GfMatrix4d(scene_delegate->GetTransform(id)));
 	myDirtyMask = myDirtyMask | HUSD_HydraGeoPrim::INSTANCE_CHANGE;
     }
-    
+
+    // Make sure our instancer and it's parent instancers are synced.
+    _UpdateInstancer(scene_delegate, dirty_bits);
+    HdInstancer::_SyncInstancerAndParents(
+        scene_delegate->GetRenderIndex(), GetInstancerId());
+
     GT_TransformHandle th;
-    buildTransforms(scene_delegate, id, GetInstancerId(), dirty_bits,
+    buildTransforms(scene_delegate, rparm, id, GetInstancerId(), dirty_bits,
                     myHydraPrim.id());
     if(myInstanceTransforms && myInstanceTransforms->entries() == 0)
     {
@@ -2462,12 +2874,25 @@ XUSD_HydraGeoPoints::Sync(HdSceneDelegate *scene_delegate,
     updateAttrib(HdTokens->displayColor, "Cd"_sh,
 		 scene_delegate, id, dirty_bits, gt_prim, attrib_list,
                  GT_TYPE_COLOR);
+    updateAttrib(HdTokens->normals, "N"_sh,
+		 scene_delegate, id, dirty_bits, gt_prim, attrib_list,
+                 GT_TYPE_NORMAL);
+    updateAttrib(TfToken("gl_spritetex"), "gl_spritetex"_sh,
+		 scene_delegate, id, dirty_bits, gt_prim, attrib_list,
+                 GT_TYPE_NONE);
+    updateAttrib(TfToken("widths"), "pscale"_sh,
+		 scene_delegate, id, dirty_bits, gt_prim, attrib_list,
+                 GT_TYPE_NONE);
+    updateAttrib(TfToken("spritescale"), "spritescale"_sh,
+		 scene_delegate, id, dirty_bits, gt_prim, attrib_list,
+                 GT_TYPE_NONE);
 
     auto points = new GT_PrimPointMesh(attrib_list[GT_OWNER_POINT],
 				       attrib_list[GT_OWNER_DETAIL]);
 
-    createInstance(scene_delegate, id, GetInstancerId(), dirty_bits, points,
-		   lod, -1,
+    const int def_mat_id = myHydraPrim.scene().getDefaultMaterialID();
+    createInstance(scene_delegate, id, GetInstancerId(), dirty_bits,
+                   points, nullptr, lod, def_mat_id,
  		   (*dirty_bits & (HdChangeTracker::DirtyInstancer |
 				   HdChangeTracker::DirtyInstanceIndex)));
     
@@ -2483,21 +2908,7 @@ XUSD_HydraGeoPoints::Finalize(HdRenderParam *rparm)
 HdDirtyBits
 XUSD_HydraGeoPoints::GetInitialDirtyBitsMask() const
 {
-    static const int	mask
-	= HdChangeTracker::Clean
-	| HdChangeTracker::InitRepr
-	| HdChangeTracker::DirtyPoints
-	| HdChangeTracker::DirtyTopology
-	| HdChangeTracker::DirtyTransform
-	| HdChangeTracker::DirtyVisibility
-	| HdChangeTracker::DirtyCullStyle
-	| HdChangeTracker::DirtyDoubleSided
-	| HdChangeTracker::DirtySubdivTags
-	| HdChangeTracker::DirtyPrimvar
-	| HdChangeTracker::DirtyNormals
-	| HdChangeTracker::DirtyInstanceIndex
-	;
-    return mask;
+    return HdChangeTracker::AllDirty;
 }
 
 
@@ -2515,16 +2926,16 @@ XUSD_HydraGeoPoints::_InitRepr(TfToken const &representation,
 
 
 // -------------------------------------------------------------------------
-    
+
 XUSD_HydraGeoBounds::XUSD_HydraGeoBounds(TfToken const& type_id,
 					 SdfPath const& prim_id,
-					 SdfPath const& instancer_id,
 					 GT_PrimitiveHandle &prim,
 					 GT_PrimitiveHandle &instance,
 					 int &dirty,
 					 XUSD_HydraGeoPrim &hprim)
-    : HdBasisCurves(prim_id, instancer_id),
-      XUSD_HydraGeoBase(prim, instance, dirty, hprim)
+    : HdBasisCurves(prim_id),
+      XUSD_HydraGeoBase(prim, instance, dirty, hprim),
+      myExtentID(-1)
 {
 }
 
@@ -2550,11 +2961,11 @@ XUSD_HydraGeoBounds::Sync(HdSceneDelegate *scene_delegate,
 
     GT_Primitive       *gt_prim = myBasisCurve.get();
     
-     // UTdebugPrint("Sync", id.GetText(), myHydraPrim.id(),
-     //     		 GetInstancerId().GetText(),
-     //     		 representation.GetText());
-     // HdChangeTracker::DumpDirtyBits(*dirty_bits);
-    
+    // UTdebugPrint("Sync", id.GetText(), myHydraPrim.id(),
+    //      		 GetInstancerId().GetText(),
+    //      		 representation.GetText());
+    // HdChangeTracker::DumpDirtyBits(*dirty_bits);
+
     UT_AutoLock prim_lock(myHydraPrim.lock());
     myDirtyMask = 0;
     
@@ -2573,7 +2984,7 @@ XUSD_HydraGeoBounds::Sync(HdSceneDelegate *scene_delegate,
 	UT_Map<GT_Owner, GT_Owner> remap;
 	remap[GT_OWNER_POINT] = GT_OWNER_VERTEX;
 	XUSD_HydraUtils::buildAttribMap(scene_delegate, id, myAttribMap,
-					&remap);
+					GT_OWNER_VERTEX, &remap);
     }
 
     // Transforms
@@ -2584,8 +2995,13 @@ XUSD_HydraGeoBounds::Sync(HdSceneDelegate *scene_delegate,
 	myDirtyMask = myDirtyMask | HUSD_HydraGeoPrim::INSTANCE_CHANGE;
     }
 
+    // Make sure our instancer and it's parent instancers are synced.
+    _UpdateInstancer(scene_delegate, dirty_bits);
+    HdInstancer::_SyncInstancerAndParents(
+        scene_delegate->GetRenderIndex(), GetInstancerId());
+
     GT_TransformHandle th;
-    buildTransforms(scene_delegate, id, GetInstancerId(), dirty_bits,
+    buildTransforms(scene_delegate, rparm, id, GetInstancerId(), dirty_bits,
                     myHydraPrim.id());
     if(myInstanceTransforms && myInstanceTransforms->entries() == 0)
     {
@@ -2647,8 +3063,10 @@ XUSD_HydraGeoBounds::Sync(HdSceneDelegate *scene_delegate,
         };
         GT_DataArrayHandle points_array =
             new GT_Real32Array(points, 8, 3);
+        
         GT_DataArrayHandle vertices_array =
             new GT_DAIndirect(theIndicesArray, points_array);
+        vertices_array->setDataId(myExtentID++);
 
         UT_ASSERT(!attrib_list[GT_OWNER_VERTEX]);
         attrib_list[GT_OWNER_VERTEX] = GT_AttributeList::
@@ -2662,11 +3080,13 @@ XUSD_HydraGeoBounds::Sync(HdSceneDelegate *scene_delegate,
                 attrib_list[GT_OWNER_DETAIL],
                 false);
         myBasisCurve = cmesh;
+        const int def_mat_id = myHydraPrim.scene().getDefaultMaterialID();
         createInstance(scene_delegate, id, GetInstancerId(),
-                       dirty_bits, cmesh.get(), lod, -1,
+                       dirty_bits, cmesh.get(), &extents, lod, def_mat_id,
                        (*dirty_bits & (HdChangeTracker::DirtyInstancer |
                        HdChangeTracker::DirtyInstanceIndex)));
 
+        myDirtyMask = myDirtyMask | HUSD_HydraGeoPrim::GEO_CHANGE;
         // cmesh->dumpAttributeLists("XUSD_HydraGeoBounds", false);
         // if(attrib_list[GT_OWNER_VERTEX])
         // 	attrib_list[GT_OWNER_VERTEX]->dumpList("verts", false);
@@ -2686,23 +3106,7 @@ XUSD_HydraGeoBounds::Finalize(HdRenderParam *rparms)
 HdDirtyBits
 XUSD_HydraGeoBounds::GetInitialDirtyBitsMask() const
 {
-    static const int	mask
-	= HdChangeTracker::Clean
-	| HdChangeTracker::InitRepr
-	| HdChangeTracker::DirtyPoints
-	| HdChangeTracker::DirtyTopology
-	| HdChangeTracker::DirtyTransform
-	| HdChangeTracker::DirtyVisibility
-	| HdChangeTracker::DirtyDisplayStyle
-	| HdChangeTracker::DirtyCullStyle
-	| HdChangeTracker::DirtyDoubleSided
-	| HdChangeTracker::DirtySubdivTags
-	| HdChangeTracker::DirtyPrimvar
-	| HdChangeTracker::DirtyNormals
-	| HdChangeTracker::DirtyInstanceIndex
-	;
-
-    return (HdDirtyBits)mask;
+    return HdChangeTracker::AllDirty;
 }
 
 HdDirtyBits

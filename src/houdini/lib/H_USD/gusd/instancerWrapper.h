@@ -84,7 +84,7 @@ public:
         UT_Array<GU_DetailHandle> &details,
         const UT_StringRef&     fileName,
         const SdfPath&          primPath,
-        const UT_Matrix4D&      xform,
+        const UT_Matrix4D*      xform,
         fpreal                  frame,
         const char *            viewportLod,
         GusdPurposeSet          purposes,
@@ -204,16 +204,16 @@ private:
     };
 
 
-    // Boost variant for the different types of data stored by attributes.
-    typedef BOOST_NS::variant<PreOverlayDataEntry<int>, 
-                           PreOverlayDataEntry<GfVec3f>,
-                           PreOverlayDataEntry<GfQuath>> dataEntry;
+    // Variant for the different types of data stored by attributes.
+    typedef std::variant<PreOverlayDataEntry<int>,
+                         PreOverlayDataEntry<GfVec3f>,
+                         PreOverlayDataEntry<GfQuath>> dataEntry;
 
     // Map from attribute token to original data from base point instancer.
     std::map<TfToken, dataEntry> m_preOverlayDataMap;
 
-    // Visitor for the BOOST_NS variant to call the store at time function.
-    struct StoreAtTime : public BOOST_NS::static_visitor<>
+    // Visitor for the variant to call the store at time function.
+    struct StoreAtTime
     {
         StoreAtTime(UsdTimeCode time) : time(time){}
         
@@ -226,7 +226,7 @@ private:
     };
 
     // Visitor to clear stored data in a data entry.
-    struct ClearData : public BOOST_NS::static_visitor<>
+    struct ClearData
     {
         template <typename T>
         void operator()(T t) const { 

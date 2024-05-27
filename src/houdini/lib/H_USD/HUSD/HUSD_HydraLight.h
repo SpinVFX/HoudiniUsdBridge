@@ -33,6 +33,7 @@
 #include "HUSD_HydraPrim.h"
 
 #include <GT/GT_Handles.h>
+#include <GU/GU_DetailHandle.h>
 #include <UT/UT_StringHolder.h>
 #include <UT/UT_Vector3.h>
 #include <SYS/SYS_Types.h>
@@ -65,11 +66,17 @@ public:
 	LIGHT_DISK,
 	LIGHT_DISTANT,
 	LIGHT_CYLINDER,
-	LIGHT_GEOMETRY,
-	LIGHT_DOME
+	LIGHT_DOME,
+        LIGHT_UNKNOWN
     };
     LightType	type() const	     { return myLightType; }
     void	setType(LightType t) { myLightType = t; }
+
+    const UT_StringHolder &shaderId() const { return myShaderId; }
+    void setShaderId(const char *shaderId) { myShaderId = shaderId; }
+    
+    const GU_ConstDetailHandle &guideGeo() const { return myGuideGeo; }
+    void setGuideGeo(const GU_ConstDetailHandle &guideGeo) { myGuideGeo = guideGeo; }
 
     enum Attenuation
     {
@@ -118,14 +125,22 @@ public:
     HUSD_PARM(FogIntensity,  fpreal);
     HUSD_PARM(FogScatterPara,fpreal);
     HUSD_PARM(FogScatterPerp,fpreal);
+    HUSD_PARM(Focus,         fpreal);
+    HUSD_PARM(FocusTint,     UT_Vector3F);
     
     bool hasBarnDoors() const;
     
     HUSD_PARM(LightLink,UT_StringHolder);
     HUSD_PARM(ShadowLink,UT_StringHolder);
+    HUSD_PARM(ShowInMenu, bool);
+    HUSD_PARM(GuideScale, fpreal);
+
+    void        dirty(bool dirty = true) { myIsDirty = dirty; }
+    bool        isDirty() const { return myIsDirty; }
     
 private:
     LightType			 myLightType;
+    UT_StringHolder		 myShaderId;
     fpreal			 myExposure;
     fpreal			 myIntensity;
     fpreal			 myClipNear;
@@ -157,7 +172,12 @@ private:
     fpreal                       myFogScatterPara;
     fpreal                       myFogScatterPerp;
     fpreal                       myDistantAngle;
+    fpreal                       myGuideScale;
+    fpreal                       myFocus;
+    UT_Vector3F                  myFocusTint;
+    bool                         myShowInMenu;
     bool			 myHasActiveRadius;
+    bool                         myIsDirty;
     UT_StringHolder		 myTextureFile;
     UT_StringHolder		 myLightLink;
     UT_StringHolder		 myShadowLink;
@@ -168,7 +188,7 @@ private:
     bool                         myActive;
     bool                         mySingleSided;
     bool                         myUseColorTemp;
-    
+    GU_ConstDetailHandle         myGuideGeo;
     PXR_NS::XUSD_HydraLight     *myHydraLight;
 };
 

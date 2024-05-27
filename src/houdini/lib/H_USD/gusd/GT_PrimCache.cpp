@@ -81,8 +81,8 @@ namespace {
                                         GusdPurposeSet purposes)
                             {
                                 std::size_t h = hash_value(prim);
-                                BOOST_NS::hash_combine(h, time);
-                                BOOST_NS::hash_combine(h, purposes);
+                                SYShashCombine(h, time);
+                                SYShashCombine(h, purposes);
                                 return h; 
                             }
 
@@ -114,7 +114,6 @@ namespace {
    struct CacheEntry : public UT_CappedItem {
         CacheEntry() : prim( NULL ) {}
         CacheEntry( GT_PrimitiveHandle p ) : prim(p) {}
-        CacheEntry( const CacheEntry &rhs ) : prim( rhs.prim ) {}
 
         int64 getMemoryUsage () const override { 
             int64 rv = sizeof(*this);
@@ -232,7 +231,7 @@ GusdGT_PrimCache::GetPrim( const UsdPrim &usdPrim,
                            GusdPurposeSet purposes,
                            bool skipRoot )
 {
-    // We need to skip the root when walking into instance masters.
+    // We need to skip the root when walking into instance prorotypes.
 
     if( !usdPrim.IsValid() ) {
         return GT_PrimitiveHandle();
@@ -283,9 +282,9 @@ CreateEntryFn::operator()(
     //
     // USD gprims (leaves in the hierarchy) are just converted to GT_Primitives. 
     //
-    // For USD native instances, find the instance's master or the prim in
-    // master corresponding to an instance proxy, and recurse on that. This way
-    // each instance should share a cache with its master.
+    // For USD native instances, find the instance's prorotype or the prim in
+    // prorotype corresponding to an instance proxy, and recurse on that. This
+    // way each instance should share a cache with its prorotype.
     //
     // Any other USD primitive represents a branch of the USD hierarchy. Find 
     // all the instances and leaves in this branch and build a GT_PrimCollect 
@@ -306,10 +305,10 @@ CreateEntryFn::operator()(
     if( isInstance || isInstanceProxy)
     {
         DBG( cerr << "Create prim cache for instance " << prim.GetPath() << " at " << time << endl; )
-        // Look for a cache entry from the instance master
-        UsdPrim masterPrim = isInstance ? prim.GetMaster() : prim.GetPrimInMaster();
+        // Look for a cache entry from the instance prototype
+        UsdPrim prototypePrim = isInstance ? prim.GetPrototype() : prim.GetPrimInPrototype();
         GT_PrimitiveHandle instancePrim = 
-                m_cache.GetPrim( masterPrim,
+                m_cache.GetPrim( prototypePrim,
                                  time, 
                                  purposes,
                                  true );
@@ -340,7 +339,7 @@ CreateEntryFn::operator()(
         
         // Find all the gprims in the group.
         UT_Array<UsdPrim> gprims;
-        GusdUSD_StdTraverse::GetBoundableTraversal().FindPrims( 
+        GusdUSD_StdTraverse::GetBoundableAndFieldTraversal().FindPrims(
             prim, 
             time,
             purposes,
@@ -424,6 +423,13 @@ CreateEntryFn::operator()(
                     refiner.addPrimitive( new GT_PrimInstance( gtPrim, transforms ) );
                 }
             }
+        } else if (prim.IsA<UsdGeomXformable>()) {
+            // If there weren't any gprims in the group, just display as an
+            // xform prim to be visible in the viewport.
+            GT_PrimitiveHandle gp = GusdPrimWrapper::defineForRead(
+                    UsdGeomXformable(prim), time, purposes);
+            if (gp)
+                gp->refine(refiner, &refineParms);
         }
     }
     exint numPrims = refiner.getPrimCollect()->entries() + 

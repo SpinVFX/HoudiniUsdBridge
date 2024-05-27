@@ -58,13 +58,17 @@ husdGetPrimAtPath( HUSD_AutoAnyLock &lock, const UT_StringRef &primpath)
 
 static inline UsdGeomPrimvar
 husdGetPrimvar( HUSD_AutoAnyLock &lock, const UT_StringRef &primpath,
-	const UT_StringRef &primvarname)
+	const UT_StringRef &primvarname, bool allow_inheritance)
 {
     UsdGeomPrimvarsAPI	api(husdGetPrimAtPath(lock, primpath));
     if (!api)
 	return UsdGeomPrimvar(UsdAttribute());
 
-    return api.GetPrimvar(TfToken(primvarname.toStdString()));
+    TfToken name(primvarname.toStdString());
+    if (allow_inheritance)
+	return api.FindPrimvarWithInheritance(name);
+
+    return api.GetPrimvar(name);
 }
 
 template<typename UtValueType>
@@ -91,9 +95,9 @@ template<typename UtValueType>
 bool
 HUSD_GetAttributes::getPrimvar(const UT_StringRef &primpath,
 	const UT_StringRef &primvarname, UtValueType &value,
-	const HUSD_TimeCode &tc) const
+	const HUSD_TimeCode &tc, bool inherit) const
 {
-    auto primvar(husdGetPrimvar(myAnyLock, primpath, primvarname));
+    auto primvar(husdGetPrimvar(myAnyLock, primpath, primvarname, inherit));
     if (!primvar)
 	return false;
 
@@ -108,11 +112,47 @@ HUSD_GetAttributes::getPrimvar(const UT_StringRef &primpath,
 
 template<typename UtValueType>
 bool
+HUSD_GetAttributes::getAttributeOrPrimvar(const UT_StringRef &primpath,
+	const UT_StringRef &name,
+	UtValueType &value,
+	const HUSD_TimeCode &timecode) const
+{
+    if (!getAttribute(primpath, name, value, timecode))
+	return getPrimvar(primpath, name, value, timecode);
+    return true;
+}
+
+bool
+HUSD_GetAttributes::getAttributeArraySize(const UT_StringRef &primpath,
+	const UT_StringRef &attribname,
+	size_t &arraylength,
+	const HUSD_TimeCode &timecode) const
+{
+    auto prim = husdGetPrimAtPath(myAnyLock, primpath);
+    if (!prim)
+	return false;
+
+    auto attrib = prim.GetAttribute(TfToken(attribname.toStdString()));
+    if (!attrib)
+	return false;
+
+    VtValue val;
+    if (!attrib.Get(&val, HUSDgetNonDefaultUsdTimeCode(timecode)))
+	return false;
+    
+    arraylength = val.GetArraySize();
+    
+    HUSDupdateValueTimeSampling(myTimeSampling, attrib);
+    return true;
+}
+
+template<typename UtValueType>
+bool
 HUSD_GetAttributes::getFlattenedPrimvar(const UT_StringRef &primpath,
 	const UT_StringRef &primvarname, UT_Array<UtValueType> &value,
-	const HUSD_TimeCode &tc) const
+	const HUSD_TimeCode &tc, bool inherit) const
 {
-    auto primvar(husdGetPrimvar(myAnyLock, primpath, primvarname));
+    auto primvar(husdGetPrimvar(myAnyLock, primpath, primvarname, inherit));
     if (!primvar)
 	return false;
 
@@ -123,14 +163,14 @@ HUSD_GetAttributes::getFlattenedPrimvar(const UT_StringRef &primpath,
     if (!success)
 	return false;
 
-    return HUSDgetValue( vt_value, value );;
+    return HUSDgetValue( vt_value, value );
 }
 
 bool
 HUSD_GetAttributes::isPrimvarIndexed(const UT_StringRef &primpath,
-	const UT_StringRef &primvarname) const
+	const UT_StringRef &primvarname, bool inherit) const
 {
-    auto primvar(husdGetPrimvar(myAnyLock, primpath, primvarname));
+    auto primvar(husdGetPrimvar(myAnyLock, primpath, primvarname, inherit));
     if (!primvar)
 	return false;
 
@@ -140,12 +180,12 @@ HUSD_GetAttributes::isPrimvarIndexed(const UT_StringRef &primpath,
 bool
 HUSD_GetAttributes::getPrimvarIndices(const UT_StringRef &primpath,
 	const UT_StringRef &primvarname, UT_ExintArray &indices,
-	const HUSD_TimeCode &tc) const
+	const HUSD_TimeCode &tc, bool inherit) const
 {
     VtIntArray vt_indices;
 
     auto usd_tc(HUSDgetNonDefaultUsdTimeCode(tc));
-    auto primvar(husdGetPrimvar(myAnyLock, primpath, primvarname));
+    auto primvar(husdGetPrimvar(myAnyLock, primpath, primvarname, inherit));
     if (!primvar || !primvar.GetIndices(&vt_indices, usd_tc))
 	return false;
 
@@ -159,9 +199,9 @@ HUSD_GetAttributes::getPrimvarIndices(const UT_StringRef &primpath,
 
 UT_StringHolder	
 HUSD_GetAttributes::getPrimvarInterpolation(const UT_StringRef &primpath,
-	const UT_StringRef &primvarname) const
+	const UT_StringRef &primvarname, bool inherit) const
 {
-    auto primvar(husdGetPrimvar(myAnyLock, primpath, primvarname));
+    auto primvar(husdGetPrimvar(myAnyLock, primpath, primvarname, inherit));
     if (!primvar)
 	return UT_StringHolder();
 
@@ -170,9 +210,9 @@ HUSD_GetAttributes::getPrimvarInterpolation(const UT_StringRef &primpath,
 
 exint
 HUSD_GetAttributes::getPrimvarElementSize(const UT_StringRef &primpath,
-	const UT_StringRef &primvarname) const
+	const UT_StringRef &primvarname, bool inherit) const
 {
-    auto primvar(husdGetPrimvar(myAnyLock, primpath, primvarname));
+    auto primvar(husdGetPrimvar(myAnyLock, primpath, primvarname, inherit));
     if (!primvar)
 	return 0;
 
@@ -183,12 +223,6 @@ bool
 HUSD_GetAttributes::getIsTimeVarying() const
 {
     return HUSDisTimeVarying( myTimeSampling );
-}
-
-bool
-HUSD_GetAttributes::getIsTimeSampled() const
-{
-    return HUSDisTimeSampled( myTimeSampling );
 }
 
 //----------------------------------------------------------------------------
@@ -205,6 +239,12 @@ HUSD_GetAttributes::getIsTimeSampled() const
 	const UT_StringRef	&primpath,				\
 	const UT_StringRef	&primvarname,				\
 	UtType			&value,					\
+	const HUSD_TimeCode	&timecode,				\
+	bool			allow_inheritance) const;		\
+    template HUSD_API_TINST bool HUSD_GetAttributes::getAttributeOrPrimvar(	\
+	const UT_StringRef	&primpath,				\
+	const UT_StringRef	&name,					\
+	UtType			&value,					\
 	const HUSD_TimeCode	&timecode) const;			\
 
 #define HUSD_EXPLICIT_INSTANTIATION_SET(UtType)				\
@@ -214,7 +254,8 @@ HUSD_GetAttributes::getIsTimeSampled() const
 	const UT_StringRef	&primpath,				\
 	const UT_StringRef	&primvarname,				\
 	UT_Array<UtType>	&value,					\
-	const HUSD_TimeCode	&timecode) const;			\
+	const HUSD_TimeCode	&timecode,				\
+	bool			 allow_inheritance) const;		\
 
 HUSD_EXPLICIT_INSTANTIATION_SET(bool)
 HUSD_EXPLICIT_INSTANTIATION_SET(int)

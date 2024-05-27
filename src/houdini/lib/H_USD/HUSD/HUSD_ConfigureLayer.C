@@ -23,11 +23,16 @@
  */
 
 #include "HUSD_ConfigureLayer.h"
+#include "HUSD_AssetPath.h"
 #include "HUSD_Constants.h"
+#include "HUSD_Token.h"
+#include "XUSD_AttributeUtils.h"
 #include "XUSD_Data.h"
 #include "XUSD_Utils.h"
 #include <pxr/usd/usdGeom/tokens.h>
 #include <pxr/usd/usdRender/tokens.h>
+#include <pxr/usd/sdf/path.h>
+#include <pxr/base/tf/token.h>
 
 PXR_NAMESPACE_USING_DIRECTIVE
 
@@ -304,3 +309,68 @@ HUSD_ConfigureLayer::setRenderSettings(const UT_StringRef &primpath) const
     return false;
 }
 
+template<typename UtValueType>
+bool
+HUSD_ConfigureLayer::setStageVariable(const UT_StringRef &key,
+        const UtValueType &value) const
+{
+    auto		 outdata = myWriteLock.data();
+
+    if (outdata && outdata->isStageValid())
+    {
+        std::string  key_str(key.toStdString());
+        VtValue      vt_value = HUSDgetVtValue(value);
+
+        {
+            VtDictionary stage_variables =
+                outdata->activeLayer()->GetExpressionVariables();
+            stage_variables.SetValueAtPath(key_str, vt_value);
+            outdata->activeLayer()->SetExpressionVariables(stage_variables);
+        }
+        if (myModifyRootLayer)
+        {
+            VtDictionary stage_variables =
+                outdata->stage()->GetRootLayer()->GetExpressionVariables();
+            stage_variables.SetValueAtPath(key_str, vt_value);
+            outdata->setStageRootPrimMetadata(
+                SdfFieldKeys->ExpressionVariables, VtValue(stage_variables));
+        }
+
+        return true;
+    }
+
+    return false;
+}
+
+#define HUSD_EXPLICIT_INSTANTIATION(UtType)				\
+    template HUSD_API_TINST bool					\
+    HUSD_ConfigureLayer::setStageVariable(				\
+	const UT_StringRef	&key,					\
+	const UtType		&value) const;				\
+
+// Keep the list of supported data types here synchronized with the list of
+// data types in the comment in the header file. Otherwise there is no way to
+// know which data types can be used to call these templated functions.
+HUSD_EXPLICIT_INSTANTIATION(bool)
+HUSD_EXPLICIT_INSTANTIATION(int)
+HUSD_EXPLICIT_INSTANTIATION(int64)
+HUSD_EXPLICIT_INSTANTIATION(UT_Vector2i)
+HUSD_EXPLICIT_INSTANTIATION(UT_Vector3i)
+HUSD_EXPLICIT_INSTANTIATION(UT_Vector4i)
+HUSD_EXPLICIT_INSTANTIATION(fpreal32)
+HUSD_EXPLICIT_INSTANTIATION(fpreal64)
+HUSD_EXPLICIT_INSTANTIATION(UT_Vector2F)
+HUSD_EXPLICIT_INSTANTIATION(UT_Vector3F)
+HUSD_EXPLICIT_INSTANTIATION(UT_Vector4F)
+HUSD_EXPLICIT_INSTANTIATION(UT_QuaternionF)
+HUSD_EXPLICIT_INSTANTIATION(UT_QuaternionH)
+HUSD_EXPLICIT_INSTANTIATION(UT_Matrix3D)
+HUSD_EXPLICIT_INSTANTIATION(UT_Matrix4D)
+HUSD_EXPLICIT_INSTANTIATION(UT_StringHolder)
+HUSD_EXPLICIT_INSTANTIATION(UT_Array<UT_StringHolder>)
+HUSD_EXPLICIT_INSTANTIATION(HUSD_AssetPath)
+HUSD_EXPLICIT_INSTANTIATION(UT_Array<HUSD_AssetPath>)
+HUSD_EXPLICIT_INSTANTIATION(HUSD_Token)
+HUSD_EXPLICIT_INSTANTIATION(UT_Array<HUSD_Token>)
+
+#undef HUSD_EXPLICIT_INSTANTIATION

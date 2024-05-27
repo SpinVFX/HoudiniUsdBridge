@@ -32,7 +32,9 @@
 
 #include <GT/GT_Handles.h>
 #include <UT/UT_NonCopyable.h>
+#include <UT/UT_Set.h>
 #include <UT/UT_StringArray.h>
+#include <UT/UT_StringHolder.h>
 
 class HUSD_Scene;
 class HUSD_HydraMaterial;
@@ -42,7 +44,7 @@ class HUSD_API HUSD_HydraGeoPrim : public HUSD_HydraPrim
 {
 public:
              HUSD_HydraGeoPrim(HUSD_Scene &scene,
-                               const char *geo_id,
+                               const HUSD_Path &path,
                                bool consolidated = false);
             ~HUSD_HydraGeoPrim() override;
 
@@ -81,9 +83,6 @@ public:
     void        setIndex(int i) { myIndex = i; }
     int		index() const   { return myIndex; }
 
-    uint64	deferredBits() const	   { return myDeferBits; }
-    void	setDeferredBits(uint64 b) { myDeferBits = b; }
-
     bool        hasMaterialOverrides() const
                                 { return myHasMatOverrides; }
     void        hasMaterialOverrides(bool y)
@@ -98,15 +97,21 @@ public:
     bool        isConsolidated() const { return myIsConsolidated; }
     void        setConsolidated(bool c) { myIsConsolidated = c; }
     const UT_IntArray &consolidatedPrimIDs() { return myPrimIDs; }
-    // For consolidated and instanced prims only.
-    virtual bool getSelectedBBox(UT_BoundingBox &bbox) const = 0;
-    
-    virtual const UT_StringArray &materials() const = 0;
+
+    virtual const UT_Array<HUSD_Path> &materials() const = 0;
     virtual void getPrimIDRange(int &mn, int &mx) const { mn = mx = 0; }
+
+    void        addMaterialRef(const HUSD_Path &matname)
+                   { myMaterialRefs.emplace(matname); }
+    void        clearMaterials()
+                   { myMaterialRefs.clear(); }
+    const UT_Set<HUSD_Path> &materialReferences()
+                   { return myMaterialRefs; }
 
 protected:
     GT_PrimitiveHandle		myGTPrim;
     GT_PrimitiveHandle		myInstance;
+    UT_Set<HUSD_Path>           myMaterialRefs;
     UT_IntArray                 myPrimIDs;
     uint64			myDeferBits;
     int				myDirtyMask;

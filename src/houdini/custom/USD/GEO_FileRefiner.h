@@ -18,9 +18,9 @@
 #define __GEO_FILEREFINER_H__
 
 #include "GEO_FileUtils.h"
+#include "GEO_FilePrimUtils.h"
 #include "GEO_FilePrimAgentUtils.h"
 #include "GEO_FilePrimInstancerUtils.h"
-#include <gusd/writeCtrlFlags.h>
 #include <GT/GT_Refine.h>
 #include <GT/GT_RefineParms.h>
 #include <GU/GU_AgentDefinition.h>
@@ -59,6 +59,8 @@ PXR_NAMESPACE_OPEN_SCOPE
 class GEO_FileRefinerCollector;
 class GT_PrimPointInstancer;
 class GT_PrimVolumeCollection;
+class XUSD_LockedGeo;
+using XUSD_LockedGeoPtr = UT_IntrusivePtr<XUSD_LockedGeo>;
 
 class GEO_FileRefiner : public GT_Refine 
 {
@@ -73,8 +75,7 @@ public:
         UT_Matrix4D         xform;
         GA_DataId           topologyId;
         TfToken             purpose;
-        GusdWriteCtrlFlags  writeCtrlFlags;
-        GEO_AgentShapeInfo  agentShapeInfo;
+        GEO_AgentShapeInfoPtr agentShapeInfo;
 
         GEO_FileGprimArrayEntry() : topologyId(GA_INVALID_DATAID) {}
         GEO_FileGprimArrayEntry( 
@@ -83,17 +84,15 @@ public:
             const UT_Matrix4D&          xform,
             GA_DataId                   topologyId,
             const TfToken&              purpose,
-            const GusdWriteCtrlFlags&   writeCtrlFlags,
-            const GEO_AgentShapeInfo&   agentShapeInfo )
+            const GEO_AgentShapeInfoPtr& agentShapeInfo )
                 : path( path )
                 , prim( prim )
                 , xform( xform )
                 , topologyId( topologyId )
                 , purpose(purpose)
-                , writeCtrlFlags(writeCtrlFlags)
                 , agentShapeInfo(agentShapeInfo) {}
     };
-    using GEO_FileGprimArray = std::vector<GEO_FileGprimArrayEntry>;
+    using GEO_FileGprimArray = UT_Array<GEO_FileGprimArrayEntry>;
 
     ///////////////////////////////////////////////////////////////////////////
 
@@ -108,7 +107,8 @@ public:
     GEO_FileRefiner(
         GEO_FileRefinerCollector&   collector,
         const SdfPath&          pathPrefix,
-        const UT_StringArray&   pathAttrNames );
+        const UT_StringArray&   pathAttrNames,
+        bool                    prefixAbsolutePaths);
 
     ~GEO_FileRefiner() override;
 
@@ -116,9 +116,10 @@ public:
 
     void addPrimitive( const GT_PrimitiveHandle& gtPrim ) override;
 
-    void refineDetail( 
-        const GU_ConstDetailHandle& detail,
-        const GT_RefineParms&       parms  );
+    void refineDetail(
+            const GU_ConstDetailHandle& detail,
+            const GT_RefineParms& parms,
+            const GT_TransformHandle& xform = nullptr);
 
     void refinePrim(
             const GT_Primitive& prim,
@@ -130,6 +131,7 @@ public:
 
     // A string specifying the group of primitives to import (blank means all).
     UT_StringHolder		 m_importGroup;
+    GA_AttributeOwner            m_importGroupType = GA_ATTRIB_PRIMITIVE;
 
     // A string specifying the group of primitives to import as subdivision
     // surfaces.
@@ -140,22 +142,18 @@ public:
 
     // Setting to control the processing of packed prims.
     GEO_HandlePackedPrims	 m_handlePackedPrims;
-
-    GusdWriteCtrlFlags		 m_writeCtrlFlags;
+    GEO_HandleAgents	         m_handleAgents;
+    GEO_HandleNurbsSurfs	 m_handleNurbsSurfs;
 
     //////////////////////////////////////////////////////////////////////////
 
 private:
-    // Convert a prim's name into a prim path taking into account prefix and
-    // modifying to be a valid Usd prim path.
-    std::string createPrimPath( const std::string& primName);
-
     /// Create a new refiner and copy any settings that should be propagated to
     /// a sub-refiner.
     GEO_FileRefiner createSubRefiner(
-        const SdfPath &pathPrefix, const UT_StringArray &pathAttrNames,
-        const GT_PrimitiveHandle &src_prim,
-        const GEO_AgentShapeInfo &agentShapeInfo = GEO_AgentShapeInfo());
+            const SdfPath& pathPrefix,
+            const UT_StringArray& pathAttrNames,
+            const GEO_AgentShapeInfoPtr& agentShapeInfo = nullptr);
 
     /// Creates or returns the point instancer for the given primitive path.
     UT_IntrusivePtr<GT_PrimPointInstancer>
@@ -168,16 +166,24 @@ private:
     int addPointInstancerPrototype(GT_PrimPointInstancer &instancer,
                                    GT_GEOPrimPacked &gtpacked,
                                    const TfToken &purpose,
-                                   const std::string &primPath,
-                                   const std::string &primName,
-                                   bool addNumericSuffix);
+                                   const SdfPath &prefix,
+                                   const SdfPath &prim_path,
+                                   bool make_relative_path,
+                                   bool add_numeric_suffix);
+
+    /// Refines the agent shapes under the given path prefix.
+    void refineAgentShapes(
+            const GT_PrimitiveHandle& src_prim,
+            const SdfPath& root_path,
+            const GU_AgentDefinition& defn,
+            const UT_Array<GEO_AgentShapeInfoPtr>& shapes);
 
     /// Adds a prototype for the packed primitive's geometry (for native
     /// instancing), if it hasn't been seen before.
     /// Returns the path to the prototype prim.
     GEO_PathHandle
     addNativePrototype(GT_GEOPrimPacked &gtpacked, const TfToken &purpose,
-                       const std::string &primPath, bool addNumericSuffix);
+                       const SdfPath &prim_path, bool addNumericSuffix);
 
     /// Creates or returns the volume collection prim for the given path.
     UT_IntrusivePtr<GT_PrimVolumeCollection>
@@ -201,6 +207,9 @@ private:
 
     // The name of the attribute that specifies what USD object to write to.
     UT_StringArray          m_pathAttrNames;
+    
+    // Whether to use m_pathPrefix when the values in m_pathAttrNames are absolute paths.
+    bool                    m_prefixAbsolutePaths;
 
     // Data ID for the current detail's topology and path attributes.
     GA_DataId               m_topologyId;
@@ -210,10 +219,10 @@ private:
     bool                    m_markMeshesAsSubd;
 
     // Tracks the source agent shape when refining a shape library.
-    GEO_AgentShapeInfo      m_agentShapeInfo;
+    GEO_AgentShapeInfoPtr   m_agentShapeInfo;
 
     // The known agent definitions and their prim paths
-    UT_Map<GU_AgentDefinitionConstPtr, SdfPath> m_knownAgentDefs;
+    UT_Map<GU_AgentDefinitionConstPtr, GT_PrimAgentDefinitionPtr> m_knownAgentDefs;
 
     // Map from a packed primitive to the path where it was unpacked. Used for
     // converting packed primitives to native instances.
@@ -232,6 +241,15 @@ private:
 class GEO_FileRefinerCollector
 {
 public:
+    GEO_FileRefinerCollector(
+            GEO_VolumeFileMap& volume_file_paths,
+            UT_Array<XUSD_LockedGeoPtr>& unpacked_geos,
+            const std::string& primary_file_path)
+        : myVolumeFilePaths(volume_file_paths)
+        , myUnpackedGeos(unpacked_geos)
+        , myPrimaryFilePath(primary_file_path)
+    {
+    }
 
     using GEO_FileGprimArrayEntry = GEO_FileRefiner::GEO_FileGprimArrayEntry;
     using GEO_FileGprimArray = GEO_FileRefiner::GEO_FileGprimArray;
@@ -252,11 +270,14 @@ public:
         const UT_Matrix4D&          xform,
         GA_DataId                   topologyId,
         const TfToken &             purpose,
-        const GusdWriteCtrlFlags&   writeCtrlFlags,
-        const GEO_AgentShapeInfo&   agentShapeInfo);
+        const GEO_AgentShapeInfoPtr& agentShapeInfo);
 
     // Complete any final work after refining all prims.
     void finish( GEO_FileRefiner& refiner );
+
+    /// Add an XUSD_LockedGeo for the geometry containing the volume / VDB, and
+    /// determine a suitable file path identifier.
+    void registerVolumeGeometry(const GT_Primitive &gt_volume);
 
     ////////////////////////////////////////////////////////////////////////////
 
@@ -264,7 +285,12 @@ public:
     GEO_FileRefiner::GEO_FileGprimArray m_gprims;
 
     // Map used to generate unique names for each prim
-    std::map<SdfPath, NameInfo> m_names;
+    UT_Map<SdfPath, NameInfo> m_names;
+
+private:
+    GEO_VolumeFileMap &myVolumeFilePaths;
+    UT_Array<XUSD_LockedGeoPtr> &myUnpackedGeos;
+    const std::string& myPrimaryFilePath;
 };
 
 PXR_NAMESPACE_CLOSE_SCOPE

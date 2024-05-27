@@ -36,6 +36,8 @@
 #include <GT/GT_Refine.h>
 #include <GT/GT_RefineParms.h>
 
+#include "pxr/usd/usdGeom/primvarsAPI.h"
+
 #include <iostream>
 
 PXR_NAMESPACE_OPEN_SCOPE
@@ -237,7 +239,7 @@ GusdCurvesWrapper::refine(
             }
         }
         if( basis == GT_BASIS_INVALID ) {
-            TF_WARN( "Usupported curve basis" );
+            TF_WARN("Unsupported curve basis");
             return false;
         }
     }
@@ -257,7 +259,7 @@ GusdCurvesWrapper::refine(
 
     VtIntArray usdCounts;
     countsAttr.Get(&usdCounts, m_time);
-    auto gtVertexCounts = new GusdGT_VtArray<int32>( usdCounts );
+    auto gtVertexCounts = UTmakeIntrusive<GusdGT_VtArray<int32>>( usdCounts );
 
     // point positions
     UsdAttribute pointsAttr = usdCurves.GetPointsAttr();
@@ -392,9 +394,11 @@ GusdCurvesWrapper::refine(
     } 
     else {
 
-        UsdGeomPrimvar colorPrimvar = usdCurves.GetPrimvar(GusdTokens->Cd);
+        UsdGeomPrimvar colorPrimvar = UsdGeomPrimvarsAPI(
+            usdCurves).GetPrimvar(GusdTokens->Cd);
         if( !colorPrimvar || !colorPrimvar.GetAttr().HasAuthoredValue() ) {
-            colorPrimvar = usdCurves.GetPrimvar(GusdTokens->displayColor);
+            colorPrimvar = UsdGeomPrimvarsAPI(
+                usdCurves).GetPrimvar(GusdTokens->displayColor);
         }
 
         if( colorPrimvar && colorPrimvar.GetAttr().HasAuthoredValue()) {
@@ -455,9 +459,11 @@ GusdCurvesWrapper::refine(
             }
         }
 
-        UsdGeomPrimvar alphaPrimvar = usdCurves.GetPrimvar(GusdTokens->Alpha);
+        UsdGeomPrimvar alphaPrimvar = UsdGeomPrimvarsAPI(
+            usdCurves).GetPrimvar(GusdTokens->Alpha);
         if( !alphaPrimvar || !alphaPrimvar.GetAttr().HasAuthoredValue() ) {
-            alphaPrimvar = usdCurves.GetPrimvar(GusdTokens->displayOpacity);
+            alphaPrimvar = UsdGeomPrimvarsAPI(
+                usdCurves).GetPrimvar(GusdTokens->displayOpacity);
         }
 
         if( alphaPrimvar && alphaPrimvar.GetAttr().HasAuthoredValue()) {
@@ -519,11 +525,14 @@ GusdCurvesWrapper::refine(
         }
     }
 
-    GT_FaceSetMapPtr facesets;
+    GT_FaceSetMapPtr face_sets;
     if (!refineForViewport)
     {
+        GT_ElementSetMapPtr point_sets;
         loadSubsets(
-            m_usdCurves, facesets, gtUniformAttrs, parms, usdCounts.size());
+                m_usdCurves, /*uniform_element_type=*/UsdGeomTokens->face,
+                face_sets, gtUniformAttrs, usdCounts.size(), point_sets,
+                gtVertexAttrs, usdPoints.size(), parms, m_time);
     }
 
     auto prim = new GT_PrimCurveMesh( 
@@ -533,7 +542,7 @@ GusdCurvesWrapper::refine(
         gtUniformAttrs,
         gtDetailAttrs,
         wrap );
-    prim->setFaceSetMap(facesets);
+    prim->setFaceSetMap(face_sets);
 
     // set local transform
     UT_Matrix4D mat;

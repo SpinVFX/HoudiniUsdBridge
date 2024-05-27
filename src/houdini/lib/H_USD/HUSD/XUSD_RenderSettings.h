@@ -23,16 +23,20 @@
 
 #include "HUSD_API.h"
 #include <PXL/PXL_Common.h>
-#include <UT/UT_UniquePtr.h>
-#include <UT/UT_Rect.h>
+#include <UT/UT_Array.h>
 #include <UT/UT_NonCopyable.h>
-#include <UT/UT_StringArray.h>
+#include <UT/UT_Rect.h>
+#include <UT/UT_StringHolder.h>
+#include <UT/UT_UniquePtr.h>
+#include <SYS/SYS_Types.h>
 #include <pxr/pxr.h>
 #include <pxr/imaging/hd/aov.h>
 #include <pxr/imaging/hd/renderDelegate.h>
-#include <pxr/usd/usdRender/var.h>
 #include <pxr/usd/usdRender/product.h>
 #include <pxr/usd/usdRender/settings.h>
+#include <pxr/usd/usdRender/var.h>
+
+#include <string>
 
 class UT_JSONWriter;
 
@@ -78,8 +82,8 @@ public:
     /// Optionally, override the data window
     virtual GfVec4f	overrideDataWindow(const GfVec4f &w) const { return w; }
 
-    /// Optionally, override the instantaneousShutter
-    virtual bool	overrideInstantaneousShutter(bool v) const { return v; }
+    /// Optionally, override the disableMotionBlur
+    virtual bool	overrideDisableMotionBlur(bool v) const { return v; }
 
     /// Return if there's an overridden purpose for the render
     virtual const char	*overridePurpose() const { return nullptr; }
@@ -102,6 +106,9 @@ public:
     /// Return the number of frames being rendered
     virtual int		frameCount() const { return 1; }
 
+    /// Return the fps
+    virtual fpreal	fps() const { return 24; }
+
     /// Current frame in the render sequence
     virtual UsdTimeCode	evalTime() const = 0;
 
@@ -115,20 +122,29 @@ public:
     virtual const char	*defaultProductName() const { return nullptr; }
 
     /// Return a product name override
-    virtual const char	*overrideProductName(const XUSD_RenderProduct &p) const
+    virtual const char	*overrideProductName(const XUSD_RenderProduct &p,
+                                            int pidx) const
     {
         return nullptr;
     }
 
-    /// Optionally, override the path to the checkpoints
-    virtual const char	*overrideSnapshotPath(const XUSD_RenderProduct &p) const
+    /// Optionally, override the path to the snapshots
+    virtual const char	*overrideSnapshotPath(const XUSD_RenderProduct &p,
+                                            int pidx) const
     {
         return nullptr;
     }
+    /// Optionally, override the suffix on snapshots
+    virtual const char	*overrideSnapshotSuffix(const XUSD_RenderProduct &p,
+                                            int pidx) const
+    {
+        return "_part";
+    }
+
 
     /// Get the tile suffix, if there is one
     virtual const char	*tileSuffix() const { return nullptr; }
-    
+
     /// Get the tile index, defaults to 0
     virtual int		tileIndex() const { return 0; }
 
@@ -159,7 +175,7 @@ public:
                         const XUSD_RenderSettingsContext &ctx);
     bool	buildDefault(const XUSD_RenderSettingsContext &ctx);
 
-    UT_UniquePtr<XUSD_RenderVar>	clone() const;
+    virtual UT_UniquePtr<XUSD_RenderVar>        clone() const;
 
     const std::string	        &aovName() const { return myAovName; }
     const TfToken	        &aovToken() const { return myAovToken; }
@@ -198,32 +214,92 @@ public:
     bool	 resolveFrom(const UsdStageRefPtr &usd,
 			const UsdRenderProduct &prim,
 			const XUSD_RenderSettingsContext &ctx);
-    bool	 buildDefault(const XUSD_RenderSettingsContext &ctx);
+    bool         buildDefault(const XUSD_RenderSettingsContext &ctx);
+    bool         buildDummyRaster(const XUSD_RenderSettingsContext &ctx,
+                        const XUSD_RenderProduct &src);
+
+    void         updateSettings(const UsdStageRefPtr &use,
+                        const UsdRenderProduct &prim,
+                        const XUSD_RenderSettingsContext &ctx);
 
     const TfToken       &productType() const;
     TfToken              productName(int frame = 0) const;
+
+    bool                 isRaster() const;
 
     // Current output filename (with all variables expanded)
     const UT_StringHolder	&outputName() const { return myFilename; }
 
     const RenderVarList	        &vars() const { return myVars; }
 
-    const_iterator	         begin() const { return myVars.begin(); }
-    const_iterator	         end() const { return myVars.end(); }
+    /// @{
+    /// Properties that can override settings defined on a render settings
+    /// primitive The functions return true if they are authored on the
+    /// product.
+    template <typename T>
+    struct SettingOverride
+    {
+        void    clear() { myAuthored = false; }
+        bool    import(T &val) const
+        {
+            if (myAuthored)
+            {
+                val = myValue;
+                return true;
+            }
+            return false;
+        }
+        T       myValue;
+        bool    myAuthored = false;
+    };
+    bool   cameraPath(SdfPath &val) const
+    {
+        if (myCameraPath.IsEmpty())
+            return false;
+        val = myCameraPath;
+        return true;
+    }
+    bool   shutter(GfVec2d &val) const { return myShutter.import(val); }
+    bool   res(GfVec2i &val) const { return myRes.import(val); }
+    bool   pixelAspect(float &val) const { return myPixelAspect.import(val); }
+    bool   dataWindow(GfVec4f &val) const { return myDataWindowF.import(val); }
+    bool   disableMotionBlur(bool &val) const;
+    bool   disableDepthOfField(bool &val) const;
+    /// @}
+
+    /// @{
+    /// Test whether the product list has a specific value for the given
+    /// attribute.  If so, overwrite the value with the value of the product
+    /// list.  Note, all products must author the attribute and have the same
+    /// value.
+    using ProductList = UT_Array<UT_UniquePtr<XUSD_RenderProduct>>;
+    static bool specificRes(GfVec2i &val, const ProductList &products);
+    static bool specificPixelAspect(float &val, const ProductList &products);
+    static bool specificDataWindow(GfVec4f &val, const ProductList &products);
+    static bool specificDisableMotionBlur(bool &val, const ProductList &products);
+    static bool specificDisableDepthOfField(bool &val, const ProductList &products);
+    /// @}
+
+    const SdfPath       &cameraPath() const { return myCameraPath; }
+
+    const_iterator      begin() const { return myVars.begin(); }
+    const_iterator      end() const { return myVars.end(); }
 
     /// Expand product name variables.  Returns false if there are multiple
-    /// frames, but no frame expansion.
-    bool	                 expandProduct(
-                                        const XUSD_RenderSettingsContext &opts,
-                                        int frame);
-    bool	                 collectAovs(TfTokenVector &aovs,
-                                        HdAovDescriptorList &descs) const;
+    /// frames, but no frame expansion.  The @c product_index is -1 for
+    /// non-raster products or the offset into the list of raster products.
+    bool   expandProduct(const XUSD_RenderSettingsContext &opts,
+                    int product_index, int frame);
+    bool   collectAovs(TfTokenVector &aovs, HdAovDescriptorList &descs) const;
 
     /// User settings for this product
     const HdAovSettingsMap	&settings() const { return mySettings; }
 
     /// Print out the settings
     void	                 dump(UT_JSONWriter &w) const;
+
+    bool        isDefault() const { return myIsDefault; }
+    void        setIsDefault() { myIsDefault = true; }
 
 protected:
     /// If you have a sub-class of XUSD_RenderVar, you can create it here
@@ -234,9 +310,21 @@ protected:
 
     // Member data
     HdAovSettingsMap	        mySettings;
+    SdfPath                     myCameraPath;
     UT_StringHolder		myFilename;
     UT_StringHolder		myPartname;
     RenderVarList		myVars;
+
+    // Override values
+    SettingOverride<GfVec2d>    myShutter;
+    SettingOverride<GfVec2i>    myRes;
+    SettingOverride<float>      myPixelAspect;
+    SettingOverride<GfVec4f>    myDataWindowF;
+    SettingOverride<bool>       myInstantaneousShutter;
+    SettingOverride<bool>       myDisableMotionBlur;
+    SettingOverride<bool>       myDisableDepthOfField;
+    bool                        myIsDefault;
+
 };
 
 /// XUSD_RenderSettings contains the HdRenderSettings for the render
@@ -245,6 +333,8 @@ class HUSD_API XUSD_RenderSettings
 {
 public:
     using ProductList = UT_Array<UT_UniquePtr<XUSD_RenderProduct>>;
+    using ProductGroup = UT_Array<int>;
+    using ProductGroupList = UT_Array<ProductGroup>;
     using const_iterator = ProductList::const_iterator;
 
     XUSD_RenderSettings();
@@ -259,15 +349,20 @@ public:
     bool	init(const UsdStageRefPtr &usd,
 			const SdfPath &settings_path,
 			XUSD_RenderSettingsContext &ctx);
+    /// Alternative initialization with a string path
+    bool	init(const UsdStageRefPtr &usd,
+			const UT_StringHolder &settings_path,
+			XUSD_RenderSettingsContext &ctx);
 
     /// Update the frame
     bool	updateFrame(const UsdStageRefPtr &usd,
-			const SdfPath &settings_path,
-			XUSD_RenderSettingsContext &ctx);
+			XUSD_RenderSettingsContext &ctx,
+                        bool create_dummy_raster_product);
 
     /// Resolve products/vars
     bool	resolveProducts(const UsdStageRefPtr &usd,
-			const XUSD_RenderSettingsContext &ctx);
+			const XUSD_RenderSettingsContext &ctx,
+                        bool create_dummy_raster_product);
 
     /// Get the render settings
     UsdPrim	prim() const { return myUsdSettings.GetPrim(); }
@@ -275,27 +370,29 @@ public:
     /// Rendering head
     const TfToken	        &renderer() const { return myRenderer; }
 
-    /// Properties from the render settings
-    const SdfPath	        &cameraPath() const { return myCameraPath; }
-    double			 shutterOpen() const { return myShutter[0]; }
-    double			 shutterClose() const { return myShutter[1]; }
-    int				 xres() const { return myRes[0]; }
-    int				 yres() const { return myRes[1]; }
-    const GfVec2i	        &res() const { return myRes; }
-    float			 pixelAspect() const { return myPixelAspect; }
-    const GfVec4f	        &dataWindowF() const { return myDataWindowF; }
+    /// Properties from the render settings which cannot be overridden per
+    /// product.
     const VtArray<TfToken>      &purpose() const { return myPurpose; }
-    bool			 instantaneousShutter() const
-				    { return myInstantShutter; }
 
-    const UT_DimRect	        &dataWindow() const { return myDataWindow; }
-
-    UT_StringHolder	         outputName() const;
+    /// Properties which a render product might override
+    SdfPath             cameraPath(const XUSD_RenderProduct *p) const;
+    double              shutterOpen(const XUSD_RenderProduct *p) const;
+    double              shutterClose(const XUSD_RenderProduct *p) const;
+    int                 xres(const XUSD_RenderProduct *p) const;
+    int                 yres(const XUSD_RenderProduct *p) const;
+    GfVec2i             res(const XUSD_RenderProduct *p) const;
+    float               pixelAspect(const XUSD_RenderProduct *p) const;
+    GfVec4f             dataWindowF(const XUSD_RenderProduct *p) const;
+    UT_DimRect          dataWindow(const XUSD_RenderProduct *p) const;
+    bool                disableMotionBlur(const XUSD_RenderProduct *p) const;
+    bool                disableDepthOfField(const XUSD_RenderProduct *p) const;
+    UT_StringHolder     outputName(int product_group) const;
 
     const HdRenderSettingsMap	&renderSettings() const { return mySettings; }
 
     /// @{
     /// Render Products
+    const ProductGroupList      &productGroups() const { return myProductGroups; }
     const ProductList	        &products() const { return myProducts; }
     const_iterator	         begin() const { return myProducts.begin(); }
     const_iterator	         end() const { return myProducts.end(); }
@@ -303,7 +400,8 @@ public:
 
     /// Expand product name variables
     bool	expandProducts(const XUSD_RenderSettingsContext &ctx,
-			int frame);
+			int frame,
+                        int product_group);
 
     /// Print out the settings to UT_ErrorLog
     void	printSettings() const;
@@ -324,7 +422,12 @@ public:
 	DEFAULT = EXPAND_APERTURE
     };
     static HUSD_AspectConformPolicy	conformPolicy(const TfToken &t);
-    static TfToken	conformPolicy(HUSD_AspectConformPolicy policy);
+    static const TfToken	&conformPolicy(HUSD_AspectConformPolicy policy);
+
+    // Helper function for calculating a UT_DimRect consistently based on
+    // floating point reoslution and datawindow fractional values.
+    static UT_InclusiveRect computeDataWindow(const GfVec2i &res,
+                                              const GfVec4f &win);
 
     /// When the camera aspect ratio doesn't match the image aspect ratio, USD
     /// specifies five different approatches to resolving this difference.
@@ -347,11 +450,17 @@ public:
     HUSD_AspectConformPolicy	conformPolicy(
 				    const XUSD_RenderSettingsContext &c) const;
 
+    // Return a VtValue for all non-raster render products for the delegate
+    // render product interface.
+    VtValue             delegateRenderProducts(int product_group) const;
+
+    virtual bool        supportedDelegate(const TfToken &name) const;
 protected:
     virtual UT_UniquePtr<XUSD_RenderProduct>	newRenderProduct() const
     {
 	return UTmakeUnique<XUSD_RenderProduct>();
     }
+    void        partitionProducts();
     void	computeImageWindows(const UsdStageRefPtr &usd,
 			const XUSD_RenderSettingsContext &ctx);
     void	setDefaults(const UsdStageRefPtr &usd,
@@ -362,19 +471,31 @@ protected:
 			const XUSD_RenderSettingsContext &ctx);
     void	buildRenderSettings(const UsdStageRefPtr &usd,
 			const XUSD_RenderSettingsContext &ctx);
+    bool        isDefaultProduct() const
+    {
+        return myProducts.size() >= 1 && myProducts[0]->isDefault();
+    }
+    /// Check to see whether there have been any unexpected products added (as
+    /// in the mplay monitor or the dummy raster product).  Returns true if the
+    /// path list size matches.
+    bool        accountForExtraProducts(const SdfPathVector &paths) const;
 
     UsdRenderSettings		myUsdSettings;
     SdfPath			myCameraPath;
     HdRenderSettingsMap		mySettings;
     TfToken			myRenderer;
     ProductList			myProducts;
-    double			myShutter[2];
+    ProductGroupList		myProductGroups;
+    GfVec2d			myShutter;
     GfVec2i			myRes;
     float			myPixelAspect;
     GfVec4f			myDataWindowF;
     UT_DimRect			myDataWindow;
     VtArray<TfToken>    	myPurpose;
-    bool			myInstantShutter;
+    exint                       myProductGroup;
+    bool			myDisableMotionBlur;
+    bool			myDisableDepthOfField;
+    bool                        myProductDataWindow;
     bool                        myFirstFrame;
 };
 

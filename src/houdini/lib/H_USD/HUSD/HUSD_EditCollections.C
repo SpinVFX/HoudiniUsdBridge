@@ -70,7 +70,7 @@ namespace {
             return UsdCollectionAPI();
 
         TfToken		name(collectionname.toStdString());
-        return UsdCollectionAPI::ApplyCollection(prim, name);
+        return UsdCollectionAPI::Apply(prim, name);
     }
 
     void
@@ -123,7 +123,8 @@ HUSD_EditCollections::createCollection(const UT_StringRef &primpath,
 	const HUSD_FindPrims &includeprims,
 	const HUSD_FindPrims &excludeprims,
         bool setexcludes,
-	bool createprim)
+	bool createprim,
+	bool forceapply /*=true*/)
 {
     auto	 outdata = myWriteLock.data();
     bool	 success = false;
@@ -141,12 +142,10 @@ HUSD_EditCollections::createCollection(const UT_StringRef &primpath,
                 HUSD_Preferences::defaultCollectionsPrimType().toStdString();
 
             SdfPrimSpecHandle primspec = HUSDcreatePrimInLayer(
-                stage, outdata->activeLayer(),
-                sdfpath, TfToken(), true,
-                primtype);
+                stage, outdata->activeLayer(), sdfpath, TfToken(),
+                SdfSpecifierDef, SdfSpecifierDef, primtype);
             if (primspec)
             {
-                primspec->SetSpecifier(SdfSpecifierDef);
                 if (!primtype.empty())
                     primspec->SetTypeName(primtype);
                 prim = stage->GetPrimAtPath(sdfpath);
@@ -168,8 +167,20 @@ HUSD_EditCollections::createCollection(const UT_StringRef &primpath,
             // so we want to avoid that by doing the same check here.
 	    if (name_vector.size() > 0)
 	    {
-		UsdCollectionAPI collection =
-		    UsdCollectionAPI::ApplyCollection(prim, name_token);
+		// If the collection already exists (for example how the LightAPI
+		// provides a 'lightLink' collection as part of its schema), it's
+		// arguably redundant to call Apply. While it should generally be
+		// safe to still make the call, and there are multi-layer workflows
+		// where it may be better/safer to always do so, we've identified
+		// one instance where the redundant call actually caused an issue:
+		// https://forum.aousd.org/t/light-linking-compatibility-when-moving-to-23-08/343/3
+		// In general we still promote a workflow of always calling Apply,
+		// with `forceapply==false` seen as the special-case exception.
+		UsdCollectionAPI collection;
+		if (!forceapply)
+		    collection = UsdCollectionAPI::Get(prim, name_token);
+		if (!collection)
+		    collection = UsdCollectionAPI::Apply(prim, name_token);
 
 		if (collection)
 		{
@@ -179,14 +190,18 @@ HUSD_EditCollections::createCollection(const UT_StringRef &primpath,
 		    SdfPathVector includepaths;
 		    UsdRelationship includerel =
 			collection.CreateIncludesRel();
-		    const XUSD_PathSet &includeset =
-			includeprims.getCollectionAwarePathSet().sdfPathSet();
+		    const XUSD_PathSet &includeset = includeprims.
+                        getCollectionAwarePathSet().sdfPathSet();
+                    const XUSD_PathSet &includemissingset = includeprims.
+                        getMissingExplicitPathSet().sdfPathSet();
 		    const SdfPath &rootpath =
 			SdfPath::AbsoluteRootPath();
                     bool includeroot = false;
 
                     expandCollectionPaths(stage, collectionpath,
                         includeset, includepaths);
+                    includepaths.insert(includepaths.end(),
+                        includemissingset.begin(), includemissingset.end());
 		    // The root path can't be included in the list of
 		    // targets. There is a special attribute for it.
 		    if (includeset.find(rootpath) != includeset.end())
@@ -208,9 +223,11 @@ HUSD_EditCollections::createCollection(const UT_StringRef &primpath,
                         // expanded path set, not the collection-aware path
                         // set.  This is because USD collections do not support
                         // the use of collections in the exclude specification.
-                        const XUSD_PathSet &excludeset =
-                            excludeprims.getExpandedPathSet().sdfPathSet();
-                        if (!excludeset.empty())
+                        const XUSD_PathSet &excludeset = excludeprims.
+                            getExpandedPathSet().sdfPathSet();
+                        const XUSD_PathSet &excludemissingset = excludeprims.
+                            getMissingExplicitPathSet().sdfPathSet();
+                        if (!excludeset.empty() || !excludemissingset.empty())
                         {
                             // We have been asked to exclude specific prims.
                             SdfPathVector excludepaths;
@@ -222,7 +239,11 @@ HUSD_EditCollections::createCollection(const UT_StringRef &primpath,
                             // collection-aware path set, we have to use the
                             // expanded path set.
                             excludepaths.insert(excludepaths.end(),
-                                excludeset.begin(), excludeset.end());
+                                excludeset.begin(),
+                                excludeset.end());
+                            excludepaths.insert(excludepaths.end(),
+                                excludemissingset.begin(),
+                                excludemissingset.end());
                             // The root path can't be included in the list of
                             // targets. There is a special attribute for it.
                             if (excludeset.find(rootpath) != excludeset.end())
@@ -249,7 +270,7 @@ HUSD_EditCollections::createCollection(const UT_StringRef &primpath,
                                 collection.GetExcludesRel();
 
                             if (excluderel)
-                                excluderel.BlockTargets();
+                                excluderel.SetTargets({});
                         }
                     }
 
@@ -284,10 +305,11 @@ HUSD_EditCollections::createCollection(const UT_StringRef &primpath,
 	const UT_StringRef &collectionname,
 	const UT_StringRef &expansionrule,
 	const HUSD_FindPrims &includeprims,
-	bool createprim)
+	bool createprim,
+	bool forceapply /*=true*/)
 {
     return createCollection(primpath, collectionname, expansionrule,
-	includeprims, HUSD_FindPrims(myWriteLock), true, createprim);
+	includeprims, HUSD_FindPrims(myWriteLock), true, createprim, forceapply);
 }
 
 bool

@@ -23,11 +23,16 @@
  */
 
 #include "HUSD_Utils.h"
+#include "HUSD_Asset.h"
 #include "HUSD_Constants.h"
 #include "HUSD_ErrorScope.h"
+#include "HUSD_Info.h"
 #include "HUSD_LockedStage.h"
 #include "HUSD_LockedStageRegistry.h"
+#include "HUSD_PathSet.h"
+#include "HUSD_PropertyHandle.h" // for HUSD_PROPERTY_ISCONNECTION
 #include "HUSD_TimeCode.h"
+#include "HUSD_UniversalLogUsdSource.h"
 #include "XUSD_AttributeUtils.h"
 #include "XUSD_AutoCollection.h"
 #include "XUSD_Data.h"
@@ -36,29 +41,98 @@
 #include <gusd/GU_PackedUSD.h>
 #include <gusd/stageCache.h>
 #include <OP/OP_Node.h>
+#include <IMG/IMG_File.h>
+#include <PRM/PRM_SpareData.h>
+#include <UT/UT_EnvControl.h>
+#include <UT/UT_ErrorLog.h>
 #include <UT/UT_Exit.h>
+#include <UT/UT_Function.h>
+#include <UT/UT_JSONParser.h>
+#include <UT/UT_JSONValue.h>
+#include <UT/UT_JSONValueArray.h>
+#include <UT/UT_JSONValueMap.h>
 #include <UT/UT_Lock.h>
+#include <UT/UT_PathSearch.h>
 #include <UT/UT_Set.h>
+#include <UT/UT_StdUtil.h>
 #include <UT/UT_String.h>
 #include <UT/UT_StringArray.h>
 #include <UT/UT_WorkArgs.h>
+#include <tools/henv.h>
+#include <tools/hpath.h>
 #include <pxr/pxr.h>
-#include <pxr/base/work/threadLimits.h>
 #include <pxr/usd/ar/resolver.h>
 #include <pxr/usd/sdf/path.h>
+#include <pxr/usd/sdf/variableExpression.h>
 #include <pxr/usd/usd/collectionAPI.h>
 #include <pxr/usd/usd/stage.h>
 #include <pxr/usd/usd/tokens.h>
 #include <pxr/usd/usdGeom/xformOp.h>
 #include <pxr/usd/usdGeom/xformable.h>
+#include <pxr/usd/usdShade/connectableAPI.h>
+#include <pxr/usd/usdShade/materialBindingAPI.h>
+#include <pxr/usd/usdShade/material.h>
+#include <pxr/usd/usdShade/shader.h>
+#include <pxr/usd/usdShade/tokens.h>
 #include <iostream>
 
 PXR_NAMESPACE_USING_DIRECTIVE
 
-static HUSD_LopStageResolver theLopStageResolver = nullptr;
-static UT_Set<HUSD_LockedStagePtr> theHoldLockedStages;
-static UT_Lock theHoldLockedStagesLock;
-static int theStageCacheReaderCounter = 0;
+namespace
+{
+    typedef UT_Function<UT_StringHolder(UT_StringHolder)> ModifyPathFn;
+    UT_Map<UT_IStream *, HUSD_Asset *> theAssetMap;
+    UT_Lock theAssetMapLock;
+    HUSD_LopStageResolver theLopStageResolver = nullptr;
+    UT_Set<HUSD_LockedStagePtr> theHoldLockedStages;
+    UT_Lock theHoldLockedStagesLock;
+    int theStageCacheReaderCounter = 0;
+
+    UT_IStream *assetOpen(const UT_StringRef &filepath)
+    {
+        HUSD_Asset *asset = new HUSD_Asset(filepath);
+
+        if(asset->isValid())
+        {
+            UT_IStream *is = asset->newStream();
+
+            if(is && !is->isError())
+            {
+                UT_AutoLock lock(theAssetMapLock);
+                theAssetMap[is] = asset;
+                return is;
+            }
+        }
+        delete asset;
+
+        return nullptr;
+    }
+
+    void assetClose(UT_IStream *is)
+    {
+        HUSD_Asset *asset = nullptr;
+
+        if (is)
+        {
+            UT_AutoLock lock(theAssetMapLock);
+
+            auto entry = theAssetMap.find(is);
+            if(entry != theAssetMap.end())
+            {
+                asset = entry->second;
+                theAssetMap.erase(entry);
+            }
+            else
+            {
+                UT_ASSERT(!"Tried to close invalid HUSD_Asset.");
+            }
+        }
+        delete is;
+        delete asset;
+    }
+}
+
+UT_REGISTERUNIVERSALLOGSOURCE(HUSD_UniversalLogUsdSource);
 
 UT_StringHolder
 husdLopStageResolver(const UT_StringRef &path)
@@ -106,23 +180,101 @@ husdStageCacheReaderTracker(bool addreader)
     }
 }
 
+namespace
+{
+    class materialXPathHelper
+    {
+    public:
+        materialXPathHelper()
+        {
+            auto s = UT_PathSearch::getInstance(UT_HOUDINI_PATH);
+            UT_ASSERT_P(s);
+            myMaterialX = findDirs(*s, "materialx");
+            myLibraries = findDirs(*s, "materialx/libraries");
+        }
+        const UT_StringHolder   &materialx() const { return myMaterialX; }
+        const UT_StringHolder   &libraries() const { return myLibraries; }
+
+        void    setVariable(const char *varname, bool lib) const
+        {
+            const UT_StringHolder       path = lib ? myLibraries : myMaterialX;
+            HoudiniSetenv(varname, path.c_str());
+            UT_ErrorLog::format(8, "Setting {} to '{}'", varname, path);
+        }
+    private:
+        UT_StringHolder findDirs(const UT_PathSearch &search,
+                const char *pattern) const
+        {
+            UT_WorkBuffer       var;
+            UT_StringArray      paths;
+            search.findAllDirectories(pattern, paths);
+            for (const auto &p : paths)
+            {
+                if (var.length())
+                    var.append(PATH_SEP_CHAR);
+                var.append(p);
+            }
+            return UT_StringHolder(var);
+        }
+        UT_StringHolder myMaterialX;
+        UT_StringHolder myLibraries;
+    };
+
+    static const materialXPathHelper &
+    materialxHelper()
+    {
+        static materialXPathHelper      helper;
+        return helper;
+    }
+}
+
 void
 HUSDinitialize()
 {
-    // In case Gusd hasn't been initialized yet, do it here becuase that
-    // function adds plugin registry directories to the USD library.
-    GusdInit();
-    GusdStageCache::SetLopStageResolver(
-        husdLopStageResolver);
-    GusdStageCache::SetStageCacheReaderTracker(
-        husdStageCacheReaderTracker);
-    GusdGU_PackedUSD::setPackedUSDTracker(
-        HUSD_LockedStageRegistry::packedUSDTracker);
-    UT_Exit::addExitCallback(
-        HUSD_LockedStageRegistry::exitCallback);
-    WorkSetConcurrencyLimitArgument(UT_Thread::getNumProcessors());
-    ArSetPreferredResolver("FS_ArResolver");
-    XUSD_AutoCollection::registerPlugins();
+    static bool theInitialized = false;
+
+    if (!theInitialized)
+    {
+        //UTdebugFormat("Initializing");
+
+        // In case the user hasn't set a MATERIALX_SEARCH_PATH value, or the
+        // other USD-specific MaterialX paths, set one here to point to the
+        // MaterialX libraries that ship with Houdini.
+        const char *MATERIALX_SEARCH_PATH =
+            "MATERIALX_SEARCH_PATH";
+        const char *PXR_MTLX_STDLIB_SEARCH_PATHS =
+            "PXR_MTLX_STDLIB_SEARCH_PATHS";
+        const char *PXR_AR_DEFAULT_SEARCH_PATH =
+            "PXR_AR_DEFAULT_SEARCH_PATH";
+
+        if (!HoudiniGetenv(MATERIALX_SEARCH_PATH))
+        {
+            materialxHelper().setVariable(MATERIALX_SEARCH_PATH,
+                    false);
+        }
+        if (!HoudiniGetenv(PXR_MTLX_STDLIB_SEARCH_PATHS))
+        {
+            materialxHelper().setVariable(PXR_MTLX_STDLIB_SEARCH_PATHS,
+                    true);
+        }
+        if (!HoudiniGetenv(PXR_AR_DEFAULT_SEARCH_PATH))
+        {
+            HoudiniSetenv(PXR_AR_DEFAULT_SEARCH_PATH,
+                UT_EnvControl::getString(ENV_HFS));
+        }
+
+        // In case Gusd hasn't been initialized yet, do it here because that
+        // function adds plugin registry directories to the USD library.
+        GusdInit();
+        GusdStageCache::SetLopStageResolver(husdLopStageResolver);
+        GusdStageCache::SetStageCacheReaderTracker(husdStageCacheReaderTracker);
+        GusdGU_PackedUSD::setPackedUSDTracker(
+            HUSD_LockedStageRegistry::packedUSDTracker);
+        UT_Exit::addExitCallback(HUSD_LockedStageRegistry::exitCallback);
+        XUSD_AutoCollection::registerPlugins();
+        IMG_File::setFileHooks(assetOpen, assetClose);
+        theInitialized = true;
+    }
 }
 
 void
@@ -135,10 +287,11 @@ bool
 HUSDsplitLopStageIdentifier(const UT_StringRef &identifier,
         OP_Node *&lop,
         bool &split_layers,
-        fpreal &t)
+        fpreal &t,
+        UT_Options &opts)
 {
     return GusdStageCache::SplitLopStageIdentifier(identifier,
-        lop, split_layers, t);
+        lop, split_layers, t, opts);
 }
 
 bool
@@ -175,6 +328,12 @@ HUSDgetValidUsdName(OP_Node &node)
 bool
 HUSDmakeValidUsdPath(UT_String &path, bool addwarnings)
 {
+    return HUSDmakeValidUsdPath(path, addwarnings, false);
+}
+
+bool
+HUSDmakeValidUsdPath(UT_String &path, bool addwarnings, bool allow_relative)
+{
     if (!path.isstring())
 	return false;
 
@@ -184,6 +343,7 @@ HUSDmakeValidUsdPath(UT_String &path, bool addwarnings)
     bool		 changed = false;
     bool		 fixed = false;
     bool		 rebuild_path = false;
+    bool                 is_relative_path = false;
 
     // Trim off any trailing slashes.
     while (path.length() > 1 && path.endsWith("/"))
@@ -192,9 +352,16 @@ HUSDmakeValidUsdPath(UT_String &path, bool addwarnings)
 	changed = true;
     }
     // Make sure the path starts with a "/". If not, we will rebuild it.
-    rebuild_path = !path.startsWith("/");
+    if (!path.startsWith("/"))
+    {
+        if (allow_relative)
+            is_relative_path = true;
+        else
+            rebuild_path = true;
+    }
     // If we have any double-slashes, we need to rebuild the path.
-    rebuild_path = path.fcontain("//", false);
+    if (path.fcontain("//", false))
+        rebuild_path = true;
 
     // Split the path into components so we can look for any invalid names
     // in any of the components.
@@ -227,19 +394,27 @@ HUSDmakeValidUsdPath(UT_String &path, bool addwarnings)
 	changed = true;
 	for (int i = 0, n = args.getArgc(); i < n; i++)
 	{
-	    // Paths given to this function must be absolute paths, always. So
-	    // no matter what we want to start the rebuilt path, and each
-	    // component in it, with a "/". Chek if we already end with a
-	    // slash in case we have a "." component.
-	    if (outpath.length() == 0 || outpath.last() != '/')
-		outpath.append('/');
+            // Append a "/" to any path that already has a component, or an
+            // empty string (unless we were passed an allowed relative path).
+            if (!is_relative_path || outpath.length() > 0)
+                if (outpath.length() == 0 || outpath.last() != '/')
+                    outpath.append('/');
+
 	    if (changed_components(i).isstring())
 	    {
+                // Do nothing with a "."... it has no effect.
 		if (changed_components(i) == ".")
 		{
-		    // Do nothing: "." in the middle of a path has no effect.
 		}
-		else if (changed_components(i) == "..")
+                // A ".." should erase the last path component. In a full path,
+                // we back up only as far as the first "/", and never append
+                // the ".." component. In a relative path, we back up as far as
+                // the last "../", then append the ".." component.
+		else if (changed_components(i) == ".." &&
+                         (!allow_relative ||
+                           (outpath.length() > 0 &&
+                            (outpath.length() < 3 ||
+                             strcmp(outpath.end() - 3, "../") != 0))))
 		{
 		    // Get rid of the trailing slash we add at the start of
 		    // each path component (unless the path is exactly "/").
@@ -252,6 +427,8 @@ HUSDmakeValidUsdPath(UT_String &path, bool addwarnings)
 		    if (outpath.length() > 1)
 			outpath.backup(1);
 		}
+                // For any component other than "." or "..", append the
+                // validated component.
 		else
 		    outpath.append(changed_components(i));
 	    }
@@ -281,6 +458,29 @@ HUSDmakeValidUsdPathOrDefaultPrim(UT_String &path, bool addwarnings)
     return HUSDmakeValidUsdPath(path, addwarnings);
 }
 
+bool
+HUSDmakeUniqueUsdPath(UT_String &path, const HUSD_AutoAnyLock &lock,
+	const UT_StringRef &suffix)
+{
+    if (!lock.constData() || !lock.constData()->isStageValid())
+	return false;
+
+    auto stage	    = lock.constData()->stage();
+    auto testpath   = HUSDgetSdfPath(path);
+    if (!stage->GetPrimAtPath(testpath))
+	return false;
+
+    path.append(suffix);
+    do
+    {
+	path.incrementNumberedName();
+	testpath = HUSDgetSdfPath(path);
+    }
+    while (stage->GetPrimAtPath(testpath));
+
+    return true;
+}
+
 UT_StringHolder
 HUSDgetValidUsdPath(OP_Node &node)
 {
@@ -307,7 +507,7 @@ HUSDmakeValidUsdPropertyName(UT_String &name, bool addwarnings)
 	changed = true;
     }
     // Replace any sequence of ":"s with a single ":".
-    while (name.substitute("::", ":", false))
+    while (name.substitute("::", ":", 1))
 	changed = true;
 
     if (changed && addwarnings)
@@ -318,12 +518,35 @@ HUSDmakeValidUsdPropertyName(UT_String &name, bool addwarnings)
 }
 
 bool
-HUSDmakeValidVariantName(UT_String &name, bool addwarnings)
+HUSDmakeValidVariantName(UT_String &name, bool allowexprs, bool addwarnings)
 {
     if (!name.isstring())
 	return false;
 
     bool	 changed = false;
+
+    if (allowexprs && SdfVariableExpression::IsExpression(name.toStdString()))
+    {
+        // If expressions are allowed, and the passed in value is an
+        // expression, we never change the value. But we may still add an
+        // error if the expression can't be evaluated.
+        if (addwarnings)
+        {
+            SdfVariableExpression expr(name.toStdString());
+            auto result = expr.Evaluate(VtDictionary());
+            if (!result.errors.empty())
+            {
+                UT_StringArray errors;
+                UT_WorkBuffer buf;
+                UTarrayFromStdVectorOfStrings(errors, result.errors);
+                buf.append(errors, "\n    ");
+                HUSD_ErrorScope::addError(
+                    HUSD_ERR_INVALID_VARIABLE_EXPRESSION, buf.buffer());
+            }
+        }
+
+        return false;
+    }
 
     // This logic is copied from USD/pxr/usd/lib/sdf/schema.cpp,
     // SdfSchemaBase::IsValidVariantIdentifier.
@@ -388,6 +611,21 @@ HUSDgetUsdParentPath(const UT_StringRef &primpath)
     SdfPath sdf_path(primpath.toStdString());
 
     return UT_StringHolder( sdf_path.GetParentPath().GetString() );
+}
+
+void
+HUSDgetMinimalPathsForInheritableProperty(
+        bool skip_point_instancers,
+        const HUSD_AutoAnyLock &lock,
+        HUSD_PathSet &paths)
+{
+    if (lock.constData() && lock.constData()->isStageValid())
+    {
+        HUSDgetMinimalPathsForInheritableProperty(
+            skip_point_instancers,
+            lock.constData()->stage(),
+            paths.sdfPathSet());
+    }
 }
 
 UT_StringHolder
@@ -580,6 +818,21 @@ HUSDmakeRelationshipPath(const UT_StringRef &prim_path, const UT_StringRef&name)
     return HUSDmakePropertyPath(prim_path, name);
 }
 
+std::pair<UT_StringHolder, UT_StringHolder>
+HUSDsplitPropertyPath(const UT_StringRef &property_path)
+{
+    UT_StringHolder prim_path, prop_name;
+
+    if (property_path)
+    {
+        SdfPath sdf_path(HUSDgetSdfPath(property_path));
+        prim_path = sdf_path.GetPrimPath().GetString();
+        prop_name = sdf_path.GetName();
+    }
+
+    return std::make_pair(prim_path, prop_name);
+}
+
 UT_StringHolder 
 HUSDgetPrimvarAttribName(const UT_StringRef &primvar_name)
 {
@@ -589,6 +842,16 @@ HUSDgetPrimvarAttribName(const UT_StringRef &primvar_name)
     buffer.append( primvar_name );
 
     return UT_StringHolder(buffer);
+}
+
+UT_StringHolder
+HUSDgetAttribTypeName(const PI_EditScriptedParm &parm)
+{
+    SdfValueTypeName sdftype = HUSDgetAttribSdfTypeName( parm );
+    if( sdftype != SdfValueTypeName() )
+	return UT_StringHolder( sdftype.GetAsToken().GetString() );
+
+    return UT_StringHolder();
 }
 
 HUSD_TimeCode
@@ -640,6 +903,25 @@ HUSDsetParmFromProperty(HUSD_AutoAnyLock &lock,
 	return false;
 
     auto attrib = prim.GetAttribute(TfToken(attribname.toStdString()));
+
+    // If parmtag is not defined, assume the parm is not a connection specifier.
+    const PRM_SpareData *tags = parm.getSparePtr();
+    bool is_connection_parm = (tags && 
+        (UT_StringWrap("1") == tags->getValue(HUSD_PROPERTY_ISCONNECTION)));
+
+    if (attrib && is_connection_parm)
+    {
+	UsdShadeConnectionSourceInfo src_info;
+
+        bool ok = true;
+	if (!HUSDgetFirstConnectedSrc(attrib, src_info))
+            parm.setValue( 0, "", CH_STRING_LITERAL ); // No source: clear parm
+        else
+            ok = HUSDsetConnectionNodeParm(parm, src_info, true);
+
+        return ok;
+    }
+
     if (attrib)
     {
         HUSDupdateValueTimeSampling(timesampling, attrib);
@@ -655,3 +937,323 @@ HUSDsetParmFromProperty(HUSD_AutoAnyLock &lock,
     return false;
 }
 
+bool
+HUSDpartitionShadePrims(const HUSD_AutoAnyLock &anylock,
+        const HUSD_PathSet &primpaths,
+        UT_StringArray &shadeprimpaths,
+        UT_StringArray &geoprimpaths,
+        bool include_bound_materials,
+        bool use_shader_for_mat_with_no_inputs)
+{
+    auto indata = anylock.constData();
+    if (!indata || !indata->isStageValid())
+        return false;
+
+    auto stage = indata->stage();
+
+    for( auto &&primpath : primpaths )
+    {
+        auto prim = stage->GetPrimAtPath(primpath.sdfPath());
+
+        // Check if prim is Material or Shader (ie, one of editable
+        // shading primitives).
+        if (prim.IsA<UsdShadeMaterial>() || prim.IsA<UsdShadeShader>())
+            shadeprimpaths.append(primpath.pathStr());
+        else
+            geoprimpaths.append(primpath.pathStr());
+
+        // Note, currently this method is geared towards a workflow for
+        // editing materials and shaders. To streamline that workflow,
+        // we use certain heuristics to judge how editable the material is.
+        // Eg, the workflow wants a list of shade prims (ie, mats or shaders)
+        // whether specified directly or thru binding to a specified geo pirm.
+        // But also, a material without inputs is not quite editable, so
+        // we allow substituting such materials with a surface shader, which
+        // should offer more input attributes for editing and customization.
+        if( include_bound_materials )
+        {
+            // Try resolving to a bound material.
+            UsdShadeMaterialBindingAPI api(prim);
+            auto material = api.ComputeBoundMaterial();
+            if( material )
+            {
+                auto inputs = material.GetInterfaceInputs();
+                if (inputs.size() <= 0 && use_shader_for_mat_with_no_inputs)
+                {
+                    // Mat has no input attribs to edit; surf shader is better.
+                    auto shader = material.ComputeSurfaceSource();
+                    if (shader)
+                        shadeprimpaths.append(shader.GetPath().GetAsString());
+                }
+                else
+                {
+                    // There are input attribs to edit, so add material.
+                    shadeprimpaths.append(material.GetPath().GetAsString());
+                }
+            }
+        }
+    }
+
+    return true;
+}
+
+namespace
+{
+    const std::map<TfType, TfTokenVector> &
+    getPrimTypeToAttributeNameMap()
+    {
+        static std::map<TfType, TfTokenVector> thePrimTypeToAttributeNameMap =
+        []() {
+            std::map<TfType, TfTokenVector> map;
+            UT_StringArray mapfiles;
+            const UT_PathSearch *pathsearch =
+                UT_PathSearch::getInstance(UT_HOUDINI_PATH);
+            const char *thePrimAttribs = "UsdConnectablePrimAttribs.json";
+
+            if (pathsearch->findAllFiles(thePrimAttribs, mapfiles) > 0)
+            {
+                for (auto &&mapfile : mapfiles)
+                {
+                    UT_IFStream is(mapfile);
+                    UT_AutoJSONParser parser(is);
+                    UT_JSONValue value;
+
+                    value.parseValue(parser);
+                    if (value.getMap())
+                    {
+                        for (auto &&it : *value.getMap())
+                        {
+                            if (!it.second || !it.second->getS())
+                            {
+                                std::cerr
+                                    << "Attribute must be a string for "
+                                    << it.first
+                                    << " from file "
+                                    << mapfile
+                                    << std::endl;
+                                continue;
+                            }
+                            TfType tftype = HUSDfindType(it.first);
+                            if (tftype == TfType::GetUnknownType())
+                            {
+                                std::cerr
+                                    << "Unknown primitive type "
+                                    << it.first
+                                    << " from file "
+                                    << mapfile
+                                    << std::endl;
+                                continue;
+                            }
+                            map[tftype].push_back(
+                                TfToken(it.second->getS()));
+                        }
+                    }
+                }
+            }
+
+            return map;
+        }();
+
+        return thePrimTypeToAttributeNameMap;
+    }
+
+    bool
+    isPrimConnectedTo(const UsdPrim &prim,
+        std::map<SdfPath, bool> &testedpaths,
+        const SdfPathSet &findpaths)
+    {
+        auto it = testedpaths.find(prim.GetPath());
+        if (it != testedpaths.end())
+            return it->second;
+
+        auto connectable = UsdShadeConnectableAPI(prim);
+        bool connected = false;
+
+        testedpaths[prim.GetPath()] = connected;
+        if (connectable && !connected)
+        {
+            const std::vector<UsdShadeInput> inputs = connectable.GetInputs();
+            for (UsdShadeInput input : inputs)
+            {
+                UsdShadeAttributeVector attrs =
+                    input.GetValueProducingAttributes();
+                for (auto &&attr : attrs)
+                {
+                    if (findpaths.find(attr.GetPrimPath()) != findpaths.end())
+                        connected = true;
+                    else
+                        connected = isPrimConnectedTo(
+                            attr.GetPrim(), testedpaths, findpaths);
+                    if (connected)
+                        break;
+                }
+                if (connected)
+                    break;
+            }
+        }
+
+        if (connectable && !connected)
+        {
+            const std::vector<UsdShadeOutput> outputs = connectable.GetOutputs();
+            for (UsdShadeOutput output : outputs)
+            {
+                UsdShadeAttributeVector attrs =
+                    output.GetValueProducingAttributes();
+                for (auto &&attr : attrs)
+                {
+                    if (findpaths.find(attr.GetPrimPath()) != findpaths.end())
+                        connected = true;
+                    else
+                        connected = isPrimConnectedTo(
+                            attr.GetPrim(), testedpaths, findpaths);
+                    if (connected)
+                        break;
+                }
+                if (connected)
+                    break;
+            }
+        }
+        testedpaths[prim.GetPath()] = connected;
+
+        return connected;
+    }
+}
+
+UT_StringArray
+HUSDgetConnectedPrimsToBumpForHydra(
+        const HUSD_AutoAnyLock &anylock,
+        const UT_StringArray &modified_primpaths)
+{
+    UT_StringArray result;
+
+    if (!anylock.isStageValid())
+        return result;
+
+    SdfPathSet modified_sdfprimpaths;
+    HUSD_PathSet possible_connected_sdfprimpaths;
+    UsdStageRefPtr stage = anylock.constData()->stage();
+
+    for (auto &&primpath : modified_primpaths)
+    {
+        auto prim = stage->GetPrimAtPath(HUSDgetSdfPath(primpath));
+        if (!prim)
+            continue;
+        modified_sdfprimpaths.insert(prim.GetPath());
+
+        UsdPrim parentprim = prim.GetParent();
+        while (parentprim && !parentprim.IsPseudoRoot())
+        {
+            // Add the ancestors of all connectable prims up to (and including)
+            // the first prim that is not connectable. We will be scanning all
+            // descendants of this first non-connectable ancestor.
+            if (!possible_connected_sdfprimpaths.sdfPathSet().emplace(
+                    parentprim.GetPath()).second)
+                break;
+            if (!UsdShadeConnectableAPI::HasConnectableAPI(
+                    parentprim.GetPrimTypeInfo().GetSchemaType()))
+                break;
+            parentprim = parentprim.GetParent();
+        }
+    }
+    // Eliminate any children of other entries in the set. So we are left with
+    // a set of "root" prims that we can iterate through without fear of doing
+    // any duplicate processing.
+    possible_connected_sdfprimpaths.removeDescendants();
+
+    // For each source root, look test each prim of an interesting type for
+    // any connection to any of the modified prims.
+    std::map<SdfPath, bool> testedpaths;
+    for (auto &&rootpath : possible_connected_sdfprimpaths)
+    {
+        UsdPrim rootprim = stage->GetPrimAtPath(rootpath.sdfPath());
+        for (auto &&testprim : rootprim.GetDescendants())
+        {
+            bool is_interesting_type = false;
+
+            for (auto &&it : getPrimTypeToAttributeNameMap())
+            {
+                if (testprim.IsA(it.first))
+                {
+                    is_interesting_type = true;
+                    break;
+                }
+            }
+            if (!is_interesting_type)
+                continue;
+
+            if (isPrimConnectedTo(testprim, testedpaths, modified_sdfprimpaths))
+                result.append(testprim.GetPath().GetAsString());
+        }
+    }
+
+    return result;
+}
+
+bool
+HUSDbumpPrimsForHydra(const HUSD_AutoWriteLock &writelock,
+        const UT_StringArray &bump_primpaths)
+{
+    auto indata = writelock.data();
+    if (!indata || !indata->isStageValid())
+        return false;
+
+    auto stage = indata->stage();
+    UsdAttributeVector attrs;
+
+    for( auto &&primpath : bump_primpaths )
+    {
+        auto prim = stage->GetPrimAtPath(HUSDgetSdfPath(primpath));
+        if (prim)
+        {
+            for (auto &&it : getPrimTypeToAttributeNameMap())
+            {
+                if (prim.IsA(it.first))
+                {
+                    for (auto &&attrtoken : it.second)
+                    {
+                        auto attr = prim.GetAttribute(attrtoken);
+                        if (attr)
+                            attrs.push_back(attr);
+                    }
+                    break;
+                }
+            }
+        }
+    }
+    HUSDbumpPropertiesForHydra(attrs);
+
+    return true;
+}
+
+UT_Lock &
+HUSDgetLayerReloadLock()
+{
+    static UT_Lock theLayerReloadLock;
+
+    return theLayerReloadLock;
+}
+
+HUSD_API void
+HUSDmodifyAssetPaths(const UT_StringHolder &path,
+        const ModifyPathFn &modifyFn,
+        const UT_StringHolder &dest)
+{
+    SdfLayerRefPtr root;
+    if (path == dest)
+        root = SdfLayer::FindOrOpen(path.toStdString());
+    else
+        root = SdfLayer::OpenAsAnonymous(path.toStdString());
+
+    HUSDmodifyAssetPaths(root, [&modifyFn](std::string asset)
+    {
+        UT_StringHolder assetPath = asset;
+        return modifyFn(assetPath).toStdString();
+    });
+    if (path == dest)
+        root->Save();
+    else
+    {
+        root->Export(dest.toStdString());
+        HUSD_Info::reload(dest, false);
+    }
+}

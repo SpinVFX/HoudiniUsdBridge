@@ -50,6 +50,13 @@ HUSD_PathSet::HUSD_PathSet(const PXR_NS::XUSD_PathSet &src)
 {
 }
 
+HUSD_PathSet::HUSD_PathSet(std::initializer_list<HUSD_Path> init)
+    : myPathSet(new XUSD_PathSet())
+{
+    for (auto &&path : init)
+        myPathSet->insert(path.sdfPath());
+}
+
 const HUSD_PathSet &
 HUSD_PathSet::getEmptyPathSet()
 {
@@ -128,6 +135,12 @@ HUSD_PathSet::contains(const HUSD_Path &path) const
 }
 
 bool
+HUSD_PathSet::contains(const HUSD_PathSet &paths) const
+{
+    return myPathSet->contains(paths.sdfPathSet());
+}
+
+bool
 HUSD_PathSet::containsPathOrAncestor(const UT_StringRef &path) const
 {
     SdfPath sdfpath(path.toStdString());
@@ -139,6 +152,12 @@ bool
 HUSD_PathSet::containsPathOrAncestor(const HUSD_Path &path) const
 {
     return myPathSet->containsPathOrAncestor(path.sdfPath());
+}
+
+bool
+HUSD_PathSet::containsAncestor(const HUSD_Path &path) const
+{
+    return myPathSet->containsAncestor(path.sdfPath());
 }
 
 bool
@@ -155,6 +174,12 @@ HUSD_PathSet::containsPathOrDescendant(const HUSD_Path &path) const
     return myPathSet->containsPathOrDescendant(path.sdfPath());
 }
 
+bool
+HUSD_PathSet::containsDescendant(const HUSD_Path &path) const
+{
+    return myPathSet->containsDescendant(path.sdfPath());
+}
+
 void
 HUSD_PathSet::clear()
 {
@@ -167,16 +192,16 @@ HUSD_PathSet::insert(const HUSD_PathSet &other)
     myPathSet->insert(other.myPathSet->begin(), other.myPathSet->end());
 }
 
-void
+bool
 HUSD_PathSet::insert(const HUSD_Path &path)
 {
-    myPathSet->insert(path.sdfPath());
+    return myPathSet->insert(path.sdfPath()).second;
 }
 
-void
+bool
 HUSD_PathSet::insert(const UT_StringRef &path)
 {
-    myPathSet->insert(HUSDgetSdfPath(path));
+    return myPathSet->insert(HUSDgetSdfPath(path)).second;
 }
 
 void
@@ -193,16 +218,16 @@ HUSD_PathSet::erase(const HUSD_PathSet &other)
         myPathSet->erase(path);
 }
 
-void
+bool
 HUSD_PathSet::erase(const HUSD_Path &path)
 {
-    myPathSet->erase(path.sdfPath());
+    return myPathSet->erase(path.sdfPath());
 }
 
-void
+bool
 HUSD_PathSet::erase(const UT_StringRef &path)
 {
-    myPathSet->erase(SdfPath(path.toStdString()));
+    return myPathSet->erase(SdfPath(path.toStdString()));
 }
 
 void
@@ -216,6 +241,18 @@ void
 HUSD_PathSet::swap(HUSD_PathSet &other)
 {
     UTswap(myPathSet, other.myPathSet);
+}
+
+void
+HUSD_PathSet::removeDescendants()
+{
+    myPathSet->removeDescendants();
+}
+
+void
+HUSD_PathSet::removeAncestors()
+{
+    myPathSet->removeAncestors();
 }
 
 void *
@@ -256,6 +293,13 @@ HUSD_PathSet::getPathsAsStrings(UT_StringArray &paths) const
 {
     for (auto &&path : *myPathSet)
         paths.append(HUSD_Path(path).pathStr());
+}
+
+void
+HUSD_PathSet::getPathsAsStrings(UT_StringSet &paths) const
+{
+    for (auto &&path : *myPathSet)
+        paths.insert(HUSD_Path(path).pathStr());
 }
 
 UT_StringHolder

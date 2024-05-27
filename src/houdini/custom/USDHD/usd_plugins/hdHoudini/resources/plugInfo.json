@@ -1,0 +1,46 @@
+{
+    "Plugins": [
+        {
+            "Info": {
+                "Types": {
+                    "HD_DrawModeAdapter" : {
+                        "bases": ["UsdImagingPrimAdapter"],
+                        "primTypeName": "__drawModeAdapter"
+                    },
+                    "HD_CameraAdapter": {
+                        "bases": ["UsdImagingCameraAdapter"],
+                        "primTypeName": "Camera"
+                    },
+                    "HD_HoudiniFieldAssetAdapter": {
+                        "bases": [
+                            "UsdImagingFieldAdapter"
+                        ],
+                        "primTypeName": "HoudiniFieldAsset"
+                    },
+                    "HD_KarmaAtmosphereAdapter": {
+                        "bases": [
+                            "UsdImagingGprimAdapter"
+                        ],
+                        "primTypeName": "KarmaSkyAtmosphere"
+                    },
+                    "HD_MetaCurvesAdapter" : {
+                        "bases": ["UsdImagingBasisCurvesAdapter"],
+                        "primTypeName": "HoudiniMetaCurves"
+                    },
+                    "HD_HoudiniRendererPlugin": {
+                        "bases": [
+                            "HdRendererPlugin"
+                        ],
+                        "displayName": "Houdini GL",
+                        "priority": 1
+                    }
+                }
+            },
+            "LibraryPath": "../../usd/USD_HD__SHAREDLIBEXT__",
+            "Name": "hdHoudini",
+            "ResourcePath": "resources",
+            "Root": "..",
+            "Type": "library"
+        }
+    ]
+}

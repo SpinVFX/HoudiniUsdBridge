@@ -27,10 +27,14 @@
 
 #include "HUSD_API.h"
 #include "HUSD_DataHandle.h"
-#include <UT/UT_StringMap.h>
+#include "HUSD_Utils.h"
 #include <UT/UT_ArrayStringSet.h>
+#include <UT/UT_StringMap.h>
+#include <UT/UT_UniquePtr.h>
 
+class husd_InfoPrivate;
 class HUSD_TimeCode;
+class HUSD_Path;
 enum class HUSD_XformType;
 enum class HUSD_TimeSampling;
 template <typename T> class UT_BoundingBoxT;
@@ -50,16 +54,53 @@ public:
     static bool		 isPrimvarName(const UT_StringRef &name);
     static void		 getPrimitiveKinds(UT_StringArray &kinds);
     static void          getUsdVersionInfo(UT_StringMap<UT_StringHolder> &info);
-    static bool		 reload(const UT_StringRef &filepath, bool recursive);
 
+    // Get kind hierarchy information.
+    static bool          isModelKind(const UT_StringRef &kind);
+    static bool          isGroupKind(const UT_StringRef &kind);
+    static bool          isComponentKind(const UT_StringRef &kind);
+
+    // Test for paths that represent instance prototypes.
+    static bool          isPathInPrototype(const HUSD_Path &primpath);
+
+    // Get the global variant selection fallback settings from the USD library.
+    static void          getGlobalVariantSelectionFallbacks(
+                                UT_StringMap<UT_StringArray> &
+                                    variantselections);
+
+    // Test if a string is a stage variable expression, optionally setting
+    // an error if the expression isn't valid.
+    static bool          isStageVariableExpression(const UT_StringRef &expr,
+                                bool check_for_errors = true);
+
+    // Get basic information from the auto lock used to construct this
+    // info object.
     bool		 isStageValid() const;
     bool		 getStageRootLayer(UT_StringHolder &identifier) const;
+    static bool		 isLopLayer(const UT_StringRef &identifier);
+    static bool          getLayerSavePath(const UT_StringHolder &identifier,
+                                const UT_StringMap<UT_StringHolder> &refargs,
+                                UT_StringHolder &savepath);
+
+    // Reload a layer. Does the USD reload and clears Houdini-specific caches
+    // associated with loaded layers. Optionally finds all referenced layers
+    // and also reloads them (recursively).
+    static bool		 reload(const UT_StringRef &filepath,
+                                bool recursive,
+                                bool force_load = false);
+    // Reloads as above, but uses the asset resolver context from the auto lock
+    // used to construct this info object.
+    bool                 reloadWithContext(const UT_StringRef &filepath,
+                                bool recursive,
+                                bool force_load = false) const;
+    // Clear the current stage from the GusdUSD_XformCache.
+    void                 clearGusdXformCache() const;
 
     // Returns the identifiers and a human readable name for all sublayers of
     // the stage root layer in strongest to weakest order.
     bool		 getSourceLayers(UT_StringArray &names,
 				UT_StringArray &identifiers,
-				UT_IntArray &anonymous,
+				UT_IntArray &fromlops,
                                 UT_IntArray &fromsops) const;
     bool		 getLayerHierarchy(UT_InfoTree &hierarchy) const;
     bool		 getLayerSavePath(UT_StringHolder &savepath) const;
@@ -77,13 +118,42 @@ public:
     bool                 getTimeCodesPerSecond(fpreal64 &tcs) const;
     bool                 getMetrics(UT_StringHolder &upaxis,
                                 fpreal64 &metersperunit) const;
+
+    // Return the "current render settings" metadata from the stage. If it's
+    // not set, return an empty string.
     UT_StringHolder      getCurrentRenderSettings() const;
+    // Return the paths to all render settings prims on the stage.
     bool                 getAllRenderSettings(UT_StringArray &paths) const;
+    // Return a render settings path using the following priorities:
+    //    1. The provided explicit_path, if a prim exists there.
+    //    2. The current settings prim according to the stage metadata.
+    //    3. If there is exactly one settings prim on the stage, return it.
+    //       If pick_first_of_many is true and there is more than one render
+    //       settings prim, pick the first one.
+    //    4. Return an empty path.
+    HUSD_Path            getBestRenderSettings(
+                                const UT_StringRef &explicit_path =
+                                    UT_StringHolder::theEmptyString,
+                                bool pick_first_of_many = false) const;
+    // Return a camera path using the following priorities:
+    //    1. The provided explicit_path, if a camera exists there.
+    //    2. The camera according to the supplied render_settings prim
+    //       (note that no smart fallback is used here if the prim is empty
+    //        or doesn't point to a render settings prim - use the result of
+    //        getBestRenderSettings if this is the intent).
+    //    3. If there is exactly one camera prim on the stage, return it.
+    //       If pick_first_of_many is true and there is more than one camera
+    //       prim, pick the first one.
+    //    4. Return an empty path.
+    HUSD_Path            getBestCamera(
+                                const UT_StringRef &explicit_path =
+                                    UT_StringHolder::theEmptyString,
+                                const UT_StringHolder &render_settings =
+                                    UT_StringHolder::theEmptyString,
+                                bool pick_first_of_many = false) const;
 
     // General primitive information (parent, children, kinds)
-    bool		 isPrimAtPath(const UT_StringRef &primpath,
-				const UT_StringRef &prim_type =
-				    UT_StringHolder::theEmptyString) const;
+    bool		 isPrimAtPath(const UT_StringRef &primpath) const;
     bool		 isActive(const UT_StringRef &primpath) const;
     bool		 isVisible(const UT_StringRef &primpath,
 				const HUSD_TimeCode &time_code,
@@ -92,6 +162,9 @@ public:
     UT_StringHolder	 getKind(const UT_StringRef &primpath) const;
     bool		 isKind(const UT_StringRef &primpath, 
 				const UT_StringRef &kind) const;
+    UT_StringHolder	 getSpecifier(const UT_StringRef &primpath) const;
+    bool		 isAbstract(const UT_StringRef &primpath) const;
+    bool		 isModel(const UT_StringRef &primpath) const;
     UT_StringHolder	 getPrimType(const UT_StringRef &primpath) const;
     bool		 isPrimType(const UT_StringRef &primpath, 
 				const UT_StringRef &type) const;
@@ -101,11 +174,31 @@ public:
     UT_StringHolder	 getIcon(const UT_StringRef &primpath) const;
     UT_StringHolder	 getPurpose(const UT_StringRef &primpath) const;
     UT_StringHolder	 getDrawMode(const UT_StringRef &primpath) const;
+
+    // Tests the value of the "editable" attribute from the HoudiniEditableAPI
+    // schema, used to indicate if a prim should be modified by LOPs.
+    bool		 isEditable(const UT_StringRef &primpath) const;
+    // Tests the value of the "selectable" attribute from the
+    // HoudiniSelectableAPI schema, used to indicate if a prim is selectable.
+    bool		 isSelectable(const UT_StringRef &primpath,
+                                UT_Map<HUSD_Path, bool> *cache = nullptr) const;
+    // Tests the value of the IsHidden metadata, used to indicate if a prim
+    // should be shown in the scene graph tree.
+    bool		 isHiddenInUi(const UT_StringRef &primpath) const;
+
+    // Determines the primitive kind that should be used for the specified
+    // primitive to maintain a valid model kind hierarchy.
     UT_StringHolder	 getAutoParentPrimKind(
 				const UT_StringRef &primpath) const;
+
+    // Get information about child primitives.
     bool		 hasChildren(const UT_StringRef &primpath) const;
     void		 getChildren(const UT_StringRef &primpath,
 				UT_StringArray &childnames) const;
+
+    // Return a simple count of the number of descendant prims.
+    exint                getDescendantCount(const UT_StringRef &primpath,
+                                HUSD_PrimTraversalDemands demands) const;
 
     // Gather general statistics about the descendants of a primitive.
     enum DescendantStatsFlags {
@@ -118,16 +211,63 @@ public:
                                 DescendantStatsFlags
                                     flags = STATS_SIMPLE_COUNTS) const;
 
-    UT_StringHolder	 getAncestorOfKind(const UT_StringRef &primpath,
-				const UT_StringRef &kind) const;
-    UT_StringHolder	 getAncestorInstanceRoot(
-                                const UT_StringRef &primpath) const;
+    // Searches up the scene graph tree starting from "primpath" looking for
+    // the first prim with the specified kindhint. If none of that kind are
+    // found, it will look for the least nested prim of the base kind. So
+    // if kindhint is assembly, and there is no assembly, it will return
+    // the least nested group. Then fall back to the least nested model.
+    // Then finall fall back to returning the original primpath. This
+    // method will never return an empty string. If kindhint is an empty
+    // string, the original primpath is always returned.
+    UT_StringHolder	 getSelectionAncestor(const UT_StringRef &primpath,
+                                const UT_StringRef &kindhint,
+                                bool allow_kind_mismatch,
+                                bool allow_instance_proxies,
+                                bool allow_hidden_prims) const;
+    
+    // Populates "stats" with counts of various features of the stage.
+    // Wrapper around API method UsdUtilsComputeUsdStageStats
+    bool computeStageStats(UT_Options &stats) const;
+
+    static bool computeStageStats(const UT_StringRef &path,
+            UT_Options &stats);
+
+    // Wrapper for UsdUtilsComputeAllDependencies
+    static bool computeAllDependencies(const UT_StringRef &path,
+            UT_StringArray &layers,
+            UT_StringArray &resolved,
+            UT_StringArray &unresolved);
+    
+    // Wrapper for UsdUtilsExtractExternalReferences
+    static bool extractExternalReferences(const UT_StringRef &path,
+            UT_StringArray &sub_layers,
+            UT_StringArray &references,
+            UT_StringArray &payloads);
+
+    // Evaluates a primitive pattern on a stage created by loading the
+    // specified USD file.
+    static bool getExpandedPathSet(const UT_StringRef &filepath,
+            const UT_StringRef &primpattern,
+            HUSD_PathSet &paths);
+
+    // Return the root prims in the layer identified by the path and file
+    // format arguments provided. The root prims are added to the output
+    // string set as paths.
+    static bool getLayerRootPrims(const UT_StringRef &filepath,
+            const UT_StringMap<UT_StringHolder> &fileargs,
+            HUSD_PathSet &rootprims);
+
+    // Return true if the layer identified by the path and file format
+    // arguments provided has any prims outside the specified path.
+    static bool hasAnyPrimsOutside(const UT_StringRef &filepath,
+            const UT_StringMap<UT_StringHolder> &fileargs,
+            const UT_StringRef &primpath);
 
     // Attributes
     enum class QueryAspect
     {
 	ANY,	    // Any attribute 
-	ARRAY	    // Attribute of som array type.
+	ARRAY	    // Attribute of some array type.
     };
     // Checks existence or property of a prim's attribute.
     bool		 isAttribAtPath(const UT_StringRef &attribpath,
@@ -172,8 +312,12 @@ public:
 				const HUSD_TimeCode &time_code,
 				HUSD_TimeSampling *time_sampling=nullptr) const;
     UT_Matrix4D		 getParentXform(const UT_StringRef &primpath,
-				const HUSD_TimeCode &time_code,
-				HUSD_TimeSampling *time_sampling=nullptr) const;
+                                const HUSD_TimeCode &time_code,
+                                HUSD_TimeSampling *time_sampling=nullptr) const;
+    UT_Matrix4D		 getXformFromOpOrder(const UT_StringRef &primpath,
+                                const HUSD_TimeCode &time_code,
+                                const UT_StringArray &xformOpOrder,
+                                HUSD_TimeSampling *time_sampling=nullptr) const;
     bool		 getXformOrder(const UT_StringRef &primpath,
 				UT_StringArray &xform_order) const;
     bool		 isXformReset(const UT_StringRef &primpath ) const;
@@ -207,6 +351,9 @@ public:
 				exint instance_index,
 				const UT_StringArray &purposes,
 				const HUSD_TimeCode &time_code) const;
+    int                  getPointInstancerInstanceCount(
+                                const UT_StringRef &primpath,
+                                const HUSD_TimeCode &time_code) const;
 
     // Variants
     bool		 getVariantSets(const UT_StringRef &primpath,
@@ -244,20 +391,26 @@ public:
     // Primvars
     bool		 isPrimvarAtPath(const UT_StringRef &primpath,
 				const UT_StringRef &primvarname,
-				QueryAspect query = QueryAspect::ANY) const;
+				QueryAspect query = QueryAspect::ANY,
+				bool allow_inheritance = false) const;
     void		 getPrimvarNames(const UT_StringRef &primpath,
-				UT_ArrayStringSet &primvar_names) const;
+				UT_ArrayStringSet &primvar_names,
+				bool allow_inheritance = false) const;
     exint		 getPrimvarLength(const UT_StringRef &primpath,
 				const UT_StringRef &primvarname,
 				const HUSD_TimeCode &time_code,
-				HUSD_TimeSampling *time_sampling=nullptr) const;
+				HUSD_TimeSampling *time_sampling=nullptr,
+				bool allow_inheritance = false) const;
     exint		 getPrimvarSize(const UT_StringRef &primpath,
-				const UT_StringRef &primvarname) const;
+				const UT_StringRef &primvarname,
+				bool allow_inheritance = false) const;
     UT_StringHolder	 getPrimvarTypeName(const UT_StringRef &primpath,
-				const UT_StringRef &primvarname) const;
+				const UT_StringRef &primvarname,
+				bool allow_inheritance = false) const;
     bool		 getPrimvarTimeSamples(const UT_StringRef &primpath,
 				const UT_StringRef &primvarname,
-				UT_FprealArray &time_samples) const;
+				UT_FprealArray &time_samples,
+				bool allow_inheritance = false) const;
 
     // Relationships
     void		 getRelationshipNames(const UT_StringRef &primpath,
@@ -301,11 +454,38 @@ public:
     // the active layer in strongest to weakest order.
     bool		 getActiveLayerSubLayers(UT_StringArray &names,
 				UT_StringArray &identifiers,
-				UT_IntArray &anonymous,
+				UT_IntArray &fromlops,
                                 UT_IntArray &fromsops) const;
 
+    // Shader parameters.
+    void		 getShaderInputAttributeNames(
+				const UT_StringRef &primpath,
+				UT_ArrayStringSet &attrib_names) const;
+
+    // Obtains a value for a metadata on a given object.
+    // The object path can point to a primitive, attribute, or a relationship.
+    // The metadata name can be a simple name (eg, "active") or a name path
+    // into metadata dictionaries (eg "assetInfo:foo" or "customData:bar:baz").
+    template<typename UtValueType>
+    bool		 getMetadata(const UT_StringRef &object_path,
+                                const UT_StringRef &name,
+                                UtValueType &value) const;
+
+    // Obtains a value for custom data on a given object.
+    template<typename UtValueType>
+    bool                 getCustomData(const UT_StringRef &primpath,
+                                const UT_StringRef &name,
+                                UtValueType &value) const;
+
+    // Obtains a value for asset info on a given object.
+    template<typename UtValueType>
+    bool                 getAssetInfo(const UT_StringRef &primpath,
+                                const UT_StringRef &name,
+                                UtValueType &value) const;
+
 private:
-    HUSD_AutoAnyLock	&myAnyLock;
+    UT_UniquePtr<husd_InfoPrivate>	 myPrivate;
+    HUSD_AutoAnyLock	                &myAnyLock;
 };
 
 #endif

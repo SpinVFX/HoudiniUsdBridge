@@ -33,5 +33,8 @@ PXR_NAMESPACE_USING_DIRECTIVE
 
 TF_WRAP_MODULE
 {
+    TF_WRAP(UsdHoudiniHoudiniCameraPlateAPI);
     TF_WRAP(UsdHoudiniHoudiniFieldAsset);
+    TF_WRAP(UsdHoudiniHoudiniProceduralAPI);
+    TF_WRAP(UsdHoudiniHoudiniViewportGuideAPI);
 }

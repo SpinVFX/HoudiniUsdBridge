@@ -37,9 +37,10 @@
 #include <UT/UT_ArrayStringSet.h>
 #include <UT/UT_Quaternion.h>
 #include <UT/UT_Matrix4.h>
+#include <UT/UT_VarEncode.h>
 #include <pxr/usd/usdGeom/pointBased.h>
 #include <pxr/usd/usdGeom/pointInstancer.h>
-#include <pxr/usd/usdLux/light.h>
+#include <pxr/usd/usdLux/lightAPI.h>
 
 PXR_NAMESPACE_USING_DIRECTIVE
 
@@ -54,7 +55,8 @@ namespace
 	    const UT_StringRef &sourceprimpath,
 	    const UsdAttribute &attrib,
 	    const HUSD_TimeCode &timecode,
-	    const UT_StringArray &targetprimpaths)
+	    const UT_StringArray &targetprimpaths,
+	    const UT_Int64Array *srcdataindices)
     {
 	UT_StringHolder attribname(attrib.GetName());
 	UT_Array<uttype> values;
@@ -76,9 +78,11 @@ namespace
 
 	UT_String    tempname;
 
-	for (int i = 0; i < count; ++i)
+	for (exint i = 0; i < count; ++i)
 	{
-	    tempname.harden(attribname);
+            exint srcidx = srcdataindices ? (*srcdataindices)[i] : i;
+
+	    tempname.harden(UT_VarEncode::decodeAttrib(attribname));
 
 	    auto primpath = targetprimpaths[i];
 	    auto sdfpath = HUSDgetSdfPath(primpath);
@@ -87,19 +91,20 @@ namespace
 	    if (!prim)
 		continue;
 
-	    if (prim.IsA<UsdLuxLight>())
-		tempname.substitute("displayColor", "color");
+	    if (prim.HasAPI<UsdLuxLightAPI>())
+		tempname.substitute("displayColor", "inputs:color");
 
 	    if (!setattrs.setAttribute(
 			primpath, tempname,
-			values[i], timecode, valuetype))
+			values[srcidx], timecode, valuetype))
 		return false;
 	}
 
 	return true;
     }
 
-    template<typename uttype>
+    template<typename uttype,
+             typename handletype=GA_ROHandleT<uttype>>
     bool
     husdScatterSopArrayAttribute(
 	    UsdStageRefPtr &stage,
@@ -110,7 +115,7 @@ namespace
 	    const UT_StringArray &targetprimpaths,
 	    const UT_StringRef &valuetype = UT_String::getEmptyString())
     {
-	GA_ROHandleT<uttype>	 handle(attrib);
+	handletype		 handle(attrib);
 	GA_Offset		 start, end;
 	UT_Array<uttype>	 valarray(1, 1);
 	exint                    i = 0;
@@ -129,7 +134,8 @@ namespace
                     continue;
 
                 UT_StringHolder name = attrib->getName();
-		bool islight = prim.IsA<UsdLuxLight>();
+                name = UT_VarEncode::decodeAttrib(name);
+		bool islight = prim.HasAPI<UsdLuxLightAPI>();
 		bool isarray = valuetype.endsWith("[]");
                 bool isprimvar = false;
 
@@ -137,7 +143,7 @@ namespace
 		{
 		    if (islight)
 		    {
-			name = "color";
+			name = "inputs:color";
 			isarray = false;
 			myvaluetype.substitute("[]", "");
 		    }
@@ -148,6 +154,12 @@ namespace
                         UT_ASSERT(isarray);
                     }
 		}
+                else if (name.equal("Alpha"))
+                {
+                    name = "displayOpacity";
+                    isprimvar = true;
+                    UT_ASSERT(isarray);
+                }
                 else
                 {
                     // If the SOP attribute name matches an existing USD
@@ -155,6 +167,18 @@ namespace
                     // Otherwise we want to create a primvar. We always
                     // create primvars with array values.
                     isprimvar = !prim.HasAttribute(TfToken(name.toStdString()));
+                    // In the case of lights, we also consider existing
+                    // attributes with an "inputs:" prefix
+                    if (isprimvar && islight)
+                    {
+                        UT_StringHolder inputname;
+                        inputname.format("inputs:{}", name);
+                        if (prim.HasAttribute(TfToken(inputname.toStdString())))
+                        {
+                            isprimvar = false;
+                            name = inputname;
+                        }
+                    }
                     if (isprimvar && !isarray)
                     {
                         isarray = true;
@@ -212,42 +236,6 @@ namespace
 	return true;
     }
 
-    template<>
-    bool
-    husdScatterSopArrayAttribute<UT_StringHolder>(
-	    UsdStageRefPtr &stage,
-	    const GA_Attribute *attrib,
-	    const GA_PointGroup *group,
-	    HUSD_SetAttributes &setattrs,
-	    const HUSD_TimeCode &timecode,
-	    const UT_StringArray &targetprimpaths,
-	    const UT_StringRef &valuetype)
-    {
-	GA_ROHandleS		 handle(attrib);
-	GA_Offset		 start, end;
-	exint                    i = 0;
-
-	auto range = attrib->getDetail().getPointRange(group);
-	for (GA_Iterator it(range); it.blockAdvance(start, end);)
-	{
-	    for (GA_Offset ptoff = start; ptoff < end; ++ptoff)
-	    {
-		UT_StringHolder		 myvaluetype(valuetype);
-
-                auto primpath = targetprimpaths[i++];
-		auto sdfpath = HUSDgetSdfPath(primpath);
-
-		if (!setattrs.setAttribute(
-			    primpath, attrib->getName(),
-			    handle.get(ptoff),
-			    timecode, myvaluetype))
-		    return false;
-	    }
-	}
-
-	return true;
-    }
-
     template<typename ArrayType>
     bool
     husdScatterSopArrayOfArrayAttribute(
@@ -289,7 +277,8 @@ namespace
                 auto primpath = targetprimpaths[i++];
                 auto sdfpath = HUSDgetSdfPath(primpath);
 
-                primvar_name.format("primvars:{}", attrib->getName());
+                primvar_name.format("primvars:{}",
+                                    UT_VarEncode::decodeAttrib(attrib->getName()));
                 if (!setattrs.setPrimvarArray(
                         primpath, primvar_name,
                         HUSD_Constants::getInterpolationConstant(), val,
@@ -312,14 +301,15 @@ namespace
         return true;
     }
 
-    template<typename uttype>
+    template<typename uttype,
+             typename handletype=GA_ROHandleT<uttype>>
     void
     husdGetArrayAttribValues(
 	    const GA_Attribute *attrib,
 	    const GA_PointGroup *group,
 	    UT_Array<uttype> &values)
     {
-	GA_ROHandleT<uttype>	 handle(attrib);
+	handletype		 handle(attrib);
 	GA_Offset		 start, end;
 	exint                    i = 0;
 
@@ -336,30 +326,8 @@ namespace
 	}
     }
 
-    void
-    husdGetArrayAttribValues(
-	    const GA_Attribute *attrib,
-	    const GA_PointGroup *group,
-	    UT_Array<UT_StringHolder> &values)
-    {
-	GA_ROHandleS		 handle(attrib);
-	GA_Offset		 start, end;
-	exint                    i = 0;
-
-	auto range = attrib->getDetail().getPointRange(group);
-
-	values.setSize(range.getEntries());
-
-	for (GA_Iterator it(range); it.blockAdvance(start, end);)
-	{
-	    for (GA_Offset ptoff = start; ptoff < end; ++ptoff)
-	    {
-		values[i++] = handle.get(ptoff);
-	    }
-	}
-    }
-
-    template<typename uttype>
+    template<typename uttype,
+             typename handletype=GA_ROHandleT<uttype>>
     bool
     husdCopySopArrayAttribute(
 	    UsdStageRefPtr &stage,
@@ -371,11 +339,15 @@ namespace
 	    const UT_StringRef &valuetype = UT_String::getEmptyString())
     {
 	UT_Array<uttype> values;
-	husdGetArrayAttribValues(attrib, group, values);
+	husdGetArrayAttribValues<uttype, handletype>(attrib, group, values);
 
 	UT_StringHolder primvarname = attrib->getName();
+	primvarname = UT_VarEncode::decodeAttrib(primvarname);
+        
 	if (primvarname.equal("Cd"))
 	    primvarname = "displayColor";
+	else if (primvarname.equal("Alpha"))
+	    primvarname = "displayOpacity";
 
 	setattrs.setPrimvarArray(targetprimpath, primvarname,
 				    HUSD_Constants::getInterpolationVarying(),
@@ -431,7 +403,8 @@ namespace
 	husdGetArrayOfArrayAttribValues(attrib, group, values, lengths);
 
 	UT_StringHolder primvarname;
-        primvarname.format("primvars:{}", attrib->getName());
+        primvarname.format("primvars:{}",
+                           UT_VarEncode::decodeAttrib(attrib->getName()));
 
 	UT_StringHolder lengthsname;
         lengthsname.format("{}:lengths", primvarname);
@@ -452,8 +425,9 @@ bool
 HUSD_PointPrim::extractTransforms(HUSD_AutoAnyLock &readlock,
 				const UT_StringRef &primpath,
 				UT_Vector3FArray &positions,
-				UT_Array<UT_QuaternionH> *orients,
+				UT_Array<UT_QuaternionF> *orients,
 				UT_Vector3FArray *scales,
+				bool *istimesampled,
 				const HUSD_TimeCode &timecode,
 				const UT_Matrix4D *transform/*=nullptr*/)
 {
@@ -473,6 +447,8 @@ HUSD_PointPrim::extractTransforms(HUSD_AutoAnyLock &readlock,
 	    UT_Array<UT_QuaternionF>	 tmporientationsF;
 	    UT_FloatArray		 tmppscales;
 	    UT_Vector3FArray		 tmpscales;
+	    UT_Vector3FArray		 tmpnormals;
+	    UT_Vector3FArray		 tmpups;
 	    UT_QuaternionF		 tmprot;
 	    UT_Matrix3F			 tmprotmatrix;
 
@@ -502,7 +478,30 @@ HUSD_PointPrim::extractTransforms(HUSD_AutoAnyLock &readlock,
 				tmporientationsF,
 				timecode);
 		    }
-
+		    if (!hasorient)
+		    {
+			hasorient = getattrs.getAttributeArray(
+				primpath,
+				{ "normals" },
+				tmpnormals,
+				timecode);
+		    }
+		    if (!hasorient)
+		    {
+			hasorient = getattrs.getAttributeArray(
+				primpath,
+				{ "velocities" },
+				tmpnormals,
+				timecode);
+		    }
+		    if (hasorient) // not a typo, we want to do this if *true*
+		    {
+			getattrs.getAttributeArray(
+				primpath,
+				{ "primvars:up" },
+				tmpups,
+				timecode);
+		    }
 		}
 
 		if (scales)
@@ -524,6 +523,10 @@ HUSD_PointPrim::extractTransforms(HUSD_AutoAnyLock &readlock,
 			    { "widths" },
 			    tmppscales,
 			    timecode);
+
+                        // Convert the widths attribute from diameter to radius.
+                        for (float &pscale : tmppscales)
+                            pscale *= 0.5;
 		    }
 		}
 	    }
@@ -543,7 +546,6 @@ HUSD_PointPrim::extractTransforms(HUSD_AutoAnyLock &readlock,
 			    { HUSD_Constants::getAttributePointOrientations() },
 			    tmporientationsH,
 			    timecode);
-
 		}
 
 		if (scales)
@@ -598,9 +600,17 @@ HUSD_PointPrim::extractTransforms(HUSD_AutoAnyLock &readlock,
 			    if (!tmporientationsH.isEmpty())
 				tmporientationsH[i].getRotationMatrix(
                                     tmprotmatrix);
-			    else
+			    else if (!tmporientationsF.isEmpty())
 				tmporientationsF[i].getRotationMatrix(
                                     tmprotmatrix);
+			    else
+			    {
+				if (!tmpups.isEmpty())
+				    tmprotmatrix.orient(tmpnormals[i], tmpups[i]);
+				else
+				    tmprotmatrix.orient(tmpnormals[i], 1.f,
+							nullptr, nullptr, nullptr);
+			    }
 			    pointtransform *= tmprotmatrix;
 			}
 
@@ -622,9 +632,19 @@ HUSD_PointPrim::extractTransforms(HUSD_AutoAnyLock &readlock,
 				if (!tmporientationsH.isEmpty())
 				    (*orients)[outcount] =
                                         tmporientationsH[i];
-				else
+				else if (!tmporientationsF.isEmpty())
 				    (*orients)[outcount] =
                                         tmporientationsF[i];
+				else
+				{
+				    if (!tmpups.isEmpty())
+					tmprotmatrix.orient(tmpnormals[i], tmpups[i]);
+				    else
+					tmprotmatrix.orient(tmpnormals[i], 1.f,
+							    nullptr, nullptr, nullptr);
+				    (*orients)[outcount].updateFromArbitraryMatrix(
+					    tmprotmatrix);
+				}
 			    }
 			    else
 				(*orients)[outcount].identity();
@@ -643,7 +663,8 @@ HUSD_PointPrim::extractTransforms(HUSD_AutoAnyLock &readlock,
 
 		outcount++;
 	    }
-
+	    if (istimesampled)
+		*istimesampled = (getattrs.getTimeSampling() != HUSD_TimeSampling::NONE);
 	    return true;
 	}
     }
@@ -655,12 +676,13 @@ bool
 HUSD_PointPrim::extractTransforms(HUSD_AutoAnyLock &readlock,
 				const UT_StringRef &primpath,
 				UT_Matrix4DArray &xforms,
+				bool *istimesampled,
 				const HUSD_TimeCode &timecode,
 				const UT_Matrix4D *transform)
 {
     UT_Matrix3F			 tmprotmatrix;
     UT_Vector3FArray		 positions;
-    UT_Array<UT_QuaternionH>	 orients;
+    UT_Array<UT_QuaternionF>	 orients;
     UT_Vector3FArray		 scales;
 
     if (!extractTransforms(
@@ -669,6 +691,7 @@ HUSD_PointPrim::extractTransforms(HUSD_AutoAnyLock &readlock,
 	    positions,
 	    &orients,
 	    &scales,
+	    istimesampled,
 	    timecode,
 	    transform))
 	return false;
@@ -808,7 +831,8 @@ HUSD_PointPrim::scatterArrayAttributes(HUSD_AutoWriteLock &writelock,
 				const UT_StringRef &primpath,
 				const UT_ArrayStringSet &attribnames,
 			        const HUSD_TimeCode &timecode,
-				const UT_StringArray &targetprimpaths)
+				const UT_StringArray &targetprimpaths,
+				const UT_Int64Array *srcdataindices /*=nullptr*/)
 {
     HUSD_GetAttributes	     getattrs(writelock);
     HUSD_SetAttributes	     setattrs(writelock);
@@ -830,63 +854,78 @@ HUSD_PointPrim::scatterArrayAttributes(HUSD_AutoWriteLock &writelock,
 		    continue;
 
 		if (husdScatterArrayAttribute<float>(stage, getattrs,
-			setattrs, primpath, attrib, timecode, targetprimpaths))
+			setattrs, primpath, attrib, timecode,
+			targetprimpaths, srcdataindices))
 		    continue;
 
 		if (husdScatterArrayAttribute<UT_Vector2F>(stage, getattrs,
-			setattrs, primpath, attrib, timecode, targetprimpaths))
+			setattrs, primpath, attrib, timecode,
+			targetprimpaths, srcdataindices))
 		    continue;
 
 		if (husdScatterArrayAttribute<UT_Vector3F>(stage, getattrs,
-			setattrs, primpath, attrib, timecode, targetprimpaths))
+			setattrs, primpath, attrib, timecode,
+			targetprimpaths, srcdataindices))
 		    continue;
 
 		if (husdScatterArrayAttribute<UT_Vector4F>(stage, getattrs,
-			setattrs, primpath, attrib, timecode, targetprimpaths))
+			setattrs, primpath, attrib, timecode,
+			targetprimpaths, srcdataindices))
 		    continue;
 
 		if (husdScatterArrayAttribute<UT_QuaternionF>(stage, getattrs,
-			setattrs, primpath, attrib, timecode, targetprimpaths))
+			setattrs, primpath, attrib, timecode,
+			targetprimpaths, srcdataindices))
 		    continue;
 
 		if (husdScatterArrayAttribute<UT_QuaternionH>(stage, getattrs,
-			setattrs, primpath, attrib, timecode, targetprimpaths))
+			setattrs, primpath, attrib, timecode,
+			targetprimpaths, srcdataindices))
 		    continue;
 
 		if (husdScatterArrayAttribute<UT_Matrix3D>(stage, getattrs,
-			setattrs, primpath, attrib, timecode, targetprimpaths))
+			setattrs, primpath, attrib, timecode,
+			targetprimpaths, srcdataindices))
 		    continue;
 
 		if (husdScatterArrayAttribute<UT_Matrix4D>(stage, getattrs,
-			setattrs, primpath, attrib, timecode, targetprimpaths))
+			setattrs, primpath, attrib, timecode,
+			targetprimpaths, srcdataindices))
 		    continue;
 
 		if (husdScatterArrayAttribute<bool>(stage, getattrs,
-			setattrs, primpath, attrib, timecode, targetprimpaths))
+			setattrs, primpath, attrib, timecode,
+			targetprimpaths, srcdataindices))
 		    continue;
 
 		if (husdScatterArrayAttribute<int>(stage, getattrs,
-			setattrs, primpath, attrib, timecode, targetprimpaths))
+			setattrs, primpath, attrib, timecode,
+			targetprimpaths, srcdataindices))
 		    continue;
 
 		if (husdScatterArrayAttribute<int64>(stage, getattrs,
-			setattrs, primpath, attrib, timecode, targetprimpaths))
+			setattrs, primpath, attrib, timecode,
+			targetprimpaths, srcdataindices))
 		    continue;
 
 		if (husdScatterArrayAttribute<UT_Vector2i>(stage, getattrs,
-			setattrs, primpath, attrib, timecode, targetprimpaths))
+			setattrs, primpath, attrib, timecode,
+			targetprimpaths, srcdataindices))
 		    continue;
 
 		if (husdScatterArrayAttribute<UT_Vector3i>(stage, getattrs,
-			setattrs, primpath, attrib, timecode, targetprimpaths))
+			setattrs, primpath, attrib, timecode,
+			targetprimpaths, srcdataindices))
 		    continue;
 
 		if (husdScatterArrayAttribute<UT_Vector4i>(stage, getattrs,
-			setattrs, primpath, attrib, timecode, targetprimpaths))
+			setattrs, primpath, attrib, timecode,
+			targetprimpaths, srcdataindices))
 		    continue;
 
 		if (husdScatterArrayAttribute<UT_StringHolder>(stage, getattrs,
-			setattrs, primpath, attrib, timecode, targetprimpaths))
+			setattrs, primpath, attrib, timecode,
+			targetprimpaths, srcdataindices))
 		    continue;
 	    }
 
@@ -977,11 +1016,46 @@ HUSD_PointPrim::scatterSopArrayAttributes(HUSD_AutoWriteLock &writelock,
 				targetprimpaths))
 			    continue;
 		    }
+		    else if (tuplesize == 3 && typeinfo == GA_TYPE_VECTOR)
+		    {
+			if (husdScatterSopArrayAttribute<UT_Vector3F>(
+				stage, attrib, group, setattrs, timecode,
+				targetprimpaths, "vector3f[]"))
+			    continue;
+		    }
+		    else if (tuplesize == 3 && typeinfo == GA_TYPE_POINT)
+		    {
+			if (husdScatterSopArrayAttribute<UT_Vector3F>(
+				stage, attrib, group, setattrs, timecode,
+				targetprimpaths, "point3f[]"))
+			    continue;
+		    }
+		    else if (tuplesize == 3 && typeinfo == GA_TYPE_NORMAL)
+		    {
+			if (husdScatterSopArrayAttribute<UT_Vector3F>(
+				stage, attrib, group, setattrs, timecode,
+				targetprimpaths, "normal3f[]"))
+			    continue;
+		    }
+		    else if (tuplesize == 3 && typeinfo == GA_TYPE_TEXTURE_COORD)
+		    {
+			if (husdScatterSopArrayAttribute<UT_Vector3F>(
+				stage, attrib, group, setattrs, timecode,
+				targetprimpaths, "texCoord3f[]"))
+			    continue;
+		    }
 		    else if (tuplesize == 3)
 		    {
 			if (husdScatterSopArrayAttribute<UT_Vector3F>(
 				stage, attrib, group, setattrs, timecode,
-				targetprimpaths))
+				targetprimpaths, "float3[]"))
+			    continue;
+		    }
+		    else if (tuplesize == 2 && typeinfo == GA_TYPE_TEXTURE_COORD)
+		    {
+			if (husdScatterSopArrayAttribute<UT_Vector2F>(
+				stage, attrib, group, setattrs, timecode,
+				targetprimpaths, "texCoord2f[]"))
 			    continue;
 		    }
 		    else if (tuplesize == 2)
@@ -1036,11 +1110,46 @@ HUSD_PointPrim::scatterSopArrayAttributes(HUSD_AutoWriteLock &writelock,
 				targetprimpaths))
 			    continue;
 		    }
+		    else if (tuplesize == 3 && typeinfo == GA_TYPE_VECTOR)
+		    {
+			if (husdScatterSopArrayAttribute<UT_Vector3D>(
+				stage, attrib, group, setattrs, timecode,
+				targetprimpaths, "vector3d[]"))
+			    continue;
+		    }
+		    else if (tuplesize == 3 && typeinfo == GA_TYPE_POINT)
+		    {
+			if (husdScatterSopArrayAttribute<UT_Vector3D>(
+				stage, attrib, group, setattrs, timecode,
+				targetprimpaths, "point3d[]"))
+			    continue;
+		    }
+		    else if (tuplesize == 3 && typeinfo == GA_TYPE_NORMAL)
+		    {
+			if (husdScatterSopArrayAttribute<UT_Vector3D>(
+				stage, attrib, group, setattrs, timecode,
+				targetprimpaths, "normal3d[]"))
+			    continue;
+		    }
+		    else if (tuplesize == 3 && typeinfo == GA_TYPE_TEXTURE_COORD)
+		    {
+			if (husdScatterSopArrayAttribute<UT_Vector3D>(
+				stage, attrib, group, setattrs, timecode,
+				targetprimpaths, "texCoord3d[]"))
+			    continue;
+		    }
 		    else if (tuplesize == 3)
 		    {
 			if (husdScatterSopArrayAttribute<UT_Vector3D>(
 				stage, attrib, group, setattrs, timecode,
-				targetprimpaths))
+				targetprimpaths, "double3[]"))
+			    continue;
+		    }
+		    else if (tuplesize == 2 && typeinfo == GA_TYPE_TEXTURE_COORD)
+		    {
+			if (husdScatterSopArrayAttribute<UT_Vector2D>(
+				stage, attrib, group, setattrs, timecode,
+				targetprimpaths, "texCoord2d[]"))
 			    continue;
 		    }
 		    else if (tuplesize == 2)
@@ -1128,7 +1237,7 @@ HUSD_PointPrim::scatterSopArrayAttributes(HUSD_AutoWriteLock &writelock,
                 }
                 else if (tuplesize == 1)
 		{
-		    if (husdScatterSopArrayAttribute<UT_StringHolder>(
+		    if (husdScatterSopArrayAttribute<UT_StringHolder, GA_ROHandleS>(
                             stage, attrib, group, setattrs, timecode,
                             targetprimpaths))
 			continue;
@@ -1221,11 +1330,46 @@ HUSD_PointPrim::copySopArrayAttributes(HUSD_AutoWriteLock &writelock,
 				targetprimpath))
 			    continue;
 		    }
+		    else if (tuplesize == 3 && typeinfo == GA_TYPE_POINT)
+		    {
+			if (husdCopySopArrayAttribute<UT_Vector3F>(
+				stage, attrib, group, setattrs, timecode,
+				targetprimpath, "point3f[]"))
+			    continue;
+		    }
+		    else if (tuplesize == 3 && typeinfo == GA_TYPE_VECTOR)
+		    {
+			if (husdCopySopArrayAttribute<UT_Vector3F>(
+				stage, attrib, group, setattrs, timecode,
+				targetprimpath, "vector3f[]"))
+			    continue;
+		    }
+		    else if (tuplesize == 3 && typeinfo == GA_TYPE_NORMAL)
+		    {
+			if (husdCopySopArrayAttribute<UT_Vector3F>(
+				stage, attrib, group, setattrs, timecode,
+				targetprimpath, "normal3f[]"))
+			    continue;
+		    }
+		    else if (tuplesize == 3 && typeinfo == GA_TYPE_TEXTURE_COORD)
+		    {
+			if (husdCopySopArrayAttribute<UT_Vector3F>(
+				stage, attrib, group, setattrs, timecode,
+				targetprimpath, "texCoord3f[]"))
+			    continue;
+		    }
 		    else if (tuplesize == 3)
 		    {
 			if (husdCopySopArrayAttribute<UT_Vector3F>(
 				stage, attrib, group, setattrs, timecode,
-				targetprimpath))
+				targetprimpath, "float3[]"))
+			    continue;
+		    }
+		    else if (tuplesize == 2 && typeinfo == GA_TYPE_TEXTURE_COORD)
+		    {
+			if (husdCopySopArrayAttribute<UT_Vector2F>(
+				stage, attrib, group, setattrs, timecode,
+				targetprimpath, "texCoord2f[]"))
 			    continue;
 		    }
 		    else if (tuplesize == 2)
@@ -1280,11 +1424,46 @@ HUSD_PointPrim::copySopArrayAttributes(HUSD_AutoWriteLock &writelock,
 				targetprimpath))
 			    continue;
 		    }
+		    else if (tuplesize == 3 && typeinfo == GA_TYPE_POINT)
+		    {
+			if (husdCopySopArrayAttribute<UT_Vector3D>(
+				stage, attrib, group, setattrs, timecode,
+				targetprimpath, "point3d[]"))
+			    continue;
+		    }
+		    else if (tuplesize == 3 && typeinfo == GA_TYPE_VECTOR)
+		    {
+			if (husdCopySopArrayAttribute<UT_Vector3D>(
+				stage, attrib, group, setattrs, timecode,
+				targetprimpath, "vector3d[]"))
+			    continue;
+		    }
+		    else if (tuplesize == 3 && typeinfo == GA_TYPE_NORMAL)
+		    {
+			if (husdCopySopArrayAttribute<UT_Vector3D>(
+				stage, attrib, group, setattrs, timecode,
+				targetprimpath, "normal3d[]"))
+			    continue;
+		    }
+		    else if (tuplesize == 3 && typeinfo == GA_TYPE_TEXTURE_COORD)
+		    {
+			if (husdCopySopArrayAttribute<UT_Vector3D>(
+				stage, attrib, group, setattrs, timecode,
+				targetprimpath, "texCoord3d[]"))
+			    continue;
+		    }
 		    else if (tuplesize == 3)
 		    {
 			if (husdCopySopArrayAttribute<UT_Vector3D>(
 				stage, attrib, group, setattrs, timecode,
-				targetprimpath))
+				targetprimpath, "double3[]"))
+			    continue;
+		    }
+		    else if (tuplesize == 2 && typeinfo == GA_TYPE_TEXTURE_COORD)
+		    {
+			if (husdCopySopArrayAttribute<UT_Vector2D>(
+				stage, attrib, group, setattrs, timecode,
+				targetprimpath, "texCoord2d[]"))
 			    continue;
 		    }
 		    else if (tuplesize == 2)
@@ -1372,7 +1551,7 @@ HUSD_PointPrim::copySopArrayAttributes(HUSD_AutoWriteLock &writelock,
                 }
                 else if (tuplesize == 1)
 		{
-		    if (husdCopySopArrayAttribute<UT_StringHolder>(
+		    if (husdCopySopArrayAttribute<UT_StringHolder, GA_ROHandleS>(
 			stage, attrib, group, setattrs, timecode,
 			targetprimpath))
 		    continue;

@@ -38,8 +38,6 @@
 #include "pxr/usd/usd/common.h"
 #include "pxr/usd/usd/timeCode.h"
 
-#include BOOST_HEADER(function.hpp)
-
 PXR_NAMESPACE_OPEN_SCOPE
 
 class GfMatrix4d;

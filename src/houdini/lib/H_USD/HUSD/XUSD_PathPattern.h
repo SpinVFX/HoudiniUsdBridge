@@ -29,7 +29,6 @@
 #include "HUSD_PathPattern.h"
 #include "XUSD_AutoCollection.h"
 #include "XUSD_PathSet.h"
-#include "XUSD_PerfMonAutoCookEvent.h"
 #include <pxr/usd/sdf/path.h>
 
 PXR_NAMESPACE_OPEN_SCOPE
@@ -38,7 +37,8 @@ class XUSD_SpecialTokenData : public UT_SpecialTokenData
 {
 public:
                          XUSD_SpecialTokenData()
-                             : myInitialized(false)
+                             : myInitialized(false),
+                               myMayBeTimeVarying(false)
                          { }
                         ~XUSD_SpecialTokenData() override
                          { }
@@ -48,6 +48,7 @@ public:
     XUSD_PathSet	                 myCollectionlessPathSet;
     UT_UniquePtr<XUSD_AutoCollection>    myRandomAccessAutoCollection;
     bool                                 myInitialized;
+    bool                                 myMayBeTimeVarying;
 };
 
 class HUSD_API XUSD_PathPattern : public HUSD_PathPattern

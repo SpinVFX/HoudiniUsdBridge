@@ -34,8 +34,8 @@
 #include <UT/UT_StringArray.h>
 #include <UT/UT_UniquePtr.h>
 #include <UT/UT_VectorTypes.h>
+#include <SYS/SYS_Types.h>
 #include <pxr/pxr.h>
-#include <vector>
 
 PXR_NAMESPACE_OPEN_SCOPE
 class XUSD_PathPattern;
@@ -43,6 +43,7 @@ PXR_NAMESPACE_CLOSE_SCOPE
 
 class HUSD_PathSet;
 class HUSD_TimeCode;
+template <typename T> class UT_Array;
 
 class HUSD_API HUSD_FindPrims : public UT_NonCopyable
 {
@@ -78,11 +79,17 @@ public:
     const HUSD_PathSet	&getExpandedPathSet() const;
     const HUSD_PathSet	&getCollectionAwarePathSet() const;
     const HUSD_PathSet	&getExcludedPathSet(bool skipdescendants) const;
+    const HUSD_PathSet	&getMissingExplicitPathSet() const;
+    const HUSD_PathSet	&getExpandedOrMissingExplicitPathSet() const;
 
     void		 setTraversalDemands(HUSD_PrimTraversalDemands demands);
     HUSD_PrimTraversalDemands traversalDemands() const;
     void                 setAssumeWildcardsAroundPlainTokens(bool assume);
     bool                 assumeWildcardsAroundPlainTokens() const;
+    void                 setTrackMissingExplicitPrimitives(bool track_missing);
+    bool                 trackMissingExplicitPrimitives() const;
+    void                 setWarnMissingExplicitPrimitives(bool warn_missing);
+    bool                 warnMissingExplicitPrimitives() const;
     void                 setCaseSensitive(bool casesensitive);
     bool                 caseSensitive() const;
 
@@ -106,15 +113,22 @@ public:
     bool		 addDescendants();
     bool		 addAncestors();
 
-    const UT_StringMap<UT_Int64Array>	&getPointInstancerIds() const;
+    const UT_StringMap<UT_Array<int64>>
+                        &getPointInstancerIds() const;
     bool		 getExcludedPointInstancerIds(
-				UT_StringMap<UT_Int64Array> &excludedids,
+				UT_StringMap<UT_Array<int64>> &excludedids,
 				const HUSD_TimeCode &timecode) const;
 
     bool		 getIsEmpty() const;
     bool		 getFindPointInstancerIds() const;
     bool		 getIsTimeVarying() const;
     bool		 allowInstanceProxies() const;
+
+    /// Generally speaking, HUSD_FindPrims will never return the
+    /// HoudiniLayerInfo prim. But there are some circumstances where we
+    /// may wish to allow it.
+    void                 setAllowHoudiniLayerInfo(bool allow);
+    bool                 allowHoudiniLayerInfo() const;
 
     /// Returns a collection path, if only a single collection was added.
     /// Returns an empty string, if primitive target consists of more than 
@@ -143,6 +157,8 @@ private:
     UT_StringHolder			 myLastError;
     bool				 myFindPointInstancerIds;
     bool				 myAssumeWildcardsAroundPlainTokens;
+    bool                                 myTrackMissingExplicitPrimitives;
+    bool                                 myWarnMissingExplicitPrimitives;
     bool				 myCaseSensitive;
 };
 

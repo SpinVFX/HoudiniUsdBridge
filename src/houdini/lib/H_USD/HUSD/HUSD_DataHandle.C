@@ -25,8 +25,9 @@
 #include "HUSD_DataHandle.h"
 #include "HUSD_ErrorScope.h"
 #include "HUSD_FindPrims.h"
-#include "HUSD_Overrides.h"
 #include "HUSD_LoadMasks.h"
+#include "HUSD_Overrides.h"
+#include "HUSD_PerfMonAutoCookEvent.h"
 #include "XUSD_Data.h"
 #include "XUSD_PathSet.h"
 #include "XUSD_Utils.h"
@@ -34,11 +35,18 @@
 
 PXR_NAMESPACE_USING_DIRECTIVE
 
+bool
+HUSD_AutoAnyLock::isStageValid() const
+{
+    return (constData() && constData()->isStageValid());
+}
+
 HUSD_AutoReadLock::HUSD_AutoReadLock(
 	const HUSD_DataHandle &handle)
     : HUSD_AutoAnyLock(handle)
 {
-    myData = dataHandle().readLock(HUSD_ConstOverridesPtr(), false);
+    myData = dataHandle().readLock(HUSD_ConstOverridesPtr(),
+        HUSD_ConstPostLayersPtr(), false);
 }
 
 HUSD_AutoReadLock::HUSD_AutoReadLock(
@@ -46,26 +54,19 @@ HUSD_AutoReadLock::HUSD_AutoReadLock(
 	HUSD_OverridesUnchangedType)
     : HUSD_AutoAnyLock(handle)
 {
-    myData = dataHandle().readLock(dataHandle().currentOverrides(), false);
+    myData = dataHandle().readLock(dataHandle().currentOverrides(),
+        dataHandle().currentPostLayers(), false);
 }
 
 HUSD_AutoReadLock::HUSD_AutoReadLock(
 	const HUSD_DataHandle &handle,
-	HUSD_RemoveLayerBreaksType layer_breaks)
+	const HUSD_ConstOverridesPtr &overrides,
+	const HUSD_ConstPostLayersPtr &postlayers,
+        HUSD_RemoveLayerBreaksType lbtype)
     : HUSD_AutoAnyLock(handle)
 {
-    if (layer_breaks == REMOVE_LAYER_BREAKS)
-        myData = dataHandle().readLock(dataHandle().currentOverrides(), true);
-    else
-        myData = dataHandle().readLock(HUSD_ConstOverridesPtr(), false);
-}
-
-HUSD_AutoReadLock::HUSD_AutoReadLock(
-	const HUSD_DataHandle &handle,
-	const HUSD_ConstOverridesPtr &overrides)
-    : HUSD_AutoAnyLock(handle)
-{
-    myData = dataHandle().readLock(overrides, false);
+    myData = dataHandle().readLock(overrides, postlayers,
+        lbtype == REMOVE_LAYER_BREAKS);
 }
 
 HUSD_AutoReadLock::~HUSD_AutoReadLock()
@@ -91,7 +92,7 @@ HUSD_AutoWriteLock::~HUSD_AutoWriteLock()
 }
 
 void
-HUSD_AutoWriteLock::addLockedStages(const HUSD_LockedStageArray &stages)
+HUSD_AutoWriteLock::addLockedStages(const HUSD_LockedStageSet &stages)
 {
     myData->addLockedStages(stages);
 }
@@ -122,30 +123,19 @@ HUSD_AutoWriteOverridesLock::constData() const
     return myData;
 }
 
-HUSD_AutoLayerLock::HUSD_AutoLayerLock(const HUSD_DataHandle &handle)
+HUSD_AutoLayerLock::HUSD_AutoLayerLock(const HUSD_DataHandle &handle,
+        ChangeBlockTag change_block)
     : HUSD_AutoAnyLock(handle),
       myOwnsHandleLock(true)
 {
-    // The layerLock call creates an SdfChangeBlock which is destroyed when
-    // this object is destroyed.
-    myLayer = dataHandle().layerLock(myData);
-}
-
-HUSD_AutoLayerLock::HUSD_AutoLayerLock(const HUSD_AutoWriteLock &lock)
-    : HUSD_AutoAnyLock(lock.dataHandle()),
-      myOwnsHandleLock(false)
-{
-    // When creating a layer lock from a write lock, we do not want to create
-    // an SdfChangeBlock (the second 'false' parameter to the XUSD_Layer
-    // constructor). This is because we want Sdf edits to immediately be
-    // processed so that subsequent Usd edits will work properly.
-    myData = lock.data();
-    if (myData && myData->isStageValid())
-	myLayer = new XUSD_Layer(myData->activeLayer(), false);
+    // The layerLock call can create an SdfChangeBlock which is destroyed when
+    // this object is destroyed. Choose based on the ChangeBlockTag.
+    myLayer = dataHandle().layerLock(myData,
+        change_block == ChangeBlock);
 }
 
 HUSD_AutoLayerLock::HUSD_AutoLayerLock(const HUSD_AutoWriteLock &lock,
-        ScopedTag)
+        ChangeBlockTag change_block)
     : HUSD_AutoAnyLock(lock.dataHandle()),
       myOwnsHandleLock(false)
 {
@@ -153,7 +143,8 @@ HUSD_AutoLayerLock::HUSD_AutoLayerLock(const HUSD_AutoWriteLock &lock,
     // write lock is used again, it _is_ safe to create an SdfChangeBlock.
     myData = lock.data();
     if (myData && myData->isStageValid())
-	myLayer = new XUSD_Layer(myData->activeLayer(), true);
+	myLayer = new XUSD_Layer(myData->activeLayer(),
+            change_block == ChangeBlock);
 }
 
 HUSD_AutoLayerLock::~HUSD_AutoLayerLock()
@@ -163,19 +154,25 @@ HUSD_AutoLayerLock::~HUSD_AutoLayerLock()
 }
 
 void
-HUSD_AutoLayerLock::addTickets(const PXR_NS::XUSD_TicketArray &tickets)
+HUSD_AutoLayerLock::addLockedGeos(const PXR_NS::XUSD_LockedGeoSet &lockedgeos)
 {
-    myData->addTickets(tickets);
+    myData->addLockedGeos(lockedgeos);
 }
 
 void
-HUSD_AutoLayerLock::addReplacements(const PXR_NS::XUSD_LayerArray &replacements)
+HUSD_AutoLayerLock::addHeldLayers(const PXR_NS::XUSD_LayerSet &layers)
+{
+    myData->addHeldLayers(layers);
+}
+
+void
+HUSD_AutoLayerLock::addReplacements(const PXR_NS::XUSD_LayerSet &replacements)
 {
     myData->addReplacements(replacements);
 }
 
 void
-HUSD_AutoLayerLock::addLockedStages(const HUSD_LockedStageArray &stages)
+HUSD_AutoLayerLock::addLockedStages(const HUSD_LockedStageSet &stages)
 {
     myData->addLockedStages(stages);
 }
@@ -198,8 +195,51 @@ HUSD_DataHandle::HUSD_DataHandle(const HUSD_DataHandle &src)
     *this = src;
 }
 
+HUSD_DataHandle::HUSD_DataHandle(void *stage_ptr)
+    : myNodeId(OP_INVALID_ITEM_ID),
+      myMirroring(HUSD_EXTERNAL_STAGE)
+{
+    UsdStageWeakPtr stage =
+            BOOST_NS::python::extract<UsdStageWeakPtr>((PyObject*)stage_ptr);
+    myData.reset(new XUSD_Data(stage));
+    myDataLock = myData->myDataLock;
+}
+
+HUSD_DataHandle::HUSD_DataHandle(const UT_StringRef &filepath)
+    : myNodeId(OP_INVALID_ITEM_ID),
+      myMirroring(HUSD_EXTERNAL_STAGE)
+{
+    UsdStageRefPtr stage = UsdStage::Open(filepath.toStdString());
+
+    if (stage)
+    {
+        myData.reset(new XUSD_Data(stage));
+        myDataLock = myData->myDataLock;
+    }
+}
+
 HUSD_DataHandle::~HUSD_DataHandle()
 {
+}
+
+bool
+HUSD_DataHandle::hasData() const
+{
+    return (bool)myData;
+}
+
+bool
+HUSD_DataHandle::matchesResolverContext(const HUSD_DataHandle &other) const
+{
+    ArResolverContext	 resolver_context;
+    ArResolverContext	 other_resolver_context;
+
+    if (myData)
+        resolver_context = myData->resolverContext();
+    if (other.myData)
+        other_resolver_context = other.myData->resolverContext();
+
+    return (resolver_context == other_resolver_context);
 }
 
 void
@@ -333,6 +373,20 @@ HUSD_DataHandle::mirror(const HUSD_DataHandle &src,
     return success;
 }
 
+void
+HUSD_DataHandle::clearMirror()
+{
+    static HUSD_DataHandle theEmptyDataHandle(HUSD_NOT_FOR_MIRRORING);
+    static HUSD_LoadMasks theEmptyLoadMasks;
+
+    // The first time we come through here, initialize the empty data
+    // handle to hold an empty stage.
+    if (theEmptyDataHandle.layerCount() == 0)
+        theEmptyDataHandle.createNewData();
+
+    mirror(theEmptyDataHandle, theEmptyLoadMasks);
+}
+
 bool
 HUSD_DataHandle::mirrorUpdateRootLayer(const HUSD_MirrorRootLayer &rootlayer)
 {
@@ -356,6 +410,8 @@ HUSD_DataHandle::flattenLayers()
 	// Lock ourselves for reading, and make sure we have a valid stage.
 	if (lock.data() && lock.data()->isStageValid())
 	{
+            HUSD_PerfMonAutoCookEvent perf("Flattening layers");
+
 	    // Create a new XUSD_Data and initialize it by flattening the
 	    // layers from the read lock on ourselves.
 	    new_data.reset(new XUSD_Data(myMirroring));
@@ -392,7 +448,9 @@ HUSD_DataHandle::flattenStage()
 	// Lock ourselves for reading, and make sure we have a valid stage.
 	if (lock.data() && lock.data()->isStageValid())
 	{
-	    // Create a new XUSD_Data and initialize it by flattening the
+            HUSD_PerfMonAutoCookEvent perf("Flattening stage");
+
+            // Create a new XUSD_Data and initialize it by flattening the
 	    // stage from the read lock on ourselves.
 	    new_data.reset(new XUSD_Data(myMirroring));
 	    new_data->flattenStage(*lock.data(), myNodeId);
@@ -445,6 +503,19 @@ HUSD_DataHandle::currentOverrides() const
     return HUSD_ConstOverridesPtr();
 }
 
+HUSD_ConstPostLayersPtr
+HUSD_DataHandle::currentPostLayers() const
+{
+    if (myData && myDataLock)
+    {
+        UT_Lock::Scope	 lock(myDataLock->myMutex);
+
+        return myData->postLayers();
+    }
+
+    return HUSD_ConstPostLayersPtr();
+}
+
 HUSD_LoadMasksPtr
 HUSD_DataHandle::loadMasks() const
 {
@@ -465,8 +536,15 @@ HUSD_DataHandle::rootLayerIdentifier() const
     return theEmptyString;
 }
 
+bool
+HUSD_DataHandle::isLocked() const
+{
+    return (myData && myDataLock->isLocked());
+}
+
 XUSD_ConstDataPtr
 HUSD_DataHandle::readLock(const HUSD_ConstOverridesPtr &overrides,
+        const HUSD_ConstPostLayersPtr &postlayers,
 	bool remove_layer_breaks) const
 {
     // It's okay to try to lock an empty handle. Just return nullptr.
@@ -505,8 +583,9 @@ HUSD_DataHandle::readLock(const HUSD_ConstOverridesPtr &overrides,
     if (myDataLock->myLockCount == 1)
     {
 	myDataLock->myLockedNodeId = myNodeId;
+        myDataLock->myLastLockedNodeId = myNodeId;
 	myData->afterLock(false, overrides,
-	    HUSD_OverridesPtr(), remove_layer_breaks);
+	    HUSD_OverridesPtr(), postlayers, remove_layer_breaks);
     }
 
     return myData;
@@ -543,6 +622,7 @@ HUSD_DataHandle::writeLock() const
 
     myDataLock->myLockCount++;
     myDataLock->myLockedNodeId = myNodeId;
+    myDataLock->myLastLockedNodeId = myNodeId;
     myDataLock->myWriteLock = true;
     myData->afterLock(true);
 
@@ -581,6 +661,7 @@ HUSD_DataHandle::writeOverridesLock(
 
     myDataLock->myLockCount++;
     myDataLock->myLockedNodeId = myNodeId;
+    myDataLock->myLastLockedNodeId = myNodeId;
     myDataLock->myWriteLock = true;
     myData->afterLock(false, HUSD_ConstOverridesPtr(), overrides);
 
@@ -588,7 +669,7 @@ HUSD_DataHandle::writeOverridesLock(
 }
 
 XUSD_LayerPtr
-HUSD_DataHandle::layerLock(XUSD_DataPtr &data) const
+HUSD_DataHandle::layerLock(XUSD_DataPtr &data, bool create_change_block) const
 {
     // It's okay to try to lock an empty handle. Just return nullptr.
     if (!myData || !myDataLock)
@@ -618,11 +699,12 @@ HUSD_DataHandle::layerLock(XUSD_DataPtr &data) const
 
     myDataLock->myLockCount++;
     myDataLock->myLockedNodeId = myNodeId;
+    myDataLock->myLastLockedNodeId = myNodeId;
     myDataLock->myLayerLock = true;
     myData->afterLock(false);
     data = myData;
 
-    return myData->editActiveSourceLayer();
+    return myData->editActiveSourceLayer(create_change_block);
 }
 
 void
@@ -667,3 +749,14 @@ HUSD_DataHandle::release() const
     }
 }
 
+bool
+HUSD_DataHandle::isMostRecentStageLock() const
+{
+    return myDataLock && myDataLock->getLastLockedNodeId() == myNodeId;
+}
+
+void
+HUSD_DataHandle::clearAllMirroredData()
+{
+    XUSD_Data::clearAllMirroredData();
+}

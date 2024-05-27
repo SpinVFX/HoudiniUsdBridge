@@ -26,10 +26,12 @@
 #include "context.h"
 #include "GT_PrimCache.h"
 #include "GU_PackedUSD.h"
+#include "GU_USD.h"
 #include "refiner.h"
 #include "USD_XformCache.h"
 #include "UT_Gf.h"
 
+#include <GT/GT_DAIndexedString.h>
 #include <GT/GT_DANumeric.h>
 #include <GT/GT_GEODetail.h>
 #include <GT/GT_PrimInstance.h>
@@ -65,11 +67,14 @@ using std::map;
 #define DBG(x)
 #endif
 
+ARCH_PRAGMA_PUSH
+ARCH_PRAGMA_MACRO_TOO_FEW_ARGUMENTS
 TF_DEFINE_PRIVATE_TOKENS(
     _tokens,
     ((prunable, "pruning:prunable"))
     (Xform)
 );     
+ARCH_PRAGMA_POP
 
 namespace {
 
@@ -97,7 +102,8 @@ void setAngularVelocity(GT_DataArrayHandle houWAttr, std::vector<fpreal32>& houW
         houWArray.begin(),
         houWArray.end(),
         houWArray.begin(),
-        std::bind1st(std::multiplies<fpreal32>(), 180.0 / M_PI));
+        std::bind(std::multiplies<fpreal32>(), 180.0 / M_PI, 
+		  std::placeholders::_1));
 }
 
 void setTransformAttrsFromComponents(UsdAttribute& usdPositionAttr,
@@ -368,7 +374,7 @@ void GusdInstancerWrapper::storePreOverlayData(bool justProtoIndices,
         for (const TfToken& token : m_usdGeomTokens) {
             if (!m_preOverlayDataMap.count(token))
                 continue;
-            BOOST_NS::apply_visitor(StoreAtTime(UsdTimeCode(times[i])), m_preOverlayDataMap[token]);
+            std::visit(StoreAtTime(UsdTimeCode(times[i])), m_preOverlayDataMap[token]);
         }
     }
 
@@ -378,7 +384,7 @@ void GusdInstancerWrapper::clearPreOverlayData() {
     for (const TfToken& token : m_usdGeomTokens){
         if (!m_preOverlayDataMap.count(token))
             continue;
-        BOOST_NS::apply_visitor(ClearData{}, m_preOverlayDataMap[token]);
+        std::visit(ClearData{}, m_preOverlayDataMap[token]);
     }
 
 }
@@ -1026,7 +1032,7 @@ updateFromGTPrim(const GT_PrimitiveHandle& sourcePrim,
                 indexAttr = pntAttrs->get( "__instanceindex" );
 
             // Get the original proto indices array.
-            std::map<UsdTimeCode, VtIntArray> preOverlayProtoIndices = BOOST_NS::get<PreOverlayDataEntry<int>>(
+            std::map<UsdTimeCode, VtIntArray> preOverlayProtoIndices = std::get<PreOverlayDataEntry<int>>(
                 m_preOverlayDataMap[UsdGeomTokens->protoIndices]).preOverlayDataMap;
 
             // If we stored indices in the point instancer we are overlaying,
@@ -1209,7 +1215,7 @@ void GusdInstancerWrapper::setTransformAttrsFromMatrices(const UT_Matrix4D &worl
         }
 
         // Get the number of points in the original point instancer.
-        std::map<UsdTimeCode, VtIntArray> preOverlayProtoIndices = BOOST_NS::get<PreOverlayDataEntry<int>>(
+        std::map<UsdTimeCode, VtIntArray> preOverlayProtoIndices = std::get<PreOverlayDataEntry<int>>(
             m_preOverlayDataMap[UsdGeomTokens->protoIndices]).preOverlayDataMap;
         if ( preOverlayProtoIndices.count(time) > 0 ) {    
             numPoints = preOverlayProtoIndices[time].size();
@@ -1332,31 +1338,31 @@ void GusdInstancerWrapper::setTransformAttrsFromMatrices(const UT_Matrix4D &worl
 
             TfToken token = UsdGeomTokens->positions;
             GfVec3f ptPosition;
-            if (BOOST_NS::get<PreOverlayDataEntry<GfVec3f>>(
+            if (std::get<PreOverlayDataEntry<GfVec3f>>(
                 m_preOverlayDataMap[token]).getPointValue(time, pt, ptPosition))
                 position = GusdUT_Gf::Cast(ptPosition);
 
             token = UsdGeomTokens->scales;
             GfVec3f ptScale;
-            if (BOOST_NS::get<PreOverlayDataEntry<GfVec3f>>(
+            if (std::get<PreOverlayDataEntry<GfVec3f>>(
                 m_preOverlayDataMap[token]).getPointValue(time, pt, ptScale))
                 scale = GusdUT_Gf::Cast(ptScale);
 
             token = UsdGeomTokens->orientations;
             GfQuath ptOrientation;
-            if (BOOST_NS::get<PreOverlayDataEntry<GfQuath>>(
+            if (std::get<PreOverlayDataEntry<GfQuath>>(
                 m_preOverlayDataMap[token]).getPointValue(time, pt, ptOrientation))
                 GusdUT_Gf::Convert((GfQuatf)ptOrientation, q);
 
             token = UsdGeomTokens->velocities;
             GfVec3f ptVelocity;
-            if (BOOST_NS::get<PreOverlayDataEntry<GfVec3f>>(
+            if (std::get<PreOverlayDataEntry<GfVec3f>>(
                 m_preOverlayDataMap[token]).getPointValue(time, pt, ptVelocity))
                 velocity = GusdUT_Gf::Cast(ptVelocity);
 
             token = UsdGeomTokens->angularVelocities;
             GfVec3f ptAngularVelocity;
-            if (BOOST_NS::get<PreOverlayDataEntry<GfVec3f>>(
+            if (std::get<PreOverlayDataEntry<GfVec3f>>(
                 m_preOverlayDataMap[token]).getPointValue(time, pt, ptAngularVelocity))
                 angularVelocity = GusdUT_Gf::Cast(ptAngularVelocity);
 
@@ -1459,7 +1465,7 @@ refine( GT_Refine& refiner,
     return true;
 }
 
-GT_DataArrayHandle
+static GT_DataArrayHandle
 Gusd_ConvertDegToRad(const GT_DataArrayHandle &deg_attr)
 {
     UT_IntrusivePtr<GT_DANumeric<float>> rad_attr = new GT_DANumeric<float>(
@@ -1497,11 +1503,68 @@ GusdInstancerWrapper::addStandardAttribute(
     point_attribs = point_attribs->addAttribute(attr_name, data, true);
 }
 
+/// Translate the 'invisibleIds' attribute to the SOP 'usdvisibility' attribute.
+static void
+Gusd_RecordVisibilityAttrib(
+        const UsdAttribute &invisible_ids_attrib,
+        UsdTimeCode time,
+        const UsdAttribute &ids_attrib,
+        exint num_instances,
+        GT_AttributeListHandle &point_attribs)
+{
+    static constexpr UT_StringLit theUsdVisibilityAttribName("usdvisibility");
+    const UT_StringHolder invisible_str
+            = GusdUSD_Utils::TokenToStringHolder(UsdGeomTokens->invisible);
+
+    VtInt64Array invisible_ids;
+    if (!invisible_ids_attrib.Get(&invisible_ids, time)
+        || invisible_ids.empty())
+    {
+        return;
+    }
+
+    auto attrib = UTmakeIntrusive<GT_DAIndexedString>(num_instances);
+
+    VtInt64Array ids;
+    if (ids_attrib.Get(&ids, time))
+    {
+        if (ids.size() != num_instances)
+        {
+            TF_WARN("Indices and ids arrays are not the same size");
+            return;
+        }
+
+        // If ids are authored, we need to go through and find which are present
+        // in the invisibleIds.
+        UT_ArraySet<int64> invisible_ids_set(
+                invisible_ids.begin(), invisible_ids.end());
+
+        for (exint i = 0; i < num_instances; ++i)
+        {
+            if (invisible_ids_set.contains(ids[i]))
+                attrib->setString(i, 0, invisible_str);
+        }
+    }
+    else // No ids attribute, so invisibleIds contains the instance indices
+    {
+        for (int64 invis_instance : invisible_ids)
+        {
+            if (invis_instance < 0 || invis_instance >= num_instances)
+                continue;
+
+            attrib->setString(invis_instance, 0, invisible_str);
+        }
+    }
+
+    point_attribs = point_attribs->addAttribute(
+            theUsdVisibilityAttribName.asHolder(), attrib, true);
+}
+
 bool
 GusdInstancerWrapper::unpack(UT_Array<GU_DetailHandle> &details,
                              const UT_StringRef &fileName,
                              const SdfPath &primPath,
-                             const UT_Matrix4D &xform,
+                             const UT_Matrix4D *xform,
                              fpreal frame,
                              const char *viewportLod,
                              GusdPurposeSet purposes,
@@ -1566,7 +1629,10 @@ GusdInstancerWrapper::unpack(UT_Array<GU_DetailHandle> &details,
             continue;
         }
 
-        const UT_Matrix4D m = GusdUT_Gf::Cast(frames[i]) * xform;
+        UT_Matrix4D m = GusdUT_Gf::Cast(frames[i]);
+        if (xform)
+            m *= *xform;
+
         GusdGU_PackedUSD::Build(
                 *detail, fileName, targets[idx], primPath, i, frame,
                 viewportLod, purposes, UsdPrim(), &m);
@@ -1575,10 +1641,10 @@ GusdInstancerWrapper::unpack(UT_Array<GU_DetailHandle> &details,
 
     // unpack primvars to point attributes.
 
-    GT_AttributeListHandle point_attribs =
-        new GT_AttributeList(new GT_AttributeMap());
-    GT_AttributeListHandle constant_attribs =
-        new GT_AttributeList(new GT_AttributeMap());
+    auto point_attribs = UTmakeIntrusive<GT_AttributeList>(
+            UTmakeIntrusive<GT_AttributeMap>());
+    auto constant_attribs = UTmakeIntrusive<GT_AttributeList>(
+            UTmakeIntrusive<GT_AttributeMap>());
 
     GusdPrimWrapper::loadPrimvars(
         *m_usdPointInstancer.GetSchemaClassPrimDefinition(), m_time, &rparms, 0,
@@ -1597,6 +1663,18 @@ GusdInstancerWrapper::unpack(UT_Array<GU_DetailHandle> &details,
                          /* convert_to_radians */ true);
     addStandardAttribute(
         m_usdPointInstancer.GetIdsAttr(), GA_Names::id, point_attribs);
+
+    // Never transfer a primvars:P since that will clobber the instance
+    // transforms.
+    point_attribs = point_attribs->removeAttribute(GA_Names::P);
+
+    if (GT_RefineParms::getBool(&rparms, GUSD_REFINE_ADDVISIBILITYATTRIB, true))
+    {
+        Gusd_RecordVisibilityAttrib(
+                m_usdPointInstancer.GetInvisibleIdsAttr(), m_time,
+                m_usdPointInstancer.GetIdsAttr(), indices.size(),
+                point_attribs);
+    }
 
     GT_Util::copyAttributeListToDetail(
         detail, GA_ATTRIB_POINT, &rparms, point_attribs, 0);

@@ -25,6 +25,8 @@
 #include "XUSD_Utils.h"
 #include "XUSD_Data.h"
 #include "XUSD_DataLock.h"
+#include "XUSD_Format.h"
+#include "XUSD_LockedGeoRegistry.h"
 #include "HUSD_Constants.h"
 #include "HUSD_ErrorScope.h"
 #include "HUSD_LayerOffset.h"
@@ -32,30 +34,44 @@
 #include "HUSD_PathSet.h"
 #include "HUSD_Preferences.h"
 #include "HUSD_TimeCode.h"
+#include "XUSD_ExistenceTracker.h"
+#include "UsdHoudini/houdiniEditableAPI.h"
+#include "UsdHoudini/houdiniSelectableAPI.h"
 #include <OP/OP_Node.h>
 #include <OP/OP_Director.h>
 #include <GA/GA_Types.h>
 #include <CH/CH_Manager.h>
 #include <UT/UT_DirUtil.h>
+#include <UT/UT_EnvControl.h>
+#include <UT/UT_Function.h>
 #include <UT/UT_JSONParser.h>
 #include <UT/UT_JSONValue.h>
 #include <UT/UT_JSONValueMap.h>
+#include <UT/UT_JSONWriter.h>
 #include <UT/UT_OptionEntry.h>
 #include <UT/UT_PathSearch.h>
+#include <UT/UT_StdUtil.h>
+#include <UT/UT_StringStream.h>
 #include <FS/UT_DSO.h>
 #include <pxr/pxr.h>
+#include <pxr/usd/pcp/composeSite.h>
 #include <pxr/usd/usdUtils/dependencies.h>
 #include <pxr/usd/usdUtils/flattenLayerStack.h>
 #include <pxr/usd/usdUtils/stitch.h>
 #include <pxr/usd/usdGeom/pointInstancer.h>
 #include <pxr/usd/usdGeom/metrics.h>
+#include <pxr/usd/usdGeom/modelAPI.h>
 #include <pxr/usd/usdGeom/tokens.h>
 #include <pxr/usd/usdGeom/xformCache.h>
+#include <pxr/usd/usd/clipsAPI.h>
+#include <pxr/usd/usd/flattenUtils.h>
 #include <pxr/usd/usd/schemaBase.h>
+#include <pxr/usd/usd/tokens.h>
 #include <pxr/usd/sdf/fileFormat.h>
 #include <pxr/usd/sdf/reference.h>
 #include <pxr/usd/sdf/layer.h>
 #include <pxr/usd/sdf/primSpec.h>
+#include <pxr/usd/sdf/variableExpression.h>
 #include <pxr/usd/sdf/variantSpec.h>
 #include <pxr/usd/sdf/variantSetSpec.h>
 #include <pxr/usd/sdf/layerUtils.h>
@@ -68,6 +84,14 @@
 #include <pxr/base/tf/warning.h>
 #include <pxr/base/tf/token.h>
 #include <pxr/base/tf/type.h>
+#include <pxr/base/gf/matrix2f.h>
+#include <pxr/base/gf/matrix3f.h>
+#include <pxr/base/gf/matrix4f.h>
+#include <pxr/base/gf/matrix2d.h>
+#include <pxr/base/gf/matrix3d.h>
+#include <pxr/base/gf/matrix4d.h>
+#include <pxr/base/gf/size2.h>
+#include <pxr/base/gf/size3.h>
 #include <map>
 #include <set>
 #include <string>
@@ -81,6 +105,8 @@ namespace {
 
 UT_StringMap<SdfPath>    theKnownDefaultPrims;
 UT_StringMap<SdfPath>    theKnownAutomaticPrims;
+const std::string        theLopTagPrefix = "LOP";
+const std::string        theLopStageRootLayerIdentifier = "LOP:rootlayer";
 
 TF_MAKE_STATIC_DATA(TfType, theSchemaBaseType) {
     *theSchemaBaseType = TfType::Find<UsdSchemaBase>();
@@ -198,20 +224,13 @@ public:
 
     std::string operator()(const std::string &assetPath)
     {
-        // Leave absolute paths and "search" paths alone. We only want to
-        // update file-relative paths to be absolute.
-        if (!assetPath.empty() &&
-            ArGetResolver().IsRelativePath(assetPath) &&
-            !ArGetResolver().IsSearchPath(assetPath))
-        {
-            // ComputeAbsolutePath may return an empty string if it doesn't
-            // know what to do with a path (such as an op: path pointing to
-            // a SOP).
-            std::string newpath = mySourceLayer->ComputeAbsolutePath(assetPath);
+        // ComputeAbsolutePath may return an empty string if it doesn't
+        // know what to do with a path (such as an op: path pointing to
+        // a SOP).
+        std::string newpath = mySourceLayer->ComputeAbsolutePath(assetPath);
 
-            if (!newpath.empty())
-                return newpath;
-        }
+        if (!newpath.empty())
+            return newpath;
 
         return assetPath;
     }
@@ -220,12 +239,166 @@ private:
     const SdfLayerRefPtr &mySourceLayer;
 };
 
+void
+_MergeClipSet(VtDictionary *strong, const VtDictionary &weak)
+{
+    VtArray<SdfAssetPath> weakPaths;
+    VtVec2dArray weakActive;
+    VtVec2dArray weakTimes;
+    bool clip_data_handled = false;
+
+    if (VtDictionaryIsHolding<VtArray<SdfAssetPath>>(weak,
+            UsdClipsAPIInfoKeys->assetPaths))
+        weakPaths = VtDictionaryGet<VtArray<SdfAssetPath>>(weak,
+            UsdClipsAPIInfoKeys->assetPaths);
+    if (VtDictionaryIsHolding<VtVec2dArray>(weak,
+            UsdClipsAPIInfoKeys->active))
+        weakActive = VtDictionaryGet<VtVec2dArray>(weak,
+            UsdClipsAPIInfoKeys->active);
+    if (VtDictionaryIsHolding<VtVec2dArray>(weak,
+            UsdClipsAPIInfoKeys->times))
+        weakTimes = VtDictionaryGet<VtVec2dArray>(weak,
+            UsdClipsAPIInfoKeys->times);
+
+    if (!weakPaths.empty() && !weakActive.empty() && !weakTimes.empty())
+    {
+        VtArray<SdfAssetPath> strongPaths;
+        VtVec2dArray strongActive;
+        VtVec2dArray strongTimes;
+
+        if (VtDictionaryIsHolding<VtArray<SdfAssetPath>>(*strong,
+                UsdClipsAPIInfoKeys->assetPaths))
+            strongPaths = VtDictionaryGet<VtArray<SdfAssetPath>>(*strong,
+                UsdClipsAPIInfoKeys->assetPaths);
+        if (VtDictionaryIsHolding<VtVec2dArray>(*strong,
+                UsdClipsAPIInfoKeys->active))
+            strongActive = VtDictionaryGet<VtVec2dArray>(*strong,
+                UsdClipsAPIInfoKeys->active);
+        if (VtDictionaryIsHolding<VtVec2dArray>(*strong,
+                UsdClipsAPIInfoKeys->times))
+            strongTimes = VtDictionaryGet<VtVec2dArray>(*strong,
+                UsdClipsAPIInfoKeys->times);
+
+        UT_Set<double> strong_active_times;
+        for (auto &&vec : strongActive)
+            strong_active_times.insert(vec[0]);
+
+        UT_StringMap<int> asset_paths;
+        for (int i = 0; i < strongPaths.size(); ++i)
+            asset_paths.emplace(strongPaths[i].GetAssetPath(), i);
+
+        // Test for duplicate "active" declarations, and ignore weak ones that
+        // match strong ones. Only add asset paths that are new, and that
+        // correspond to weak "active" declarations that we actually keep.
+        for (auto &&active : weakActive)
+        {
+            if (strong_active_times.contains(active[0]) ||
+                (int)active[1] >= weakPaths.size())
+                continue;
+            auto asset_path = weakPaths[(int)active[1]];
+            auto it = asset_paths.find(asset_path.GetAssetPath());
+            if (it == asset_paths.end())
+            {
+                it = asset_paths.emplace(
+                    asset_path.GetAssetPath(), strongPaths.size()).first;
+                strongPaths.push_back(asset_path);
+            }
+            strongActive.push_back(GfVec2d(active[0], (double)it->second));
+        }
+
+        // Don't add "times" entries that start at the same time as weak
+        // "active" entries that we didn't copy into the strong array.
+        for (auto &&time : weakTimes)
+        {
+            if (!strong_active_times.contains(time[0]))
+                strongTimes.push_back(time);
+        }
+
+        // Set the combined data back into the strong dictionary.
+        (*strong)[UsdClipsAPIInfoKeys->active] = strongActive;
+        (*strong)[UsdClipsAPIInfoKeys->assetPaths] = strongPaths;
+        (*strong)[UsdClipsAPIInfoKeys->times] = strongTimes;
+        clip_data_handled = true;
+    }
+
+    for (auto it = TfMakeIterator(weak); it; ++it)
+    {
+        // If both dictionaries have values that are in turn dictionaries,
+        // recurse:
+        if (VtDictionaryIsHolding<VtDictionary>(*strong, it->first) &&
+            VtDictionaryIsHolding<VtDictionary>(weak, it->first))
+        {
+            const VtDictionary &weakSubDict =
+                VtDictionaryGet<VtDictionary>(weak, it->first);
+
+            // Swap out the stored dictionary, mutate it, then swap it back in
+            // place.  This avoids expensive copying.  There may still be a copy
+            // if the VtValue storage is shared.
+            VtDictionary::iterator i = strong->find(it->first);
+            VtDictionary strongSubDict;
+            i->second.Swap(strongSubDict);
+            // Modify the extracted dict.
+            VtDictionaryOverRecursive(&strongSubDict, weakSubDict);
+            // Swap the modified dict back into place.
+            i->second.Swap(strongSubDict);
+        }
+        else if (clip_data_handled &&
+                 (it->first == UsdClipsAPIInfoKeys->assetPaths ||
+                  it->first == UsdClipsAPIInfoKeys->active ||
+                  it->first == UsdClipsAPIInfoKeys->times))
+        {
+            // These special clip dictionary values were handled above.
+            continue;
+        }
+        else
+        {
+            // Insert will set strong with value from weak only if
+            // strong does not already have a value for that key.
+            strong->insert(*it);
+        }
+    }
+}
+
+void
+_MergeClipDictionaries(VtDictionary *strong, const VtDictionary &weak)
+{
+    for (auto it = TfMakeIterator(weak); it; ++it)
+    {
+        // If both dictionaries have values that are in turn dictionaries,
+        // these are overlapping clip sets that must be merged.
+        if (VtDictionaryIsHolding<VtDictionary>(*strong, it->first) &&
+            VtDictionaryIsHolding<VtDictionary>(weak, it->first))
+        {
+            const VtDictionary &weakSubDict =
+                VtDictionaryGet<VtDictionary>(weak, it->first);
+
+            // Swap out the stored dictionary, mutate it, then swap it back in
+            // place.  This avoids expensive copying.  There may still be a copy
+            // if the VtValue storage is shared.
+            VtDictionary::iterator i = strong->find(it->first);
+            VtDictionary strongSubDict;
+            i->second.Swap(strongSubDict);
+            // Modify the extracted dict.
+            _MergeClipSet(&strongSubDict, weakSubDict);
+            // Swap the modified dict back into place.
+            i->second.Swap(strongSubDict);
+        }
+        else
+        {
+            // Insert will set strong with value from weak only if
+            // strong does not already have a value for that key.
+            strong->insert(*it);
+        }
+    }
+}
+
 UsdUtilsStitchValueStatus 
 _StitchCallback(
     const TfToken& field, const SdfPath& path,
     const SdfLayerHandle& strongLayer, bool fieldInStrongLayer,
     const SdfLayerHandle& weakLayer, bool fieldInWeakLayer,
-    VtValue* stitchedValue)
+    VtValue* stitchedValue,
+    HUSD_PathSet* varyingDefaultPaths)
 {
     // If both strong and weak layers contain values for time samples or
     // custom data, we need to stitch together values sparsely. Otherwise,
@@ -240,12 +413,27 @@ _StitchCallback(
 	    const VtValue weakDataId = weakLayer->GetFieldDictValueByKey(
 		path, SdfFieldKeys->CustomData, HUSDgetDataIdToken());
 
-	    // If dataIds stored in customData are the same valid value,
-	    // don't stitch any values together.
-	    if (!weakDataId.IsEmpty() &&
-		weakDataId != VtValue(GA_INVALID_DATAID) &&
-		strongDataId == weakDataId)
-		return UsdUtilsStitchValueStatus::NoStitchedValue;
+	    if (UT_EnvControl::getInt(ENV_HOUDINI_LOP_STITCH_DEDUPLICATE_SAMPLES))
+	    {
+		// If dataIds stored in customData are the same valid value,
+		// don't stitch any values together.
+		//
+		// NOTE: As this only looks at the previous sample, it does
+		//       not let us capture the end endpoint of a series of
+		//       constant samples surrounded by other values.
+		//       For example, if the incoming data is:
+		//       1.0@t=1 0.0@t=2 0.0@t=3 0.0@t=4 0.0@t=5 1.0@t=6
+		//       Then the resulting stitched time samples will be:
+		//       1.0@t=1 0.0@t=2                         1.0@t=6
+		//       Which, due to USD's linear interpolation of sampled
+		//       data, will synthesise a value of 0.5@t=4
+		//       Ideally we'd instead want to generate:
+		//       1.0@t=1 0.0@t=2                 0.0@t=5 1.0@t=6
+		if (!weakDataId.IsEmpty() &&
+		    weakDataId != VtValue(GA_INVALID_DATAID) &&
+		    strongDataId == weakDataId)
+		    return UsdUtilsStitchValueStatus::NoStitchedValue;
+	    }
 
 	    // Otherwise, stitch time samples and custom data as normal,
 	    // but merge in the data id from the weaker layer into the
@@ -265,6 +453,46 @@ _StitchCallback(
 		return UsdUtilsStitchValueStatus::UseSuppliedValue;
 	    }
 	}
+	else if (varyingDefaultPaths && field == SdfFieldKeys->Default)
+	{
+	    bool varyingDefaultValue = false;
+	    VtValue strongValue = strongLayer->GetField(path, field);
+	    VtValue weakValue = weakLayer->GetField(path, field);
+	    // In some circumstances (details unclear/unknown),
+	    // SdfAssetPath values can be holding a resolved path (or not).
+	    // Since we ultimately only case about the asset path, ws
+	    // explicitly only compare that component here.
+	    if (strongValue.IsHolding<SdfAssetPath>() &&
+		weakValue.IsHolding<SdfAssetPath>())
+	    {
+		if (strongValue.UncheckedGet<SdfAssetPath>().GetAssetPath() !=
+		    weakValue.UncheckedGet<SdfAssetPath>().GetAssetPath())
+		{
+		    varyingDefaultValue = true;
+		}
+	    }
+	    else if (strongValue != weakValue)
+		varyingDefaultValue = true;
+	    
+	    if (varyingDefaultValue)
+		varyingDefaultPaths->insert(path);
+	}
+        else if (field == UsdTokens->clips)
+        {
+            // When merging clips metadata, merge each clip set separately,
+            // by combining the active, times, and assetPaths lists.
+            VtDictionary strongValue, weakValue;
+
+            if (strongLayer->HasField(path, field, &strongValue) &&
+                weakLayer->HasField(path, field, &weakValue))
+            {
+                VtDictionary merged = strongValue;
+                _MergeClipDictionaries(&merged, weakValue);
+                *stitchedValue = merged;
+
+                return UsdUtilsStitchValueStatus::UseSuppliedValue;
+            }
+        }
     }
 
     return UsdUtilsStitchValueStatus::UseDefaultValue;
@@ -329,7 +557,7 @@ _ShouldCopyValue(
     const SdfLayerHandle& dstLayer,
     const SdfPath& dstPath,
     bool fieldInDst,
-    BOOST_NS::optional<VtValue>* valueToCopy)
+    std::optional<VtValue>* valueToCopy)
 {
     if (fieldInSrc) {
         if (field == SdfFieldKeys->ConnectionPaths || 
@@ -467,8 +695,8 @@ _ShouldCopyChildren(
     const SdfLayerHandle& dstLayer,
     const SdfPath& dstPath,
     bool fieldInDst,
-    BOOST_NS::optional<VtValue>* srcChildren, 
-    BOOST_NS::optional<VtValue>* dstChildren)
+    std::optional<VtValue>* srcChildren, 
+    std::optional<VtValue>* dstChildren)
 {
     static TfToken	 theHoudiniLayerInfoName(
 	HUSD_Constants::getHoudiniLayerInfoPrimName().toStdString());
@@ -524,29 +752,31 @@ _ShouldCopyChildren(
 }
 
 std::string
-_FlattenLayerStackResolveAssetPath(
-    const SdfLayerHandle& sourceLayer,
-    const std::string& assetPath)
+_FlattenLayerStackResolveAssetPath(const UsdFlattenResolveAssetPathContext &ctx)
 {
-    // Used in calls to UsdUtilsFlattenLayerStack to help resolve layer paths
+    // Used in calls to UsdFlattenLayerStack to help resolve layer paths
     // from that function into new paths. We are always flattening to in-memory
     // stages. For absolute and search paths, we want to leave asset paths
     // alone. For relative paths we want to make them absolute. If the asset
     // path is anonymous, we don't want to touch it, and if the source layer is
     // anonymous we don't need to touch it (because the assetPath can be
-    // assumed to already be what it is supposed to be.
-    if (!assetPath.empty() &&
-	!SdfLayer::IsAnonymousLayerIdentifier(assetPath) &&
-	!sourceLayer->IsAnonymous())
-    {
-	ArResolver	&resolver = ArGetResolver();
+    // assumed to already be what it is supposed to be).
+    //
+    // Note that we don't use the "isLopLayer" function here, because we
+    // really are interested in treating _all_ anonymous layers in a special
+    // way here (because by definition they don't have files backing them
+    // which can meaningfully have their paths manipulated).
+    //
+    // Also ignore all asset paths that use variable expressions. We don't
+    // want to lose the expression, so we have to leave it totally untouched
+    // and leave any special handling to output processors.
+    if (!SdfVariableExpression::IsExpression(ctx.assetPath) &&
+        !ctx.assetPath.empty() &&
+	!SdfLayer::IsAnonymousLayerIdentifier(ctx.assetPath) &&
+	!HUSDisLopLayer(ctx.sourceLayer))
+        return ctx.sourceLayer->ComputeAbsolutePath(ctx.assetPath);
 
-	if (resolver.IsRelativePath(assetPath) &&
-	    !resolver.IsSearchPath(assetPath))
-	    return sourceLayer->ComputeAbsolutePath(assetPath);
-    }
-
-    return assetPath;
+    return ctx.assetPath;
 }
 
 void
@@ -556,8 +786,25 @@ _GetLayersToFlatten(const UsdStageWeakPtr &stage,
 {
     if (flatten_flags & HUSD_FLATTEN_FULL_STACK)
     {
+        double stagetcps = stage->GetTimeCodesPerSecond();
+
 	for (auto &&layer : stage->GetLayerStack(false))
-	    layers.append(XUSD_LayerAtPath(layer, layer->GetIdentifier()));
+        {
+            UsdEditTarget edittarget = stage->GetEditTargetForLocalLayer(layer);
+            SdfLayerOffset offset = edittarget.GetMapFunction().GetTimeOffset();
+            double layertcps = layer->GetTimeCodesPerSecond();
+
+            // If there is a difference between the layer and stage tcps values,
+            // we want to eliminate this contribution from the edit target time
+            // offset calculation. This portion of the time offset will be
+            // preserved in the substage we use for layer flattening. If we
+            // include it in the layer offset as well, this portion of the
+            // time offset will be double applied (see bug 113246).
+            if (layertcps != stagetcps)
+                offset.SetScale(offset.GetScale() * layertcps / stagetcps);
+	    layers.append(XUSD_LayerAtPath(layer,
+                layer->GetIdentifier(), offset));
+        }
     }
     else
     {
@@ -565,11 +812,13 @@ _GetLayersToFlatten(const UsdStageWeakPtr &stage,
 	SdfSubLayerProxy sublayer_proxy = root_layer->GetSubLayerPaths();
 
 	layers.append(XUSD_LayerAtPath(stage->GetRootLayer()));
-	for (auto &&path : sublayer_proxy)
+        for (int i = 0, n = sublayer_proxy.size(); i < n; i++)
 	{
+            std::string          path = sublayer_proxy[i];
 	    SdfLayerHandle	 layer = SdfLayer::Find(path);
 
-	    layers.append(XUSD_LayerAtPath(layer, path));
+	    layers.append(XUSD_LayerAtPath(layer, path,
+                root_layer->GetSubLayerOffset(i)));
 	    if (!layer)
 		HUSD_ErrorScope::addWarning(
 		    HUSD_ERR_CANT_FIND_LAYER, std::string(path).c_str());
@@ -586,13 +835,21 @@ _FlattenLayerPartitions(const UsdStageWeakPtr &stage,
     SdfLayerRefPtrVector	 layers_to_scan_for_references;
     XUSD_LayerAtPathArray	 all_layers;
     std::vector<std::string>	 explicit_paths;
+    std::vector<SdfLayerOffset>	 explicit_offsets;
     std::vector<std::vector<std::string> > partitions;
+    std::vector<std::vector<SdfLayerOffset> > partition_offsets;
     std::map<size_t, std::vector<std::string> > sublayers_map;
     std::map<size_t, SdfLayerOffsetVector> sublayer_offsets_map;
     bool			 flatten_file_layers;
     bool			 flatten_sop_layers;
     bool			 flatten_explicit_layers;
     bool			 flatten_full_stack;
+
+    // Just in case we are passed a null stage, return a null layer instead
+    // of inflicting the inevitable crash on the user. This can happen when
+    // an invalid extension is specified on a layer save path (Bug 110485).
+    if (!stage)
+        return SdfLayerRefPtr();
 
     flatten_file_layers = (flatten_flags & HUSD_FLATTEN_FILE_LAYERS);
     flatten_sop_layers = (flatten_flags & HUSD_FLATTEN_SOP_LAYERS);
@@ -630,7 +887,7 @@ _FlattenLayerPartitions(const UsdStageWeakPtr &stage,
 	bool		 is_file_layer = false;
 
 	if (!is_sop_layer &&
-	    (!layer.isLayerAnonymous() ||
+	    (!layer.isLopLayer() ||
 	     HUSD_Constants::getSaveControlIsFileFromDisk() == save_control))
 	    is_file_layer = true;
 
@@ -643,13 +900,16 @@ _FlattenLayerPartitions(const UsdStageWeakPtr &stage,
 	    (!flatten_sop_layers && is_sop_layer) ||
 	    (!flatten_explicit_layers && save_control ==
 	     HUSD_Constants::getSaveControlExplicit().toStdString()))
+        {
 	    partitions.push_back(std::vector<std::string>());
+	    partition_offsets.push_back(std::vector<SdfLayerOffset>());
+        }
 
 	// Special handling of nested sublayers if we are not flattening the
 	// whole layer stack, but instead just one level of sublayers at a
 	// time.
 	if (!flatten_full_stack &&
-	    layer.isLayerAnonymous() &&
+	    layer.isLopLayer() &&
 	    layer.myLayer->GetNumSubLayerPaths() > 0)
 	{
 	    // For anonymous layers, stash their sublayers and sublayer
@@ -677,9 +937,11 @@ _FlattenLayerPartitions(const UsdStageWeakPtr &stage,
 	    layer = XUSD_LayerAtPath(copy_layer);
 	}
 
-	std::vector<std::string> &partition = partitions.back();
+	std::vector<std::string> &partition=partitions.back();
+	std::vector<SdfLayerOffset> &partition_offset=partition_offsets.back();
 
 	partition.push_back(layer.myIdentifier);
+        partition_offset.push_back(layer.myOffset);
 
 	// If we are putting files or sops in their own partitions, we need
 	// to skip to the next partition regardless of what the next layer
@@ -694,7 +956,10 @@ _FlattenLayerPartitions(const UsdStageWeakPtr &stage,
 	if ((!flatten_file_layers && is_file_layer) ||
 	    (!flatten_sop_layers && is_sop_layer) ||
 	    (!flatten_full_stack && sublayers_map.count(partitions.size()) > 0))
+        {
 	    partitions.push_back(std::vector<std::string>());
+	    partition_offsets.push_back(std::vector<SdfLayerOffset>());
+        }
     }
 
     SdfLayerRefPtr		 new_layer;
@@ -702,6 +967,7 @@ _FlattenLayerPartitions(const UsdStageWeakPtr &stage,
     for (int i = 0, n = partitions.size(); i < n; i++)
     {
 	std::vector<std::string> &partition = partitions[i];
+	std::vector<SdfLayerOffset> &partition_offset = partition_offsets[i];
 
 	// Ignore empty partitions. These may happen as a result of the
 	// way the partitions are created in the loop above.
@@ -709,18 +975,19 @@ _FlattenLayerPartitions(const UsdStageWeakPtr &stage,
 	    continue;
 
 	if (partition.size() == 1 &&
-	    !SdfLayer::IsAnonymousLayerIdentifier(partition.front()))
+	    !HUSDisLopLayer(partition.front()))
 	{
 	    // A single SOP or file layer in a partition should just be added
 	    // directly to the explicit paths. If this layer is the strongest
 	    // layer, create an empty layer to hold all the explicit sublayers.
 	    if (first_partition)
 	    {
-		new_layer = HUSDcreateAnonymousLayer(stage);
+		new_layer = HUSDcreateAnonymousLayer(stage->GetRootLayer());
 		layers_to_scan_for_references.push_back(new_layer);
 		first_partition = false;
 	    }
 	    explicit_paths.push_back(partition.front());
+            explicit_offsets.push_back(partition_offset.front());
 	}
 	else
 	{
@@ -741,11 +1008,13 @@ _FlattenLayerPartitions(const UsdStageWeakPtr &stage,
                 HUSD_ErrorScope      ignore_errors(&ignore_errors_mgr);
 
                 substage->GetRootLayer()->SetSubLayerPaths(partition);
+		for (int si = 0, sn = partition_offset.size(); si < sn; si++)
+		    substage->GetRootLayer()->SetSubLayerOffset(
+                        partition_offset[si], si);
             }
 
             // Flatten the layers in the partition.
-	    created_layer = UsdUtilsFlattenLayerStack(substage,
-		_FlattenLayerStackResolveAssetPath);
+	    created_layer = HUSDflattenLayers(substage);
 	    if (first_partition)
 	    {
 		new_layer = created_layer;
@@ -754,6 +1023,7 @@ _FlattenLayerPartitions(const UsdStageWeakPtr &stage,
 	    else
 	    {
 		explicit_layers.push_back(created_layer);
+                explicit_offsets.push_back(SdfLayerOffset());
 		explicit_paths.push_back(created_layer->GetIdentifier());
 	    }
 	    layers_to_scan_for_references.push_back(created_layer);
@@ -779,7 +1049,12 @@ _FlattenLayerPartitions(const UsdStageWeakPtr &stage,
     // the LOP Network) which should be stronger than all the additional
     // layers created from the partitions.
     for (int i = 0, n = explicit_paths.size(); i < n; i++)
+    {
+        int newsublayerindex = new_layer->GetNumSubLayerPaths();
+
 	new_layer->InsertSubLayerPath(explicit_paths[i]);
+        new_layer->SetSubLayerOffset(explicit_offsets[i], newsublayerindex);
+    }
 
     // Now that we've partitioned and flattened all the sublayers, look for
     // any other composition types (references or payloads) that point to
@@ -789,13 +1064,14 @@ _FlattenLayerPartitions(const UsdStageWeakPtr &stage,
     for (auto &&update_layer : layers_to_scan_for_references)
     {
         std::map<std::string, std::string> pathmap;
-	std::set<std::string> refs = update_layer->GetExternalReferences();
+	auto refs = HUSDgetExternalReferences(update_layer);
 
-	for (auto &&ref : refs)
+	for (auto &&it : refs)
 	{
 	    // Only interested in references that are not sublayers, and that
 	    // are anonymous layers.
-	    if (SdfLayer::IsAnonymousLayerIdentifier(ref))
+            auto ref = it.first;
+	    if (HUSDisLopLayer(ref))
 	    {
 		auto	it = std::find(explicit_paths.begin(),
 				    explicit_paths.end(), ref);
@@ -827,6 +1103,10 @@ _FlattenLayerPartitions(const UsdStageWeakPtr &stage,
 			    // "RemoveFromSublayers". But this shouldn't
 			    // happen because the layer should have been
 			    // removed in the HUSD_Save processing.
+                            //
+                            // The other way this can happen is via Bug 110485.
+                            // See the other comment at the top of this function
+                            // relating to this bug id.
 			    UT_ASSERT(!"Flattened reference to nothing.");
 			    continue;
 			}
@@ -858,13 +1138,209 @@ _FlattenLayerPartitions(const UsdStageWeakPtr &stage,
     return new_layer;
 }
 
-static bool
+void
+_ClipReferencesRecursive(const SdfPrimSpecHandle &primspec,
+        std::set<std::string> &refs)
+{
+    VtValue clipsValue = primspec->GetInfo(UsdTokens->clips);
+    if (!clipsValue.IsEmpty() && clipsValue.IsHolding<VtDictionary>())
+    {
+        const VtDictionary clipsDict = clipsValue.UncheckedGet<VtDictionary>();
+
+        for (auto &&clip : clipsDict)
+        {
+            if (!clip.second.IsHolding<VtDictionary>())
+                continue;
+
+            VtDictionary clipDict = clip.second.UncheckedGet<VtDictionary>();
+
+            if (VtDictionaryIsHolding<VtArray<SdfAssetPath>>(clipDict,
+                    UsdClipsAPIInfoKeys->assetPaths.GetString()))
+            {
+                const VtArray<SdfAssetPath> &assetPaths =
+                    VtDictionaryGet<VtArray<SdfAssetPath>>(clipDict,
+                        UsdClipsAPIInfoKeys->assetPaths.GetString());
+
+                for (auto &&assetPath : assetPaths)
+                    refs.insert(assetPath.GetAssetPath());
+            }
+
+            if (VtDictionaryIsHolding<SdfAssetPath>(clipDict,
+                    UsdClipsAPIInfoKeys->manifestAssetPath.GetString()))
+            {
+                const SdfAssetPath &assetPath =
+                    VtDictionaryGet<SdfAssetPath>(clipDict,
+                        UsdClipsAPIInfoKeys->manifestAssetPath.GetString());
+
+                refs.insert(assetPath.GetAssetPath());
+            }
+        }
+    }
+
+    // Recurse on nameChildren
+    for (const SdfPrimSpecHandle &child : primspec->GetNameChildren()) {
+        _ClipReferencesRecursive(child, refs);
+    }
+}
+
+std::set<std::string>
+_ClipReferences(const SdfLayerRefPtr &layer)
+{
+    std::set<std::string>    refs;
+
+    _ClipReferencesRecursive(layer->GetPseudoRoot(), refs);
+
+    return refs;
+}
+
+void
+_ClipFixActiveDataFromPathMapRecursive(const SdfPrimSpecHandle &primspec,
+        const std::map<std::string, std::string> &deletingpathmap)
+{
+    VtValue clipsValue = primspec->GetInfo(UsdTokens->clips);
+    if (!clipsValue.IsEmpty() && clipsValue.IsHolding<VtDictionary>())
+    {
+        const VtDictionary clipsDict = clipsValue.UncheckedGet<VtDictionary>();
+
+        for (auto &&clip : clipsDict)
+        {
+            if (!clip.second.IsHolding<VtDictionary>())
+                continue;
+
+            VtDictionary clipDict = clip.second.UncheckedGet<VtDictionary>();
+
+            if (VtDictionaryIsHolding<VtArray<SdfAssetPath>>(clipDict,
+                    UsdClipsAPIInfoKeys->assetPaths.GetString()) &&
+                VtDictionaryIsHolding<VtVec2dArray>(clipDict,
+                    UsdClipsAPIInfoKeys->active.GetString()))
+            {
+                const VtArray<SdfAssetPath> &assetPaths =
+                    VtDictionaryGet<VtArray<SdfAssetPath>>(clipDict,
+                        UsdClipsAPIInfoKeys->assetPaths.GetString());
+                const VtVec2dArray &actives =
+                    VtDictionaryGet<VtVec2dArray>(clipDict,
+                        UsdClipsAPIInfoKeys->active.GetString());
+
+                // Go through the asset paths looking for entries in the
+                // deletingpathmap. If the destination path is already in
+                // the assetpaths array, we should update active entries to
+                // point to these existing asset paths. If the deletingpathmap
+                // entry is not in the assetpaths yet, we want to change the
+                // path (rather than letting it get deleted later).
+
+                // newassetpaths will contain the new value for assetPaths.
+                // If no matches to the deletingpathmap are found, this array
+                // will remain empty.
+                VtArray<SdfAssetPath> newassetpaths;
+                // idxmap will contain a map of old active index values to the
+                // new values that should replace them.
+                std::map<int, int> idxmap;
+                // remapidx tracks the new active index to use when we end up
+                // removing entries from the assetPaths array.
+                int remapidx = 0;
+
+                for (int idx = 0, n = assetPaths.size(); idx < n; idx++)
+                {
+                    const auto &assetPath = assetPaths[idx];
+                    auto it = deletingpathmap.find(assetPath.GetAssetPath());
+                    if (it != deletingpathmap.end())
+                    {
+                        if (newassetpaths.empty())
+                            newassetpaths.assign(assetPaths.begin(),
+                                assetPaths.begin() + idx);
+
+                        auto assetit = std::find(assetPaths.begin(),
+                            assetPaths.end(), SdfAssetPath(it->second));
+                        if (assetit == assetPaths.end())
+                        {
+                            newassetpaths.push_back(SdfAssetPath(it->second));
+                            remapidx++;
+                            if (idx != remapidx)
+                                idxmap.emplace(idx, remapidx);
+                        }
+                        else
+                        {
+                            // New asset paths are always appended, so there
+                            // should be no way for us to have an existing
+                            // asset path in the array with an index greater
+                            // than idx (the entry that is going to be
+                            // deleted). Note that we don't add an entry to
+                            // the newassetpaths, and we don't bump remapidx.
+                            // This marks a point where we are really removing
+                            // an asset path, so from now on every active index
+                            // will be changed.
+                            UT_ASSERT(idx > assetit - assetPaths.begin());
+                            idxmap.emplace(idx, assetit - assetPaths.begin());
+                        }
+                    }
+                    else if (!newassetpaths.empty())
+                    {
+                        // We've already had some kind of change. We need to
+                        // continue building newassetpaths, and track the
+                        // remapidx (in case it no longer matches idx).
+                        newassetpaths.push_back(assetPath);
+                        remapidx++;
+                        if (idx != remapidx)
+                            idxmap.emplace(idx, remapidx);
+                    }
+                    else
+                        remapidx = idx;
+                }
+
+                // If anything changed, update both the assetPaths and active
+                // arrays with the new values.
+                if (!newassetpaths.empty())
+                {
+                    clipDict[UsdClipsAPIInfoKeys->assetPaths] = newassetpaths;
+                    if (!idxmap.empty())
+                    {
+                        VtVec2dArray newactives(actives);
+
+                        for (int i = 0, n = newactives.size(); i < n; i++)
+                        {
+                            int oldidx = (int)newactives[i][1];
+                            auto it = idxmap.find(oldidx);
+                            if (it != idxmap.end())
+                                newactives[i] =
+                                    { newactives[i][0], (double)it->second };
+                        }
+                        clipDict[UsdClipsAPIInfoKeys->active] = newactives;
+                    }
+                    primspec->SetInfoDictionaryValue(UsdTokens->clips,
+                        TfToken(clip.first), VtValue(clipDict));
+                }
+            }
+        }
+    }
+
+    // Recurse on nameChildren
+    for (const SdfPrimSpecHandle &child : primspec->GetNameChildren()) {
+        _ClipFixActiveDataFromPathMapRecursive(child, deletingpathmap);
+    }
+}
+
+void
+_ClipFixActiveDataFromPathMap(const SdfLayerRefPtr &layer,
+        const std::map<std::string, std::string> &deletingpathmap)
+{
+    // If there is no chance of us changing anything, there's no point in
+    // traversing the layer's primspecs.
+    if (!deletingpathmap.empty())
+        _ClipFixActiveDataFromPathMapRecursive(
+            layer->GetPseudoRoot(), deletingpathmap);
+}
+
+bool
 _StitchLayersRecursive(const SdfLayerRefPtr &src,
 	const SdfLayerRefPtr &dest,
-	XUSD_IdentifierToLayerMap &destlayermap,
+        XUSD_IdentifierToReferenceInfoMap &destreferenceinfomap,
 	XUSD_IdentifierToSavePathMap &stitchedpathmap,
 	std::set<std::string> &newdestlayers,
-        std::map<std::string, SdfLayerRefPtr> &currentsamplesavelocations)
+        std::map<std::string, SdfLayerRefPtr> &currentsamplesavelocations,
+        bool save_locations_case_sensitive,
+        bool force_notifiable_file_format,
+        bool set_layer_override_save_paths,
+        HUSD_PathSet *varying_default_paths)
 {
     bool		 success = true;
 
@@ -873,30 +1349,43 @@ _StitchLayersRecursive(const SdfLayerRefPtr &src,
     if (stitchedpathmap.find(src->GetIdentifier()) != stitchedpathmap.end())
 	return success;
 
-    XUSD_IdentifierToLayerMap	 srclayermap;
+    XUSD_IdentifierToReferenceInfoMap srcreferenceinfomap;
 
-    HUSDaddExternalReferencesToLayerMap(src, srclayermap, false);
+    HUSDaddExternalReferencesToLayerMap(src, srcreferenceinfomap, false, true);
 
     // Stitch the source layer into the destination layer.
-    HUSDstitchLayers(dest, src);
+    HUSDstitchLayers(dest, src, varying_default_paths);
     stitchedpathmap.emplace(src->GetIdentifier(),
 	XUSD_SavePathInfo(dest->GetIdentifier()));
 
     // Go through all externally referenced layers to find other layers that
     // we need to stitch together and save to disk.
-    for (auto &&srcit : srclayermap)
+    for (auto &&srcit : srcreferenceinfomap)
     {
-	SdfLayerRefPtr	 srclayer = srcit.second;
+	SdfLayerRefPtr	         srclayer = srcit.second.myLayer;
+        XUSD_ExternalRefType     srcreftype = srcit.second.myReferenceType;
 
+        // If we failed to find a layer, exit with an error. The actual error
+        // message will have been added by HUSDaddExternalReferencesToLayerMap.
 	if (!srclayer)
 	{
 	    success = false;
 	    break;
 	}
 
-        bool             srcsavenodepath = false;
+        // If we are handed a placeholder layer, create an entry in the
+        // path update map to remove this identifier from the dest layer.
+        // We don't want placeholders showing up in our stitched result.
+        if (HUSDisLayerPlaceholder(srclayer))
+        {
+            stitchedpathmap.emplace(srclayer->GetIdentifier(),
+                XUSD_SavePathInfo());
+            continue;
+        }
+
         bool             srcsavelocationtimedep = false;
         std::string      srcsavelocation;
+        std::string      savekey;
 	SdfLayerRefPtr	 destlayer;
 
         // If we find an existing layer that we are already saving to the
@@ -906,32 +1395,45 @@ _StitchLayersRecursive(const SdfLayerRefPtr &src,
         // same location. This is not okay. We want to warn the user, and
         // increment the file name until we find one that is unique among
         // the layers being saved within this time sample.
-        srcsavelocation = HUSDgetLayerSaveLocation(srclayer, &srcsavenodepath);
+        srcsavelocation = HUSDgetLayerSaveLocation(srclayer);
         srcsavelocationtimedep = HUSDgetSavePathIsTimeDependent(srclayer);
-        if (currentsamplesavelocations.count(srcsavelocation) > 0)
+        if (save_locations_case_sensitive)
+            savekey = srcsavelocation;
+        else
+            savekey = UT_StringRef(srcsavelocation).toLower().toStdString();
+        if (currentsamplesavelocations.count(savekey) > 0)
         {
             // If we are finding the same layer for the second time (it is
             // perhaps referenced in by two separate sublayers), just skip
             // this occurrence of it. It has already been stitched in with
             // the new time sample.
-            if (currentsamplesavelocations[srcsavelocation] == srclayer)
+            if (currentsamplesavelocations[savekey] == srclayer)
                 continue;
 
             std::string      testpath = srcsavelocation;
             UT_StringHolder  ext = UT_String(testpath).fileExtension();
             UT_WorkBuffer    errbuf;
             std::string      nodepath;
+            std::string      testkey;
             UT_String        noext = UT_String(testpath).pathUpToExtension();
 
             // Make a unique save path for this layer.
             noext.append("_duplicate1");
             testpath = noext;
             testpath.append(ext);
-            while (currentsamplesavelocations.count(testpath) > 0)
+            if (save_locations_case_sensitive)
+                testkey = testpath;
+            else
+                testkey = UT_StringRef(testpath).toLower().toStdString();
+            while (currentsamplesavelocations.count(testkey) > 0)
             {
                 noext.incrementNumberedName();
                 testpath = noext;
                 testpath.append(ext);
+                if (save_locations_case_sensitive)
+                    testkey = testpath;
+                else
+                    testkey = UT_StringRef(testpath).toLower().toStdString();
             }
 
             if (HUSDgetCreatorNode(srclayer, nodepath))
@@ -951,14 +1453,17 @@ _StitchLayersRecursive(const SdfLayerRefPtr &src,
                 errbuf.buffer());
 
             srcsavelocation = testpath;
+            savekey = testkey;
         }
-        currentsamplesavelocations.emplace(srcsavelocation, srclayer);
+        currentsamplesavelocations.emplace(savekey, srclayer);
 
-	for (auto &&destit : destlayermap)
+	for (auto &&destit : destreferenceinfomap)
 	{
-	    if (HUSDgetLayerSaveLocation(destit.second) == srcsavelocation)
+            if (!UT_StringRef(HUSDgetLayerSaveLocation(destit.second.myLayer)).
+                    compare(srcsavelocation.c_str(),
+                         !save_locations_case_sensitive))
 	    {
-		destlayer = destit.second;
+		destlayer = destit.second.myLayer;
 		break;
 	    }
 	}
@@ -967,9 +1472,13 @@ _StitchLayersRecursive(const SdfLayerRefPtr &src,
 	{
 	    // A new layer to save. We must make a copy.
 	    UT_ASSERT(HUSDshouldSaveLayerToDisk(srclayer));
-	    destlayer = HUSDcreateAnonymousLayer(
-                UsdStageWeakPtr(), srcsavelocation);
-	    destlayermap[destlayer->GetIdentifier()] = destlayer;
+            if (force_notifiable_file_format)
+                destlayer = HUSDcreateAnonymousLayer();
+            else
+                destlayer = HUSDcreateAnonymousLayer(
+                    SdfLayerHandle(), srcsavelocation);
+            destreferenceinfomap[destlayer->GetIdentifier()] =
+                { destlayer, srcreftype };
 	    newdestlayers.insert(destlayer->GetIdentifier());
 	}
 	else
@@ -983,30 +1492,27 @@ _StitchLayersRecursive(const SdfLayerRefPtr &src,
         // hierarchy is copied to a new layer that can safely be used to
         // combine multiple time samples.
         _StitchLayersRecursive(srclayer, destlayer,
-            destlayermap, stitchedpathmap,
-            newdestlayers, currentsamplesavelocations);
+            destreferenceinfomap, stitchedpathmap,
+            newdestlayers, currentsamplesavelocations,
+            save_locations_case_sensitive,
+            force_notifiable_file_format,
+            set_layer_override_save_paths,
+            varying_default_paths);
 
         // After stitching, make sure the new layer is configured to save to
-        // the source layer save location we determined above. We want to
-        // either fake the creator node or the save path, depending on where
-        // we got the save location originally.
-        if (srcsavenodepath)
-        {
-            // The save location will be "./node/path.usd". Strip the extension
-            // and the leading ".".
-            UT_String    loc = UT_String(srcsavelocation).pathUpToExtension();
-            std::string  srcnodepath(loc.c_str() + 1);
-
-            HUSDsetCreatorNode(destlayer, srcnodepath);
-        }
-        else
-            HUSDsetSavePath(destlayer, srcsavelocation, srcsavelocationtimedep);
+        // the source layer save location we determined above. Do this by
+        // setting the override save path, which doesn't obscure the fact
+        // that the path originally came from a node path (if it did).
+        if (set_layer_override_save_paths)
+            HUSDsetSavePath(destlayer, UT_StringRef(),
+                srcsavelocationtimedep, srcsavelocation);
     }
 
     // Update references from src layer identifiers to dest layer identifiers.
     std::map<std::string, std::string> pathmap;
+    std::map<std::string, std::string> deletingpathmap;
 
-    for (auto &&srcit : srclayermap)
+    for (auto &&srcit : srcreferenceinfomap)
     {
 	auto	 mapit = stitchedpathmap.find(srcit.first);
 
@@ -1023,23 +1529,34 @@ _StitchLayersRecursive(const SdfLayerRefPtr &src,
 	// reference to the anonymous source. So we just want to delete all
 	// references to this source layer.
 	if (mapit != stitchedpathmap.end())
-	{
+        {
             std::string fullpath = mapit->second.myFinalPath.toStdString();
 
-	    if (newdestlayers.find(fullpath) != newdestlayers.end())
+            if (newdestlayers.find(fullpath) == newdestlayers.end())
+            {
+                pathmap[srcit.first] = std::string();
+                deletingpathmap[srcit.first] = fullpath;
+            }
+            else
 		pathmap[srcit.first] = fullpath;
-	    else
-		pathmap[srcit.first] = std::string();
 	}
     }
+    // Update clip "active" data for scenarios where we are about to remove
+    // duplicate asset paths.
+    _ClipFixActiveDataFromPathMap(dest, deletingpathmap);
+    // Update the actual layer references (which may remove clip asset path
+    // entries).
     HUSDupdateExternalReferences(dest, pathmap);
 
     // Add any sublayers from the source that are not on the dest.
     auto	 srcsubpaths = src->GetSubLayerPaths();
     auto	 destsubpaths = dest->GetSubLayerPaths();
 
-    for (auto &&srcsubpath : srcsubpaths)
+    for (int i = 0, n = srcsubpaths.size(); i < n; i++)
     {
+        std::string      srcsubpath = srcsubpaths[i];
+        SdfLayerOffset   srcoffset = src->GetSubLayerOffset(i);
+
 	// Don't stitch together anonymous placeholder layers.
         if (HUSDisLayerPlaceholder(srcsubpath))
             continue;
@@ -1065,7 +1582,12 @@ _StitchLayersRecursive(const SdfLayerRefPtr &src,
 	    }
 
 	    if (!foundsubpath)
+            {
+                int newsublayerindex = dest->GetNumSubLayerPaths();
+
 		dest->InsertSubLayerPath(destpath);
+                dest->SetSubLayerOffset(srcoffset, newsublayerindex);
+            }
 	}
     }
 
@@ -1095,7 +1617,11 @@ HUSDgetTag(const XUSD_DataLockPtr &datalock)
     UT_StringHolder		 nodepath;
 
     if (datalock)
-	HUSDgetNodePath(datalock->getLockedNodeId(), nodepath);
+    {
+        HUSDgetNodePath(datalock->getLockedNodeId(), nodepath);
+        if (nodepath.findCharIndex('.') >= 0)
+            nodepath.substitute(".", "_");
+    }
 
     return nodepath.toStdString();
 }
@@ -1112,6 +1638,14 @@ const TfToken &
 HUSDgetSavePathToken()
 {
     static const TfToken	 theToken("HoudiniSavePath");
+
+    return theToken;
+}
+
+const TfToken &
+HUSDgetOverrideSavePathToken()
+{
+    static const TfToken	 theToken("HoudiniOverrideSavePath");
 
     return theToken;
 }
@@ -1149,30 +1683,6 @@ HUSDgetEditorNodesToken()
 }
 
 const TfToken &
-HUSDgetMaterialIdToken()
-{
-    static const TfToken	 theToken("HoudiniMaterialId");
-
-    return theToken;
-}
-
-const TfToken &
-HUSDgetMaterialBindingIdToken()
-{
-    static const TfToken	 theToken("HoudiniMaterialBindingId");
-
-    return theToken;
-}
-
-const TfToken &
-HUSDgetIsAutoPreviewShaderToken()
-{
-    static const TfToken	 theToken("HoudiniIsAutoPreviewShader");
-
-    return theToken;
-}
-
-const TfToken &
 HUSDgetSoloLightPathsToken()
 {
     static const TfToken	 theToken("HoudiniSoloLightPaths");
@@ -1189,9 +1699,65 @@ HUSDgetSoloGeometryPathsToken()
 }
 
 const TfToken &
-HUSDgetPrimEditorNodeIdToken()
+HUSDgetTreatAsSopLayerToken()
 {
-    static const TfToken	 theToken("HoudiniPrimEditorNodeId");
+    static const TfToken	 theToken("HoudiniTreatAsSopLayer");
+
+    return theToken;
+}
+
+const TfToken &
+HUSDgetVolumeFilePathsToken()
+{
+    static const TfToken	 theToken("HoudiniVolumeFilePaths");
+
+    return theToken;
+}
+
+const TfToken &
+HUSDgetMaterialIdToken()
+{
+    static const TfToken	 theToken("HoudiniMaterialId");
+
+    return theToken;
+}
+
+const TfToken &
+HUSDgetHasAutoPreviewShaderToken()
+{
+    static const TfToken	 theToken("HoudiniHasAutoPreviewShader");
+
+    return theToken;
+}
+
+const TfToken &
+HUSDgetIsAutoCreatedShaderToken()
+{
+    static const TfToken	 theToken("HoudiniIsAutoCreatedShader");
+
+    return theToken;
+}
+
+const TfToken &
+HUSDgetPreviewTagsToken()
+{
+    static const TfToken	 theToken("HoudiniPreviewTags");
+
+    return theToken;
+}
+
+const TfToken &
+HUSDgetPreviewDefaultValueKeyPathToken()
+{
+    static const TfToken	 theToken("HoudiniPreviewTags:default_value");
+
+    return theToken;
+}
+
+const TfToken &
+HUSDgetPrimEditorNodesToken()
+{
+    static const TfToken	 theToken("HoudiniPrimEditorNodes");
 
     return theToken;
 }
@@ -1202,6 +1768,18 @@ HUSDgetSourceNodeToken()
     static const TfToken	 theToken("HoudiniSourceNode");
 
     return theToken;
+}
+
+const TfToken &
+HUSDgetDialogScriptToken()
+{
+    // Note, when saving USD files we strip metadata that starts with
+    // "Houdini", but we don't want to strip the parm dialog script,
+    // so we follow the schema-like convention of using "houdini:" prefix.
+    static const TfToken	 theToken("houdini:dialogScript");
+
+    return theToken;
+
 }
 
 const TfType &
@@ -1232,6 +1810,118 @@ HUSDisDerivedType(const UsdPrim &prim, const TfType &base_type)
 	return false;
 
     return true;
+}
+
+UT_StringHolder
+HUSDgetSpecifier(const UsdPrim &prim)
+{
+    if (prim)
+    {
+	switch (prim.GetSpecifier())
+	{
+	    case SdfSpecifierDef:
+		return HUSD_Constants::getPrimSpecifierDefine();
+	    case SdfSpecifierClass:
+		return HUSD_Constants::getPrimSpecifierClass();
+	    case SdfSpecifierOver:
+		return HUSD_Constants::getPrimSpecifierOverride();
+	    case SdfNumSpecifiers:
+		// Not a valid value. Just fall through.
+		break;
+	}
+    }
+
+    return UT_StringHolder();
+}
+
+bool
+HUSDisPrimEditable(const UsdPrim &prim)
+{
+    if (prim)
+    {
+        UsdHoudiniHoudiniEditableAPI editableapi(prim);
+
+        if (editableapi)
+        {
+            UsdAttribute editableattr =
+                editableapi.GetHoudiniEditableAttr();
+            bool editable = true;
+
+            if (editableattr &&
+                editableattr.Get(&editable) &&
+                !editable)
+                return false;
+        }
+
+        // Without the editable API, the primitive is editable.
+        return true;
+    }
+
+    // Prims that don't exist are "editable" in the sense that we should
+    // be allowed to create a primitive in this location.
+    return true;
+}
+
+bool
+HUSDisPrimSelectable(const UsdPrim &prim, UT_Map<HUSD_Path, bool> *cache)
+{
+    if (!prim)
+        return false;
+
+    UsdPrim testprim = prim;
+    SdfPathVector paths;
+    bool selectable = true;
+
+    while (testprim && !testprim.IsPseudoRoot())
+    {
+        if (cache)
+        {
+            auto it = cache->find(testprim.GetPrimPath());
+
+            // If we find a cached value before we find an authored attribute,
+            // we can just return the cached value.
+            if (it != cache->end())
+            {
+                selectable = it->second;
+                break;
+            }
+            paths.push_back(testprim.GetPrimPath());
+        }
+
+        UsdHoudiniHoudiniSelectableAPI selectableapi(testprim);
+
+        if (selectableapi)
+        {
+            UsdAttribute selectableattr =
+                selectableapi.GetHoudiniSelectableAttr();
+
+            // Stop traversing up the tree as soon as we hit an authored
+            // attribute, whether it is true or false.
+            if (selectableattr &&
+                selectableattr.Get(&selectable))
+                break;
+        }
+        testprim = testprim.GetParent();
+    }
+
+    if (cache)
+    {
+        for (auto &&path : paths)
+            cache->emplace(path, selectable);
+    }
+
+    return selectable;
+}
+
+bool
+HUSDisPrimHiddenInUi(const UsdPrim &prim)
+{
+    if (prim)
+        return prim.IsHidden();
+
+    // Prims that don't exist are not "hidden" in the sense that we should
+    // show a primitive in this location if one gets created.
+    return false;
 }
 
 SdfPath
@@ -1344,6 +2034,11 @@ HUSDgetUsdPrimPredicate(HUSD_PrimTraversalDemands demands)
     if (demands & HUSD_TRAVERSAL_ALLOW_INSTANCE_PROXIES)
 	pred.TraverseInstanceProxies(true);
 
+    // Note that this function ignores the "HUSD_TRAVERSAL_ALLOW_PROTOTYPES"
+    // flag, which has no corresponding traversal flag in USD. That flag
+    // must be handled explicitly in the (very rare) cases where we might
+    // want to respect it.
+
     return pred;
 }
 
@@ -1352,13 +2047,13 @@ HUSDgetUsdListPosition(const UT_StringRef &editopstr)
 {
     UsdListPosition	 editop(UsdListPositionFrontOfAppendList);
 
-    if (editopstr == HUSD_Constants::getReferenceEditOpAppendFront())
+    if (editopstr == HUSD_Constants::getEditOpAppendFront())
 	editop = UsdListPositionFrontOfAppendList;
-    else if (editopstr == HUSD_Constants::getReferenceEditOpAppendBack())
+    else if (editopstr == HUSD_Constants::getEditOpAppendBack())
 	editop = UsdListPositionBackOfAppendList;
-    else if (editopstr == HUSD_Constants::getReferenceEditOpPrependFront())
+    else if (editopstr == HUSD_Constants::getEditOpPrependFront())
 	editop = UsdListPositionFrontOfPrependList;
-    else if (editopstr == HUSD_Constants::getReferenceEditOpPrependBack())
+    else if (editopstr == HUSD_Constants::getEditOpPrependBack())
 	editop = UsdListPositionBackOfPrependList;
 
     return editop;
@@ -1378,6 +2073,12 @@ HUSDgetUsdStagePopulationMask(const HUSD_LoadMasks &load_masks)
 
 	for (const auto &path : load_masks.populatePaths())
 	    sdfpaths.push_back(HUSDgetSdfPath(path));
+        // The free camera prim and the layer info prim are both required for
+        // some low level underlying functionality to work. So make sure these
+        // special prims are always included in the population mask.
+        sdfpaths.push_back(HUSDgetHoudiniFreeCameraSdfPath());
+        sdfpaths.push_back(HUSDgetSdfPath(
+            HUSD_Constants::getHoudiniLayerInfoPrimPath()));
 	usdmask.Add(UsdStagePopulationMask(sdfpaths));
     }
 
@@ -1398,6 +2099,25 @@ HUSDgetSdfVariability(HUSD_Variability variability)
 
     return SdfVariabilityVarying;
 }
+
+SdfSpecifier
+HUSDgetSdfSpecifier(const UT_StringRef &specifier, bool *valid)
+ {
+     if (valid)
+         *valid = true;
+
+     if (specifier == HUSD_Constants::getPrimSpecifierClass().c_str())
+         return SdfSpecifierClass;
+     else if (specifier == HUSD_Constants::getPrimSpecifierDefine().c_str())
+         return SdfSpecifierDef;
+     else if (specifier == HUSD_Constants::getPrimSpecifierOverride().c_str())
+         return SdfSpecifierOver;
+
+     if (valid)
+         *valid = false;
+
+     return SdfSpecifierOver;
+ }
 
 SdfPrimSpecHandle
 HUSDgetLayerInfoPrim(const SdfLayerHandle &layer, bool create)
@@ -1431,7 +2151,8 @@ HUSDgetLayerInfoPrim(const SdfLayerHandle &layer, bool create)
 void
 HUSDsetSavePath(const SdfLayerHandle &layer,
 	const UT_StringRef &savepath,
-        bool savepath_is_time_dependent)
+        bool savepath_is_time_dependent,
+        const UT_StringRef &override_savepath)
 {
     auto		 infoprim = HUSDgetLayerInfoPrim(layer, true);
 
@@ -1446,9 +2167,17 @@ HUSDsetSavePath(const SdfLayerHandle &layer,
 	    data[HUSDgetSavePathIsTimeDependentToken()] =
                 VtValue(savepath_is_time_dependent);
         }
+        else if (override_savepath.isstring())
+        {
+            data[HUSDgetOverrideSavePathToken()] =
+                VtValue(override_savepath.toStdString());
+            data[HUSDgetSavePathIsTimeDependentToken()] =
+                VtValue(savepath_is_time_dependent);
+        }
 	else
         {
 	    data.erase(HUSDgetSavePathToken());
+            data.erase(HUSDgetOverrideSavePathToken());
 	    data.erase(HUSDgetSavePathIsTimeDependentToken());
         }
     }
@@ -1463,7 +2192,7 @@ HUSDgetSavePath(const SdfLayerHandle &layer,
     if (infoprim)
     {
 	auto		 data = infoprim->GetCustomData();
-	auto		 it = data.find(HUSDgetSavePathToken());
+        auto		 it = data.find(HUSDgetSavePathToken());
 
 	if (it != data.end())
 	    savepath = it->second.Get().Get<std::string>();
@@ -1474,6 +2203,28 @@ HUSDgetSavePath(const SdfLayerHandle &layer,
 	savepath.clear();
 
     return (savepath.length() > 0);
+}
+
+bool
+HUSDgetOverrideSavePath(const SdfLayerHandle &layer,
+        std::string &override_savepath)
+{
+    auto		 infoprim = HUSDgetLayerInfoPrim(layer, false);
+
+    if (infoprim)
+    {
+        auto		 data = infoprim->GetCustomData();
+        auto		 it = data.find(HUSDgetOverrideSavePathToken());
+
+        if (it != data.end())
+            override_savepath = it->second.Get().Get<std::string>();
+        else
+            override_savepath.clear();
+    }
+    else
+        override_savepath.clear();
+
+    return (override_savepath.length() > 0);
 }
 
 bool
@@ -1491,6 +2242,56 @@ HUSDgetSavePathIsTimeDependent(const SdfLayerHandle &layer)
     }
 
     return false;
+}
+
+void
+husdAddVolumeLockedGeos(
+        const UT_Function<void (const XUSD_LockedGeoPtr &)> &addfunc,
+        const SdfLayerRefPtr &layer)
+{
+    // The bgeo file format plugin records a list of its locked geos on the
+    // layer info prim (e.g. for any volumes produced by unpacking)
+    auto infoprim = HUSDgetLayerInfoPrim(layer, false);
+    if (!infoprim)
+        return;
+
+    auto data = infoprim->GetCustomData();
+    auto it = data.find(HUSDgetVolumeFilePathsToken());
+    if (it == data.end())
+        return;
+
+    auto file_paths = it->second.Get().Get<VtArray<SdfAssetPath>>();
+    for (auto &&file_path : file_paths)
+    {
+        SdfFileFormat::FileFormatArguments args;
+        std::string path;
+        SdfLayer::SplitIdentifier(file_path.GetAssetPath(), &path, &args);
+
+        auto locked_geo = XUSD_LockedGeoRegistry::getLockedGeo(path, args);
+        UT_ASSERT(locked_geo); // The locked geo should still be active!
+        if (locked_geo)
+            addfunc(locked_geo);
+    }
+}
+
+void
+HUSDaddVolumeLockedGeos(XUSD_Data &outdata,
+        const SdfLayerRefPtr &layer)
+{
+    husdAddVolumeLockedGeos(
+        [&outdata](const XUSD_LockedGeoPtr &locked_geo) {
+            outdata.addLockedGeo(locked_geo);
+        }, layer);
+}
+
+void
+HUSDaddVolumeLockedGeos(XUSD_LockedGeoSet &locked_geos,
+        const SdfLayerRefPtr &layer)
+{
+    husdAddVolumeLockedGeos(
+        [&locked_geos](const XUSD_LockedGeoPtr &locked_geo) {
+            locked_geos.insert(locked_geo);
+        }, layer);
 }
 
 void
@@ -1536,32 +2337,13 @@ HUSDgetSaveControl(const SdfLayerHandle &layer,
 void
 HUSDsetCreatorNode(const SdfLayerHandle &layer, int nodeid)
 {
-    UT_StringHolder	 nodepath;
-
-    if (HUSDgetNodePath(nodeid, nodepath))
-    {
-	auto		 infoprim = HUSDgetLayerInfoPrim(layer, true);
-
-	if (infoprim)
-	{
-	    auto		 data = infoprim->GetCustomData();
-
-	    data[HUSDgetCreatorNodeToken()] =
-		VtValue(nodepath.toStdString());
-	}
-    }
-}
-
-void
-HUSDsetCreatorNode(const SdfLayerHandle &layer, const std::string &nodepath)
-{
     auto		 infoprim = HUSDgetLayerInfoPrim(layer, true);
 
     if (infoprim)
     {
         auto		 data = infoprim->GetCustomData();
 
-        data[HUSDgetCreatorNodeToken()] = VtValue(nodepath);
+        data[HUSDgetCreatorNodeToken()] = VtValue(nodeid);
     }
 }
 
@@ -1570,18 +2352,21 @@ HUSDgetCreatorNode(const SdfLayerHandle &layer, std::string &nodepath)
 {
     auto		 infoprim = HUSDgetLayerInfoPrim(layer, false);
 
+    nodepath.clear();
     if (infoprim)
     {
 	auto		 data = infoprim->GetCustomData();
 	auto		 it = data.find(HUSDgetCreatorNodeToken());
 
 	if (it != data.end())
-	    nodepath = it->second.Get().Get<std::string>();
-	else
-	    nodepath.clear();
+        {
+	    int nodeid = it->second.Get().Get<int>();
+            OP_Node *node = OP_Node::lookupNode(nodeid);
+
+            if (node)
+                nodepath = node->getFullPath().toStdString();
+        }
     }
-    else
-	nodepath.clear();
 
     return (nodepath.length() > 0);
 }
@@ -1589,25 +2374,7 @@ HUSDgetCreatorNode(const SdfLayerHandle &layer, std::string &nodepath)
 void
 HUSDsetSourceNode(const UsdPrim &prim, int nodeid)
 {
-    UT_StringHolder	 nodepath;
-
-    if (HUSDgetNodePath(nodeid, nodepath))
-	prim.SetCustomDataByKey(HUSDgetSourceNodeToken(),
-	    VtValue(nodepath.toStdString()));
-}
-
-bool
-HUSDgetSourceNode(const UsdPrim &prim, std::string &nodepath)
-{
-    auto		 data = prim.GetCustomData();
-    auto		 it = data.find(HUSDgetCreatorNodeToken());
-
-    if (it != data.end())
-	nodepath = it->second.Get<std::string>();
-    else
-	nodepath.clear();
-
-    return (nodepath.length() > 0);
+    prim.SetCustomDataByKey(HUSDgetSourceNodeToken(), VtValue(nodeid));
 }
 
 void
@@ -1626,56 +2393,23 @@ HUSDclearEditorNodes(const SdfLayerHandle &layer)
 void
 HUSDaddEditorNode(const SdfLayerHandle &layer, int nodeid)
 {
-    UT_StringHolder	 nodepath;
-
-    if (HUSDgetNodePath(nodeid, nodepath))
-    {
-	auto		 infoprim = HUSDgetLayerInfoPrim(layer, true);
-
-	if (infoprim)
-	{
-	    auto		 data = infoprim->GetCustomData();
-	    auto		 it = data.find(HUSDgetEditorNodesToken());
-	    VtArray<std::string> vtnodepaths;
-
-	    if (it != data.end())
-		vtnodepaths = it->second.Get().Get<VtArray<std::string> >();
-	    if (std::find(vtnodepaths.begin(), vtnodepaths.end(),
-		    nodepath.toStdString()) == vtnodepaths.end())
-	    {
-		vtnodepaths.push_back(nodepath.toStdString());
-		data[HUSDgetEditorNodesToken()] = VtValue(vtnodepaths);
-	    }
-	}
-    }
-}
-
-bool
-HUSDgetEditorNodes(const SdfLayerHandle &layer,
-	std::vector<std::string> &nodepaths)
-{
-    auto		 infoprim = HUSDgetLayerInfoPrim(layer, false);
+    auto		 infoprim = HUSDgetLayerInfoPrim(layer, true);
 
     if (infoprim)
     {
-	auto		 data = infoprim->GetCustomData();
-	auto		 it = data.find(HUSDgetEditorNodesToken());
+        auto             data = infoprim->GetCustomData();
+        auto             it = data.find(HUSDgetEditorNodesToken());
+        VtArray<int>     vtnodeids;
 
-	if (it != data.end())
-	{
-	    VtArray<std::string>	 vtnodepaths;
-
-	    vtnodepaths = it->second.Get().Get<VtArray<std::string> >();
-	    nodepaths.insert(nodepaths.begin(),
-		vtnodepaths.begin(), vtnodepaths.end());
-	}
-	else
-	    nodepaths.clear();
+        if (it != data.end())
+            vtnodeids = it->second.Get().Get<VtArray<int> >();
+        if (std::find(vtnodeids.begin(), vtnodeids.end(), nodeid) ==
+            vtnodeids.end())
+        {
+            vtnodeids.push_back(nodeid);
+            data[HUSDgetEditorNodesToken()] = VtValue(vtnodeids);
+        }
     }
-    else
-	nodepaths.clear();
-
-    return (nodepaths.size() > 0);
 }
 
 void
@@ -1789,19 +2523,132 @@ HUSDgetSoloGeometryPaths(const SdfLayerHandle &layer,
 }
 
 void
-HUSDsetPrimEditorNodeId(const UsdPrim &prim, int nodeid)
+HUSDsetTreatAsSopLayer(const SdfLayerHandle &layer, bool treatassoplayer)
 {
-    if (prim)
-	prim.SetCustomDataByKey(HUSDgetPrimEditorNodeIdToken(),
-	    VtValue(nodeid));
+    auto		 infoprim = HUSDgetLayerInfoPrim(layer, true);
+
+    if (infoprim)
+    {
+        auto		 data = infoprim->GetCustomData();
+
+        data[HUSDgetTreatAsSopLayerToken()] = VtValue(treatassoplayer);
+    }
+}
+
+bool
+HUSDgetTreatAsSopLayer(const SdfLayerHandle &layer)
+{
+    auto		 infoprim = HUSDgetLayerInfoPrim(layer, false);
+
+    if (infoprim)
+    {
+        auto		 data = infoprim->GetCustomData();
+        auto		 it = data.find(HUSDgetTreatAsSopLayerToken());
+
+        if (it != data.end())
+        {
+            bool treatassoplayer = it->second.Get().Get<bool>();
+
+            return treatassoplayer;
+        }
+    }
+
+    return false;
 }
 
 void
-HUSDsetPrimEditorNodeId(const SdfPrimSpecHandle &prim, int nodeid)
+HUSDaddPrimEditorNodeId(const UsdPrim &prim, int nodeid)
 {
     if (prim)
-	prim->SetCustomData(HUSDgetPrimEditorNodeIdToken(),
-	    VtValue(nodeid));
+    {
+        VtValue oldvalue;
+        VtArray<int> ids;
+
+        oldvalue = prim.GetCustomDataByKey(HUSDgetPrimEditorNodesToken());
+        if (oldvalue.IsHolding<VtArray<int>>())
+            ids = oldvalue.UncheckedGet<VtArray<int>>();
+        ids.push_back(nodeid);
+        prim.SetCustomDataByKey(HUSDgetPrimEditorNodesToken(), VtValue(ids));
+    }
+}
+
+void
+HUSDaddPrimEditorNodeId(const SdfPrimSpecHandle &prim, int nodeid)
+{
+    if (prim)
+    {
+        auto customdata = prim->GetCustomData();
+        auto it = customdata.find(HUSDgetPrimEditorNodesToken());
+        VtArray<int> ids;
+
+        if (it != customdata.end() &&
+            it->second.Get().IsHolding<VtArray<int>>())
+            ids = it->second.Get().UncheckedGet<VtArray<int>>();
+        ids.push_back(nodeid);
+        prim->SetCustomData(HUSDgetPrimEditorNodesToken(), VtValue(ids));
+    }
+}
+
+void
+HUSDclearPrimEditorNodeIds(const UsdPrim &prim)
+{
+    if (prim)
+        prim.SetCustomDataByKey(HUSDgetPrimEditorNodesToken(),
+            VtValue(VtArray<int>()));
+}
+
+void
+HUSDclearPrimEditorNodeIds(const SdfPrimSpecHandle &prim)
+{
+    if (prim)
+        prim->SetCustomData(HUSDgetPrimEditorNodesToken(),
+            VtValue(VtArray<int>()));
+}
+
+void
+HUSDaddPropertyEditorNodeId(const UsdProperty &property, int nodeid)
+{
+    if (property)
+    {
+        VtValue oldvalue;
+        VtArray<int> ids;
+
+        oldvalue = property.GetCustomDataByKey(HUSDgetPrimEditorNodesToken());
+        if (oldvalue.IsHolding<VtArray<int>>())
+            ids = oldvalue.UncheckedGet<VtArray<int>>();
+        ids.push_back(nodeid);
+        UT_Set<int> temp(ids.begin(), ids.end());
+        ids.assign(temp.begin(), temp.end());
+        property.SetCustomDataByKey(
+                HUSDgetPrimEditorNodesToken(), VtValue(ids));
+    }
+}
+
+void
+HUSDclearPropertyEditorNodeIds(const UsdProperty &property)
+{
+    if (property)
+    {
+        property.SetCustomDataByKey(
+            HUSDgetPrimEditorNodesToken(), VtValue(VtArray<int>()));
+    }
+}
+
+void
+HUSDbumpPropertiesForHydra(const UsdAttributeVector &attrs)
+{
+    if (attrs.empty())
+        return;
+
+    SdfChangeBlock	 changeblock;
+
+    for (auto &&attr : attrs)
+    {
+        static SYS_AtomicCounter     theFilterIdCounter;
+        VtValue			     id( theFilterIdCounter.add(1) );
+
+        attr.SetCustomDataByKey( HUSDgetMaterialIdToken(), id );
+    }
 }
 
 void
@@ -1821,22 +2668,40 @@ HUSDclearDataId(const UsdAttribute &attr)
 TfToken
 HUSDgetParentKind(const TfToken &kind)
 {
-    static std::map<TfToken, TfToken>	 theModelHierarchy;
+    if (KindRegistry::IsA(kind, KindTokens->component))
+        return KindTokens->group;
+    if (KindRegistry::IsA(kind, KindTokens->subcomponent))
+        return KindTokens->component;
 
-    if (theModelHierarchy.empty())
+    // If it's not a component or subcomponent, then treat is like a "group"
+    // kind, which can contain other models. In the absence of any better
+    // guess, a group's parent should be a group, and an assembly's parent
+    // should be an assembly. So assume all custom kinds should also be
+    // self-containing.
+    return kind;
+}
+
+bool
+HUSDprimAndAllExistingAncestorsActive(const UsdStageWeakPtr &stage,
+	const SdfPath &path)
+{
+    // We can only handle absolute paths. Return false because the question
+    // doesn't even really make sense.
+    UT_ASSERT(path.IsAbsolutePath());
+    if (!path.IsAbsolutePath())
+        return false;
+
+    // The absolute root path always exists and can't be inactive.
+    SdfPath testpath = path;
+    while (testpath != SdfPath::AbsoluteRootPath())
     {
-	theModelHierarchy[KindTokens->subcomponent] = KindTokens->component;
-	theModelHierarchy[KindTokens->component] = KindTokens->group;
-	theModelHierarchy[KindTokens->group] = KindTokens->group;
-	theModelHierarchy[KindTokens->assembly] = KindTokens->assembly;
+        UsdPrim prim = stage->GetPrimAtPath(testpath);
+        if (prim)
+            return prim.IsActive();
+        testpath = testpath.GetParentPath();
     }
 
-    auto	 it = theModelHierarchy.find(kind);
-
-    if (it != theModelHierarchy.end())
-	return it->second;
-
-    return TfToken();
+    return true;
 }
 
 SdfPrimSpecHandle
@@ -1844,14 +2709,33 @@ HUSDcreatePrimInLayer(const UsdStageWeakPtr &stage,
 	const SdfLayerHandle &layer,
 	const SdfPath &path,
 	const TfToken &kind,
-	bool parent_prims_define,
+        SdfSpecifier specifier,
+        SdfSpecifier parent_prims_specifier,
 	const std::string &parent_prims_type)
 {
+    // We have to have an absolute path, because we don't know what a relative
+    // path is meant to be relative to.
+    if (!path.IsAbsolutePath())
+        return SdfPrimSpecHandle();
+
+    // If for some reason we are asked to create the root prim, just claim
+    // success and return the root prim. No point trying to set the specifier
+    // or other data on the root prim.
+    if (path.IsAbsoluteRootPath())
+        return layer->GetPseudoRoot();
+
+    // Make sure we aren't trying to create a primitive that is going to be a
+    // child of an inactive primitive. The creation will work, but subsequent
+    // operations will fail (somewhat mysteriously). Better to catch the error
+    // sooner.
+    if (!HUSDprimAndAllExistingAncestorsActive(stage, path))
+        return SdfPrimSpecHandle();
+
     UsdPrim		 prim = stage->GetPrimAtPath(path);
     SdfPrimSpecHandle	 existing_parent_spec;
     bool		 traverse_parents = false;
 
-    if (parent_prims_define ||
+    if (SdfIsDefiningSpecifier(parent_prims_specifier) ||
 	!parent_prims_type.empty() ||
 	!kind.IsEmpty())
 	traverse_parents = true;
@@ -1870,6 +2754,11 @@ HUSDcreatePrimInLayer(const UsdStageWeakPtr &stage,
     }
 
     SdfPrimSpecHandle	 primspec = SdfCreatePrimInLayer(layer, path);
+
+    // If we have been asked to put a specifier on the prim, do it even if
+    // the prim already exists.
+    if (primspec && SdfIsDefiningSpecifier(specifier))
+        primspec->SetSpecifier(specifier);
 
     // If the prim already exists on the stage, we don't want to make any
     // further changes to the prim in this layer. We must check for the prim
@@ -1898,8 +2787,8 @@ HUSDcreatePrimInLayer(const UsdStageWeakPtr &stage,
 		if (parentprim && parentprim.IsDefined())
 		    break;
 
-		if (parent_prims_define)
-		    parentspec->SetSpecifier(SdfSpecifierDef);
+		if (SdfIsDefiningSpecifier(parent_prims_specifier))
+		    parentspec->SetSpecifier(parent_prims_specifier);
 		if (!parent_prims_type.empty())
 		    parentspec->SetTypeName(parent_prims_type);
 		if (!parentkind.IsEmpty())
@@ -1949,6 +2838,36 @@ HUSDcopySpec(const SdfLayerHandle &srclayer,
 	    ph::_6, ph::_7, ph::_8, ph::_9));
 }
 
+void
+HUSDmodifyAssetPaths(const SdfLayerHandle &layer,
+        const UsdUtilsModifyAssetPathFn &modifyFn)
+{
+    SdfChangeBlock       changeblock;
+
+    // The UsdUtilsModifyAssetPaths method sets the layer offset to a no-op
+    // for any sublayer where the path is changed. We are just manipulating
+    // the paths, but pointing to the same files, so we want to preserve any
+    // layer offset values. Stash the values before the update, and restore
+    // them after it's done.
+    SdfLayerOffsetVector oldoffsets = layer->GetSubLayerOffsets();
+    UsdUtilsModifyAssetPaths(layer, modifyFn);
+    SdfLayerOffsetVector newoffsets = layer->GetSubLayerOffsets();
+
+    // If the number of sublayers changed, we can't really correlate the old
+    // and new offsets, so don't bother trying.
+    if (oldoffsets.size() == newoffsets.size())
+    {
+        for (int i = 0, n = newoffsets.size(); i < n; i++)
+        {
+            if (newoffsets[i] != oldoffsets[i])
+            {
+                UT_ASSERT(newoffsets[i] == SdfLayerOffset());
+                layer->SetSubLayerOffset(oldoffsets[i], i);
+            }
+        }
+    }
+}
+
 bool
 HUSDupdateExternalReferences(const SdfLayerHandle &layer,
 	const std::map<std::string, std::string> &pathmap)
@@ -1958,7 +2877,7 @@ HUSDupdateExternalReferences(const SdfLayerHandle &layer,
 
     SdfChangeBlock	 changeblock;
 
-    UsdUtilsModifyAssetPaths(layer,
+    HUSDmodifyAssetPaths(layer,
         husd_UpdateReferencesFromMap(pathmap));
 
     return true;
@@ -1966,9 +2885,32 @@ HUSDupdateExternalReferences(const SdfLayerHandle &layer,
 
 void
 HUSDstitchLayers(const SdfLayerHandle &strongLayer,
-	const SdfLayerHandle &weakLayer)
+	const SdfLayerHandle &weakLayer,
+	HUSD_PathSet *varyingDefaultPaths /*=nullptr*/)
 {
-    UsdUtilsStitchLayers(strongLayer, weakLayer, _StitchCallback);
+    // It's possible to end up in a state where there is no "subLayers"
+    // field on the root prim, but there is an (empty) subLayerOffsets field.
+    // When we stitch in a weaker layer with both these fields, the subLayers
+    // get copied over, but the subLayerOffsets don't (because they are a
+    // weaker opinion). Then we have a mismatch in the size of the subLayer
+    // and subLayerOffsets arrays. This makes PcpLayerStack::_BuildLayerStack
+    // crash. So if we are in this state, delete the (empty) subLayerOffsets
+    // array from the stronger layer before stitching in the weaker layer.
+    if (strongLayer->HasField(SdfPath::AbsoluteRootPath(),
+            SdfFieldKeys->SubLayerOffsets) &&
+        !strongLayer->HasField(SdfPath::AbsoluteRootPath(),
+            SdfFieldKeys->SubLayers))
+    {
+        // The subLayerOffsets array should at least be _empty_, of something
+        // is even more wrong going on here...
+        UT_ASSERT(strongLayer->GetSubLayerOffsets().size() == 0);
+        strongLayer->EraseField(SdfPath::AbsoluteRootPath(),
+            SdfFieldKeys->SubLayerOffsets);
+    }
+    using namespace std::placeholders;
+    auto stitchCB = std::bind(_StitchCallback, _1, _2, _3, _4, _5, _6, _7,
+                              varyingDefaultPaths);
+    UsdUtilsStitchLayers(strongLayer, weakLayer, stitchCB);
 }
 
 bool
@@ -1982,30 +2924,41 @@ HUSDisSopLayer(const std::string &identifier)
 bool
 HUSDisSopLayer(const SdfLayerHandle &layer)
 {
-    if (layer->IsAnonymous())
-    {
-	std::string	 nodepath;
+    if (HUSDisLopLayer(layer))
+        return HUSDgetTreatAsSopLayer(layer);
 
-	// If a SOP layer is anonymous, it will have a creator node.
-	if (HUSDgetCreatorNode(layer, nodepath))
-	{
-	    // And that creator node will be a SOP.
-	    if (OPgetDirector()->findSOPNode(nodepath.c_str()))
-	    {
-		return true;
-	    }
-	}
+    return HUSDisSopLayer(layer->GetIdentifier());
+}
+
+bool
+HUSDisLopLayer(const std::string &identifier)
+{
+    if (SdfLayer::IsAnonymousLayerIdentifier(identifier))
+    {
+        std::string tag = SdfLayer::GetDisplayNameFromIdentifier(identifier);
+
+        // Layers created by LOPs will have the "LOP" prefix. Layers created
+        // by stage or layer flattening will simply have ".usda" as their
+        // display name (see UsdStage::Flatten implementation).
+        if (tag.find(theLopTagPrefix) == 0 || tag == ".usda")
+        {
+            return true;
+        }
     }
-    else
-	return HUSDisSopLayer(layer->GetIdentifier());
 
     return false;
 }
 
 bool
+HUSDisLopLayer(const SdfLayerHandle &layer)
+{
+    return HUSDisLopLayer(layer->GetIdentifier());
+}
+
+bool
 HUSDshouldSaveLayerToDisk(const SdfLayerHandle &layer)
 {
-    if (SdfLayer::IsAnonymousLayerIdentifier(layer->GetIdentifier()))
+    if (HUSDisLopLayer(layer->GetIdentifier()))
     {
 	std::string	 savecontrol;
 
@@ -2027,8 +2980,9 @@ HUSDshouldSaveLayerToDisk(const SdfLayerHandle &layer)
 std::string
 HUSDgetLayerSaveLocation(const SdfLayerHandle &layer, bool *using_node_path)
 {
-    std::string	 savepath;
-    std::string	 savecontrol;
+    std::string  savepath;
+    std::string  savecontrol;
+    std::string  override_savepath;
 
     if (!HUSDgetSavePath(layer, savepath))
     {
@@ -2060,27 +3014,56 @@ HUSDgetLayerSaveLocation(const SdfLayerHandle &layer, bool *using_node_path)
     else if (using_node_path)
 	*using_node_path = false;
 
-    UT_ASSERT(!SdfLayer::IsAnonymousLayerIdentifier(savepath));
+    // If our save path has been overridden, use the override path even if
+    // we are using the node path to get the save location. But we still want
+    // to know that the save path originally came from a node path or else
+    // the HUSD_Save saveStage code for making node paths relative to the
+    // primary USD file won't work properly.
+    if (HUSDgetOverrideSavePath(layer, override_savepath))
+        savepath = override_savepath;
+
+    UT_ASSERT(!HUSDisLopLayer(savepath));
 
     return savepath;
 }
 
+std::map<std::string, XUSD_ExternalRefType>
+HUSDgetExternalReferences(const SdfLayerRefPtr &layer)
+{
+    std::map<std::string, XUSD_ExternalRefType>  result;
+    std::set<std::string>	                 otherrefs;
+    std::set<std::string>	                 cliprefs;
+
+    // Get all payload, reference, and sublayer references.
+    otherrefs = layer->GetExternalReferences();
+    for (auto &&ref : otherrefs)
+        result.emplace(ref, XUSD_EXTERNAL_REF_OTHER);
+    // Get all references stored in clip metadata.
+    cliprefs = _ClipReferences(layer);
+    for (auto &&ref : cliprefs)
+        result.emplace(ref, XUSD_EXTERNAL_REF_VALUE_CLIP);
+
+    return result;
+}
+
 void
 HUSDaddExternalReferencesToLayerMap(const SdfLayerRefPtr &layer,
-	XUSD_IdentifierToLayerMap &layermap,
-	bool recursive)
+        XUSD_IdentifierToReferenceInfoMap &referenceinfomap,
+	bool recursive,
+        bool include_placeholders)
 {
-    std::set<std::string>	 refs;
+    auto refs = HUSDgetExternalReferences(layer);
 
-    refs = layer->GetExternalReferences();
-    for (auto &&ref : refs)
+    for (auto &&it : refs)
     {
-	if (layermap.find(ref) == layermap.end())
+        auto ref = it.first;
+        auto reftype = it.second;
+
+	if (referenceinfomap.find(ref) == referenceinfomap.end())
 	{
 	    // Quick pre-check to avoid finding/opening the layer just to
 	    // test if it should be saved to disk.
-	    if (SdfLayer::IsAnonymousLayerIdentifier(ref) ||
-		HUSDisSopLayer(ref))
+	    if (HUSDisLopLayer(ref) || HUSDisSopLayer(ref))
 	    {
 		auto		 reflayer = SdfLayer::FindOrOpen(ref);
 
@@ -2092,11 +3075,16 @@ HUSDaddExternalReferencesToLayerMap(const SdfLayerRefPtr &layer,
                 }
                 else if (HUSDshouldSaveLayerToDisk(reflayer))
 		{
-		    layermap[ref] = reflayer;
+                    referenceinfomap[ref] = { reflayer, reftype };
 		    if (recursive)
 			HUSDaddExternalReferencesToLayerMap(
-			    reflayer, layermap, recursive);
+			    reflayer, referenceinfomap, recursive);
 		}
+                else if (include_placeholders &&
+                         HUSDisLayerPlaceholder(reflayer))
+                {
+                    referenceinfomap[ref] = { reflayer, reftype };
+                }
 	    }
 	}
     }
@@ -2105,27 +3093,60 @@ HUSDaddExternalReferencesToLayerMap(const SdfLayerRefPtr &layer,
 bool
 HUSDaddStageTimeSample(const UsdStageWeakPtr &src,
 	const UsdStageRefPtr &dest,
-	SdfLayerRefPtrVector &hold_layers)
+        const UsdTimeCode &timecode,
+	XUSD_LayerSet &held_layers,
+        bool force_notifiable_file_format,
+        bool set_layer_override_save_paths,
+        XUSD_ExistenceTracker *existence_tracker,
+        HUSD_PathSet *varying_default_paths /*=nullptr*/)
 {
     ArResolverContextBinder	          binder(src->GetPathResolverContext());
-    auto			          srclayer = src->GetRootLayer();
-    auto			          destlayer = dest->GetRootLayer();
-    XUSD_IdentifierToLayerMap	          destlayermap;
+    SdfLayerRefPtr		          srclayer = src->GetRootLayer();
+    SdfLayerRefPtr		          destlayer = dest->GetRootLayer();
+    XUSD_IdentifierToReferenceInfoMap     destreferenceinfomap;
     XUSD_IdentifierToSavePathMap          stitchedpathmap;
     std::set<std::string>	          newdestlayers;
     std::map<std::string, SdfLayerRefPtr> currentsamplesavelocations;
     bool			          success = false;
 
-    HUSDaddExternalReferencesToLayerMap(destlayer, destlayermap, true);
+    // If the source stage has a session layer, incorporate the session layer
+    // data into the root layer of the stage. This is how we save data from
+    // post layers.
+    if (src->GetSessionLayer())
+    {
+        // Flatten the session layers into a single layer.
+        UsdStageRefPtr poststage =
+            HUSDcreateStageInMemory(UsdStage::LoadNone, src);
+        poststage->GetRootLayer()->TransferContent(src->GetSessionLayer());
+        srclayer = HUSDflattenLayers(poststage);
+        // Stitch the original root layer into the flattened session layer.
+        HUSDstitchLayers(srclayer, src->GetRootLayer(), varying_default_paths);
+    }
 
+    HUSDaddExternalReferencesToLayerMap(destlayer, destreferenceinfomap, true);
+
+    if (existence_tracker)
+        existence_tracker->collectNewStageData(src);
     success = _StitchLayersRecursive(srclayer, destlayer,
-	destlayermap, stitchedpathmap,
-        newdestlayers, currentsamplesavelocations);
+        destreferenceinfomap, stitchedpathmap,
+        newdestlayers, currentsamplesavelocations,
+        UT_EnvControl::getInt(ENV_HOUDINI_CASE_SENSITIVE_FS) != 0,
+        force_notifiable_file_format,
+        set_layer_override_save_paths,
+        varying_default_paths);
+    if (existence_tracker)
+        existence_tracker->authorVisibility(dest, timecode);
 
-    for (auto &&it : destlayermap)
-	hold_layers.push_back(it.second);
+    for (auto &&it : destreferenceinfomap)
+	held_layers.insert(it.second.myLayer);
 
     return success;
+}
+
+const std::string &
+HUSDgetStageRootLayerIdentifier()
+{
+    return theLopStageRootLayerIdentifier;
 }
 
 UsdStageRefPtr
@@ -2142,7 +3163,7 @@ HUSDcreateStageInMemory(UsdStage::InitialLoadSet load,
 	UT_DSO		 dso;
 
 	dso.run("newStageFactory", &theFactories);
-	theFactories.stdsort(
+	theFactories.sort(
 	    [](const XUSD_StageFactory *f1, const XUSD_StageFactory *f2) {
 		return (f1->getPriority() < f2->getPriority());
 	    });
@@ -2156,7 +3177,7 @@ HUSDcreateStageInMemory(UsdStage::InitialLoadSet load,
 	// When building a stage based on an existing resolver context,
 	// plugin factories don't even get a chance.
 	stage = UsdStage::CreateInMemory(
-	    "root.usd",
+            HUSDgetStageRootLayerIdentifier(),
 	    *resolver_context,
 	    load);
     }
@@ -2165,7 +3186,7 @@ HUSDcreateStageInMemory(UsdStage::InitialLoadSet load,
 	// When building a stage based on an existing stage, copy the
 	// resolver context. Plugin factories don't even get a chance.
 	stage = UsdStage::CreateInMemory(
-	    "root.usd",
+            HUSDgetStageRootLayerIdentifier(),
 	    context_stage->GetPathResolverContext(),
 	    load);
     }
@@ -2179,7 +3200,7 @@ HUSDcreateStageInMemory(UsdStage::InitialLoadSet load,
 	// Last resort. Just use a default context object.
 	if (!stage)
 	    stage = UsdStage::CreateInMemory(
-		"root.usd",
+                HUSDgetStageRootLayerIdentifier(),
 		ArGetResolver().CreateDefaultContext(),
 		load);
     }
@@ -2197,8 +3218,41 @@ HUSDcreateStageInMemory(UsdStage::InitialLoadSet load,
         // nodes.
         UsdGeomSetStageMetersPerUnit(stage,
             HUSD_Preferences::defaultMetersPerUnit());
-        stage->SetTimeCodesPerSecond(CHgetManager()->getSamplesPerSec());
-        stage->SetFramesPerSecond(CHgetManager()->getSamplesPerSec());
+
+        // We are using the FPS context option to set our stage's FPS.
+        // Add a micronode dependency so this node will recook if the @fps
+        // context option changes.
+        static constexpr UT_StringLit theFpsOption("fps");
+        int thread = SYSgetSTID();
+        CH_EvalContext &ctx = CHgetManager()->evalContext(thread);
+        DEP_ContextOptionsReadHandle options = ctx.contextOptions();
+        UT_OptionEntryPtr entry;
+        fpreal fps;
+
+        // Use the default context options if there isn't one in the
+        // current CH evaluation context.
+        if (options.isNull())
+            options = CHgetManager()->getDefaultContextOptions();
+
+        if (!options.isNull() && options->hasOption(theFpsOption.asRef()))
+            entry = options->getOptionEntry(theFpsOption.asRef())->clone();
+
+        // There should always be a numeric fps context option available.
+        UT_ASSERT(entry && entry->getType() == UT_OPTION_FPREAL);
+        if (entry && entry->getType() == UT_OPTION_FPREAL)
+            fps = entry->getOptionF();
+        else
+            fps = CHgetManager()->getSamplesPerSec();
+        stage->SetTimeCodesPerSecond(fps);
+        stage->SetFramesPerSecond(fps);
+        // Add dependency tracking in case the global or context-specific
+        // @fps value changes.
+        if (OP_Node *node = OP_Node::lookupNode(resolver_context_nodeid))
+        {
+            node->dataMicroNode().addContextOptionDep(theFpsOption.asRef());
+            node->dataMicroNode().addExplicitInput(CHgetManager()->
+                getDefaultContextOptionMicroNode(theFpsOption.asRef()));
+        }
     }
 
     return stage;
@@ -2211,7 +3265,19 @@ HUSDcreateStageInMemory(const HUSD_LoadMasks *load_masks,
 	const ArResolverContext *resolver_context)
 {
     UsdStageRefPtr		 stage;
+    PcpVariantFallbackMap        oldfallbacks;
+    bool                         restorefallbacks = false;
 
+    if (load_masks)
+    {
+        PcpVariantFallbackMap    fallbacks;
+
+        oldfallbacks = UsdStage::GetGlobalVariantFallbacks();
+        HUSDconvertVariantSelectionFallbacks(
+            load_masks->variantSelectionFallbacks(), fallbacks);
+        UsdStage::SetGlobalVariantFallbacks(fallbacks);
+        restorefallbacks = true;
+    }
     stage = HUSDcreateStageInMemory(
 	(load_masks && !load_masks->loadAll())
 	    ? UsdStage::LoadNone
@@ -2219,6 +3285,8 @@ HUSDcreateStageInMemory(const HUSD_LoadMasks *load_masks,
 	context_stage,
 	resolver_context_nodeid,
 	resolver_context);
+    if (restorefallbacks)
+        UsdStage::SetGlobalVariantFallbacks(oldfallbacks);
 
     // Set the stage mask on the new stage.
     if (load_masks)
@@ -2250,23 +3318,75 @@ HUSDcreateStageInMemory(const HUSD_LoadMasks *load_masks,
     return stage;
 }
 
-SdfLayerRefPtr
-HUSDcreateAnonymousLayer(
-        const UsdStageWeakPtr &context_stage,
-        const std::string &tag)
+UsdStageRefPtr
+HUSDcreateStageFromRootLayer(const SdfLayerRefPtr &rootlayer,
+    const HUSD_LoadMasks *load_masks,
+    const UsdStageWeakPtr &context_stage)
 {
-    SdfLayerRefPtr layer;
+    UsdStageRefPtr		 stage;
 
-    layer = SdfLayer::CreateAnonymous(tag);
-    if (context_stage)
+    // We should always be passed a stage from which to copy our asset resolver
+    // context. This method is only used by HUSD_LockedStage to create a stage
+    // with a file on disk as the root layer. This wrapper function allows us
+    // to preserve the resolver context and load masks from the source LOP
+    // node.
+    UT_ASSERT(context_stage);
+    UsdStagePopulationMask stage_mask = load_masks
+        ? HUSDgetUsdStagePopulationMask(*load_masks)
+        : UsdStagePopulationMask::All();
+    if (stage_mask == UsdStagePopulationMask::All())
+        stage = UsdStage::Open(rootlayer,
+            (context_stage
+                ? context_stage->GetPathResolverContext()
+                : ArGetResolver().CreateDefaultContext()),
+            (load_masks && !load_masks->loadAll())
+                ? UsdStage::LoadNone
+                : UsdStage::LoadAll);
+    else
+        stage = UsdStage::OpenMasked(rootlayer,
+            context_stage
+                ? context_stage->GetPathResolverContext()
+                : ArGetResolver().CreateDefaultContext(),
+            stage_mask,
+            (load_masks && !load_masks->loadAll())
+                ? UsdStage::LoadNone
+                : UsdStage::LoadAll);
+
+    if (load_masks && !load_masks->muteLayers().empty())
     {
-        SdfPrimSpecHandle layerroot =
-            layer->GetPseudoRoot();
-        SdfPrimSpecHandle stageroot =
-            context_stage->GetRootLayer()->GetPseudoRoot();
-        VtValue value;
+        std::vector<std::string>	 mutelayers;
 
-        if (layerroot && stageroot)
+        for (auto &&identifier : load_masks->muteLayers())
+            mutelayers.push_back(identifier.toStdString());
+        stage->MuteAndUnmuteLayers(
+            mutelayers, std::vector<std::string>());
+    }
+    if (load_masks && !load_masks->loadAll())
+    {
+        UsdStageLoadRules        loadrules(UsdStageLoadRules::LoadNone());
+
+        for (auto &&path : load_masks->loadPaths())
+            loadrules.LoadWithDescendants(HUSDgetSdfPath(path));
+
+        stage->SetLoadRules(loadrules);
+    }
+
+    return stage;
+}
+
+void
+HUSDcopyMinimalRootPrimMetadata(const SdfLayerRefPtr &dest,
+        const SdfLayerHandle &src)
+{
+    UT_ASSERT(dest);
+    if (src)
+    {
+        SdfPrimSpecHandle destroot = dest->GetPseudoRoot();
+        SdfPrimSpecHandle srcroot = src->GetPseudoRoot();
+        VtValue destvalue;
+        VtValue srcvalue;
+
+        if (destroot && srcroot)
         {
             static const TfTokenVector theMatchStageFields({
                 UsdGeomTokens->upAxis,
@@ -2275,10 +3395,35 @@ HUSDcreateAnonymousLayer(
                 SdfFieldKeys->TimeCodesPerSecond
             });
             for (auto &&field : theMatchStageFields)
-                if (stageroot->HasField(field, &value))
-                    layerroot->SetInfo(field, value);
+            {
+                if (srcroot->HasField(field, &srcvalue))
+                {
+                    if (!destroot->HasField(field, &destvalue) ||
+                        srcvalue != destvalue)
+                        destroot->SetInfo(field, srcvalue);
+                }
+                else if (destroot->HasField(field))
+                    destroot->ClearField(field);
+            }
         }
     }
+}
+
+SdfLayerRefPtr
+HUSDcreateAnonymousLayer(
+        const SdfLayerHandle &context_layer,
+        const std::string &tag)
+{
+    SdfLayerRefPtr layer;
+    std::string loptag = theLopTagPrefix;
+
+    if (!tag.empty())
+    {
+        loptag += ":";
+        loptag += tag;
+    }
+    layer = SdfLayer::CreateAnonymous(loptag);
+    HUSDcopyMinimalRootPrimMetadata(layer, context_layer);
 
     return layer;
 }
@@ -2286,18 +3431,18 @@ HUSDcreateAnonymousLayer(
 SdfLayerRefPtr
 HUSDcreateAnonymousCopy(SdfLayerRefPtr srclayer, const std::string &tag)
 {
-    SdfLayerRefPtr copylayer = HUSDcreateAnonymousLayer(UsdStageWeakPtr(), tag);
+    SdfLayerRefPtr copylayer = HUSDcreateAnonymousLayer(SdfLayerHandle(), tag);
 
     // Copy the source layer contents.
     copylayer->TransferContent(srclayer);
 
     // For layers being copied from disk, we need to go through all external
     // references and make them full paths.
-    if (!srclayer->IsAnonymous())
+    if (!HUSDisLopLayer(srclayer))
     {
         SdfChangeBlock	 changeblock;
 
-        UsdUtilsModifyAssetPaths(copylayer,
+        HUSDmodifyAssetPaths(copylayer,
             husd_UpdateReferencesToFullPaths(srclayer));
     }
 
@@ -2322,17 +3467,20 @@ HUSDflattenLayerPartitions(const UsdStageWeakPtr &stage,
 SdfLayerRefPtr
 HUSDflattenLayers(const UsdStageWeakPtr &stage)
 {
-    return UsdUtilsFlattenLayerStack(stage,
-	_FlattenLayerStackResolveAssetPath);
+    PcpPrimIndex index = stage->GetPseudoRoot().GetPrimIndex();
+    return UsdFlattenLayerStack(
+        index.GetRootNode().GetLayerStack(),
+        _FlattenLayerStackResolveAssetPath);
 }
 
 bool
 HUSDisLayerEmpty(const SdfLayerHandle &layer,
-        const UsdStageRefPtr &compare_stage_root_prim)
+        const UsdStageRefPtr &compare_stage_root_prim,
+        bool ignore_sublayers)
 {
     // If the layer has a sublayer path or more than one root prim, it's
     // not empty.
-    if (!layer->GetSubLayerPaths().empty() ||
+    if (!(layer->GetSubLayerPaths().empty() || ignore_sublayers) ||
 	layer->GetRootPrims().size() > 1 ||
 	layer->GetRootPrimOrder().size() > 1)
 	return false;
@@ -2369,11 +3517,13 @@ HUSDisLayerEmpty(const SdfLayerHandle &layer,
 
 	auto	 data = infoprim->GetCustomData();
 
-	// Any custom data other than a creator node, treat the layer as
-	// not empty.
+	// Any custom data other than a creator node and the flag indicating
+        // whether the layer should be treated as a SOP layer, treat the layer
+        // as not empty.
 	for (auto it : data)
 	{
-	    if (it.first != HUSDgetCreatorNodeToken())
+	    if (it.first != HUSDgetCreatorNodeToken() &&
+                it.first != HUSDgetTreatAsSopLayerToken())
 		return false;
 	}
     }
@@ -2431,7 +3581,7 @@ HUSDisLayerEmpty(const SdfLayerHandle &layer,
 bool
 HUSDisLayerPlaceholder(const SdfLayerHandle &layer)
 {
-    if (layer->IsAnonymous())
+    if (HUSDisLopLayer(layer))
     {
 	std::string	 save_control;
 
@@ -2446,12 +3596,40 @@ HUSDisLayerPlaceholder(const SdfLayerHandle &layer)
 bool
 HUSDisLayerPlaceholder(const std::string &identifier)
 {
-    if (SdfLayer::IsAnonymousLayerIdentifier(identifier))
+    if (HUSDisLopLayer(identifier))
     {
         SdfLayerRefPtr	 srclayer = SdfLayer::Find(identifier);
 
         if (srclayer && HUSDisLayerPlaceholder(srclayer))
             return true;
+    }
+
+    return false;
+}
+
+bool
+HUSDisStageVariableExpression(const UT_StringRef &expr,
+        bool check_for_errors)
+{
+    std::string exprstr = expr.toStdString();
+    if (SdfVariableExpression::IsExpression(exprstr))
+    {
+        if (check_for_errors)
+        {
+            SdfVariableExpression expr(exprstr);
+            auto result = expr.Evaluate(VtDictionary());
+            if (!result.errors.empty())
+            {
+                UT_StringArray errors;
+                UT_WorkBuffer buf;
+                UTarrayFromStdVectorOfStrings(errors, result.errors);
+                buf.append(errors, "\n    ");
+                HUSD_ErrorScope::addError(
+                    HUSD_ERR_INVALID_VARIABLE_EXPRESSION, buf.buffer());
+            }
+        }
+
+        return true;
     }
 
     return false;
@@ -2468,6 +3646,13 @@ HUSDgetBestRefPrimPath(const UT_StringRef &reffilepath,
         refprimpath != HUSD_Constants::getAutomaticPrimIdentifier() &&
         refprimpath != HUSD_Constants::getDefaultPrimIdentifier())
         return HUSDgetSdfPath(refprimpath);
+
+    // If the file path is a stage variable expression, we can't accurately
+    // evaluate the expression to find the layer, so just assume that the
+    // user means the default prim path (and accept that we can't test for
+    // errors like a layer with no default prim path).
+    if (HUSDisStageVariableExpression(reffilepath, true))
+        return SdfPath();
 
     SdfLayerRefPtr layer = SdfLayer::Find(reffilepath.toStdString(), args);
     std::string layerid = layer ? layer->GetIdentifier() : std::string();
@@ -2610,27 +3795,25 @@ husdGetTimeSampling( exint num_of_samples )
     return HUSD_TimeSampling::MULTIPLE;
 }
 
-static inline void
-husdUpdateTimeSampling( HUSD_TimeSampling &sampling,
-	HUSD_TimeSampling new_sampling )
-{
-    if( new_sampling > sampling ) 
-	sampling = new_sampling;
-}
-
-static inline HUSD_TimeSampling 
-husdGetLocalTransformTimeSampling(const UsdPrim &prim, bool *resets)
+HUSD_TimeSampling
+HUSDgetLocalTransformTimeSampling(const UsdPrim &prim, bool *resets)
 {
     HUSD_TimeSampling time_sampling = HUSD_TimeSampling::NONE;
 
-    UsdGeomXformable xformable(prim);
-    if( !xformable )
-	return time_sampling;
+    bool unused = false;
+    if (resets)
+        *resets = false;
+    else
+        resets = &unused;
 
-    std::vector<UsdGeomXformOp> ops = xformable.GetOrderedXformOps( resets );
-    for( auto &&op : ops )
-	husdUpdateTimeSampling( time_sampling, 
-		husdGetTimeSampling( op.GetNumTimeSamples() ));
+    if (UsdGeomXformable xformable{prim})
+    {
+        for (auto &&op : xformable.GetOrderedXformOps(resets))
+        {
+            HUSDupdateTimeSampling(time_sampling,
+                                   HUSDgetValueTimeSampling(op.GetAttr()));
+        }
+    }
    
     return time_sampling;
 }
@@ -2638,10 +3821,15 @@ husdGetLocalTransformTimeSampling(const UsdPrim &prim, bool *resets)
 HUSD_TimeSampling
 HUSDgetValueTimeSampling(const UsdAttribute &attrib)
 {
-    if( !attrib )
+    if (!attrib)
 	return HUSD_TimeSampling::NONE;
 
-    return husdGetTimeSampling( attrib.GetNumTimeSamples() );
+    // The ValueMightBeTimeVarying function can be faster than actually
+    // getting the number of time samples.
+    if (attrib.ValueMightBeTimeVarying())
+        return HUSD_TimeSampling::MULTIPLE;
+
+    return husdGetTimeSampling(attrib.GetNumTimeSamples());
 }
 
 HUSD_TimeSampling
@@ -2654,12 +3842,6 @@ HUSDgetValueTimeSampling(const UsdGeomPrimvar &primvar)
 }
 
 HUSD_TimeSampling
-HUSDgetLocalTransformTimeSampling(const UsdPrim &prim)
-{
-    return husdGetLocalTransformTimeSampling(prim, nullptr);
-}
-
-HUSD_TimeSampling
 HUSDgetWorldTransformTimeSampling(const UsdPrim &prim)
 {
     HUSD_TimeSampling	time_sampling = HUSD_TimeSampling::NONE;
@@ -2668,8 +3850,8 @@ HUSDgetWorldTransformTimeSampling(const UsdPrim &prim)
 
     while (testprim)
     {
-	husdUpdateTimeSampling( time_sampling, 
-		husdGetLocalTransformTimeSampling(testprim, &resets));
+	HUSDupdateTimeSampling(time_sampling,
+            HUSDgetLocalTransformTimeSampling(testprim, &resets));
 	
 	// If we hit a transform that resets the transform stack, we can
 	// stop looking for time time-sampled transforms on ancestors, since
@@ -2688,14 +3870,15 @@ void
 HUSDupdateTimeSampling(HUSD_TimeSampling &sampling,
 	HUSD_TimeSampling new_sampling )
 {
-    husdUpdateTimeSampling( sampling, new_sampling );
+    if (new_sampling > sampling)
+	sampling = new_sampling;
 }
 
 void
 HUSDupdateValueTimeSampling( HUSD_TimeSampling &sampling,
 	const UsdAttribute &attrib)
 {
-    husdUpdateTimeSampling( sampling, HUSDgetValueTimeSampling( attrib ));
+    HUSDupdateTimeSampling( sampling, HUSDgetValueTimeSampling( attrib ));
 }
 
 void
@@ -2712,14 +3895,14 @@ void
 HUSDupdateLocalTransformTimeSampling(HUSD_TimeSampling &sampling,
 	const UsdPrim &prim)
 {
-    husdUpdateTimeSampling( sampling, HUSDgetLocalTransformTimeSampling(prim));
+    HUSDupdateTimeSampling( sampling, HUSDgetLocalTransformTimeSampling(prim));
 }
 
 void
 HUSDupdateWorldTransformTimeSampling(HUSD_TimeSampling &sampling,
 	const UsdPrim &prim)
 {
-    husdUpdateTimeSampling( sampling, HUSDgetWorldTransformTimeSampling(prim));
+    HUSDupdateTimeSampling( sampling, HUSDgetWorldTransformTimeSampling(prim));
 }
 
 bool
@@ -2747,6 +3930,9 @@ HUSDoptionToVtValue(const UT_OptionEntry *option)
 
     switch (option->getType())
     {
+        case UT_OPTION_BOOL:
+            return VtValue(option->getOptionB());
+
         case UT_OPTION_INT:
             return VtValue(option->getOptionI());
 
@@ -2901,5 +4087,588 @@ HUSDgetMinimalPathsForInheritableProperty(
     }
 }
 
-PXR_NAMESPACE_CLOSE_SCOPE
+void
+HUSDgetMinimalMostNestedPathsForInheritableProperty(
+    const UsdStageRefPtr &stage,
+    XUSD_PathSet &paths)
+{
+    for (auto it = paths.begin(); it != paths.end();)
+    {
+        auto	 prim = stage->GetPrimAtPath(*it);
+        auto     childit = it;
+        bool     incrementit = true;
 
+        // See if we have any descendants in the set. If not, we definitely
+        // want to keep this entry in the set.
+        childit++;
+        if (prim && !prim.IsPseudoRoot() &&
+            (childit != paths.end() && childit->HasPrefix(*it)))
+        {
+            bool missingchild = false;
+
+            for (auto child : prim.GetChildren())
+            {
+                if (paths.find(child.GetPath()) == paths.end())
+                {
+                    missingchild = true;
+                    break;
+                }
+            }
+
+            if (!missingchild)
+            {
+                // All children of this prim are present. Remove this prim
+                // from the set. At this point we will have already done this
+                // test for our parent, so we don't need to worry about the
+                // impact of this removal on the removal of our parent.
+                it = paths.erase(it);
+                incrementit = false;
+            }
+        }
+
+        if (incrementit)
+            ++it;
+    }
+}
+
+void
+HUSDgenerateUniqueTransformOpSuffix(
+        UT_StringHolder &suffix,
+        const UsdGeomXformable &xformable,
+        UsdGeomXformOp::Type type /*=UsdGeomXformOp::TypeTransform*/,
+        bool test_base_xform /*=false*/)
+{
+    // The choice of UsdGeomXformable::GetPrim().HasAttribute() here
+    // (instead of UsdGeomXformable::GetXformOpOrderAttr() and other such APIs)
+    // is intentional to support the definition of "unique" explained in the
+    // header file.
+    //
+    // If this implementation should ever be changed, please ensure the header
+    // file is similarly updated to reflect the behaviour and motivation for it.
+    
+    if (test_base_xform)
+    {
+        TfToken opName = UsdGeomXformOp::GetOpName(type);
+        if (!xformable.GetPrim().HasAttribute(opName))
+        {
+            suffix.clear();
+            return;
+        }
+    }
+
+    UT_String tmp_suffix(suffix);
+    while (true)
+    {
+        TfToken opName = UsdGeomXformOp::GetOpName(type, TfToken(tmp_suffix.c_str()));
+        if (!xformable.GetPrim().HasAttribute(opName))
+        {
+            break;
+        }
+        tmp_suffix.incrementNumberedName(true);
+    }
+    suffix = tmp_suffix;
+}
+
+void
+HUSDconvertToFileFormatArguments(
+        const UT_StringMap<UT_StringHolder> &ut_args,
+        SdfFileFormat::FileFormatArguments &sdf_args)
+{
+    for (auto &&it : ut_args)
+    {
+        UT_StringHolder key = it.first;
+        UT_StringHolder value = it.second;
+
+        sdf_args[key.toStdString()] = value.toStdString();
+    }
+}
+
+HUSD_TimeSampling
+HUSDgetBoundsTimeSampling(const UsdPrim& prim, bool world_space_bounds)
+{
+    auto updateTimeSampling = [](const UsdPrim &testprim,
+                                 bool test_xform,
+                                 HUSD_TimeSampling &out_time_sampling) {
+        // this test is copied (somewhat) from bboxCache, which seems to
+        // assume only a subset of attributes can actually change the extents
+        if (UsdGeomImageable imageable{testprim})
+        {
+            HUSDupdateTimeSampling(out_time_sampling,
+                HUSDgetValueTimeSampling(imageable.GetVisibilityAttr()));
+            if (test_xform)
+                HUSDupdateTimeSampling(out_time_sampling,
+                    HUSDgetLocalTransformTimeSampling(testprim));
+            if (UsdGeomBoundable boundable{testprim})
+                HUSDupdateTimeSampling(out_time_sampling,
+                    HUSDgetValueTimeSampling(boundable.GetExtentAttr()));
+            else if (UsdGeomModelAPI modelapi{testprim})
+                HUSDupdateTimeSampling(out_time_sampling,
+                    HUSDgetValueTimeSampling(modelapi.GetExtentsHintAttr()));
+        }
+    };
+
+    HUSD_TimeSampling time_sampling = HUSD_TimeSampling::NONE;
+
+    if (world_space_bounds)
+    {
+        updateTimeSampling(prim, false, time_sampling);
+        HUSDupdateTimeSampling(time_sampling,
+            HUSDgetWorldTransformTimeSampling(prim));
+    }
+    for (auto child : prim.GetDescendants())
+    {
+        if (time_sampling >= HUSD_TimeSampling::MULTIPLE)
+            break;
+        updateTimeSampling(child, true, time_sampling);
+    }
+    return time_sampling;
+}
+
+namespace {
+#define SCALAR_VALUE(TYPE) \
+    if (v.IsHolding<TYPE>()) { iv = v.UncheckedGet<TYPE>(); return true; } \
+    /* end macro */
+#define STRING_VALUE(TYPE, CONVERT) \
+    if (v.IsHolding<TYPE>()) { \
+        const auto &s = v.UncheckedGet<TYPE>(); \
+        iv = CONVERT;  \
+        return true; \
+    } \
+    /* end macro */
+#define VEC_VALUE(TYPE) \
+    if (v.IsHolding<TYPE>()) { \
+        TYPE tmp = v.UncheckedGet<TYPE>(); \
+        std::copy(tmp.data(), tmp.data()+T::tuple_size, iv.data()); \
+        return true; \
+    } \
+    /* end macro */
+#define VEC_COPY_VALUE(TYPE) \
+    if (v.IsHolding<TYPE>()) { \
+        TYPE tmp = v.UncheckedGet<TYPE>(); \
+        for (int i = 0; i < T::tuple_size; ++i) { iv.data()[i] = tmp[i]; } \
+        return true; \
+    } \
+    /* end macro */
+#define ARRAY_VALUE(TYPE, ATYPE, GETVAL) \
+    if (v.IsHolding<ATYPE<TYPE>>()) { \
+        const ATYPE<TYPE>       &arr = v.UncheckedGet<ATYPE<TYPE>>(); \
+        for (auto &&item : arr) \
+            iv.append(GETVAL); \
+        return true; \
+    } \
+    /* end macro */
+
+    template <typename T>
+    static bool
+    intValue(T &iv, const VtValue &v)
+    {
+        SCALAR_VALUE(int32)
+        SCALAR_VALUE(int64)
+        SCALAR_VALUE(uint32)
+        SCALAR_VALUE(uint64)
+#if defined(MBSD)
+        SCALAR_VALUE(unsigned long)	// OSX has different types for uint32 and uint64
+#endif
+        SCALAR_VALUE(bool)
+        SCALAR_VALUE(int16)
+        SCALAR_VALUE(uint16)
+        SCALAR_VALUE(int8)
+        SCALAR_VALUE(uint8)
+        return false;
+    }
+
+    template <typename T>
+    static bool
+    realValue(T &iv, const VtValue &v)
+    {
+        SCALAR_VALUE(fpreal32)
+        SCALAR_VALUE(fpreal64)
+        SCALAR_VALUE(fpreal16)
+        return intValue(iv, v);
+    }
+
+    static bool
+    stringValue(UT_StringHolder &iv, const VtValue &v)
+    {
+        STRING_VALUE(std::string, UT_StringHolder(s))
+        STRING_VALUE(TfToken, s.GetText())
+        STRING_VALUE(UT_StringHolder, s)
+        STRING_VALUE(SdfPath, s.GetAsString())
+        return false;
+    }
+
+    static bool
+    stringArray(UT_StringArray &iv, const VtValue &v)
+    {
+        ARRAY_VALUE(std::string, VtArray, UT_StringHolder(item))
+        ARRAY_VALUE(TfToken, VtArray, UT_StringHolder(item.GetText()))
+        ARRAY_VALUE(SdfPath, VtArray, UT_StringHolder(item.GetAsString()));
+        ARRAY_VALUE(UT_StringHolder, VtArray, item);
+        ARRAY_VALUE(UT_StringHolder, UT_Array, item);
+        return false;
+    }
+    static bool
+    intArray(UT_Int64Array &iv, const VtValue &v)
+    {
+        ARRAY_VALUE(int32, VtArray, item)
+        ARRAY_VALUE(int64, VtArray, item)
+        ARRAY_VALUE(uint32, VtArray, item)
+        ARRAY_VALUE(uint64, VtArray, item)
+        return false;
+    }
+    static bool
+    realArray(UT_Fpreal64Array &iv, const VtValue &v)
+    {
+        ARRAY_VALUE(fpreal32, VtArray, item)
+        ARRAY_VALUE(fpreal64, VtArray, item)
+        return false;
+    }
+
+    template <typename T> static bool
+    v2value(T &iv, const VtValue &v)
+    {
+        VEC_VALUE(GfVec2i);
+        VEC_VALUE(GfVec2f);
+        VEC_VALUE(GfVec2d);
+        VEC_COPY_VALUE(GfSize2);
+        return false;
+    }
+
+    template <typename T> static bool
+    v3value(T &iv, const VtValue &v)
+    {
+        VEC_VALUE(GfVec3i);
+        VEC_VALUE(GfVec3f);
+        VEC_VALUE(GfVec3d);
+        VEC_COPY_VALUE(GfSize3);
+        return false;
+    }
+
+    template <typename T> static bool
+    v4value(T &iv, const VtValue &v)
+    {
+        VEC_VALUE(GfVec4i);
+        VEC_VALUE(GfVec4f);
+        VEC_VALUE(GfVec4d);
+        return false;
+    }
+
+    template <typename T> static bool
+    m2value(T &iv, const VtValue &v)
+    {
+        VEC_VALUE(GfMatrix2f);
+        VEC_VALUE(GfMatrix2d);
+        return false;
+    }
+
+    template <typename T> static bool
+    m3value(T &iv, const VtValue &v)
+    {
+        VEC_VALUE(GfMatrix3f);
+        VEC_VALUE(GfMatrix3d);
+        return false;
+    }
+
+    template <typename T> static bool
+    m4value(T &iv, const VtValue &v)
+    {
+        VEC_VALUE(GfMatrix4f);
+        VEC_VALUE(GfMatrix4d);
+        return false;
+    }
+
+    static void
+    setOption(UT_Options &opts, const UT_StringHolder &key, const VtValue &v,
+            const UT_StringMap<UT_StringHolder> *aliases)
+    {
+        int64               iv;
+        fpreal64            fv;
+        UT_StringHolder     sv;
+        UT_Vector2D         v2;
+        UT_Vector3D         v3;
+        UT_Vector4D         v4;
+        UT_Matrix2D         m2;
+        UT_Matrix3D         m3;
+        UT_Matrix4D         m4;
+        UT_StringArray      sa;
+        UT_Int64Array       ia;
+        UT_Fpreal64Array    fa;
+
+        if (intValue(iv, v))
+            opts.setOptionI(key, iv);
+        else if (realValue(fv, v))
+            opts.setOptionF(key, fv);
+        else if (stringValue(sv, v))
+            opts.setOptionS(key, sv);
+        else if (v2value(v2, v))
+            opts.setOptionV2(key, v2);
+        else if (v3value(v3, v))
+            opts.setOptionV3(key, v3);
+        else if (v4value(v4, v))
+            opts.setOptionV4(key, v4);
+        else if (m2value(m2, v))
+            opts.setOptionM2(key, m2);
+        else if (m3value(m3, v))
+            opts.setOptionM3(key, m3);
+        else if (m4value(m4, v))
+            opts.setOptionM4(key, m4);
+        else if (intArray(ia, v))
+            opts.setOptionIArray(key, ia);
+        else if (realArray(fa, v))
+            opts.setOptionFArray(key, fa);
+        else if (stringArray(sa, v))
+            opts.setOptionSArray(key, sa);
+        else if (v.IsHolding<VtDictionary>())
+        {
+            UT_OptionsHolder    dict;
+            HUSDconvertDictionary(*dict.makeUnique(),
+                    v.UncheckedGet<VtDictionary>(),
+                    aliases);
+            opts.setOptionDict(key, dict);
+        }
+        else if (v.IsHolding<VtArray<VtDictionary>>())
+        {
+            const VtArray<VtDictionary> &arr =
+                        v.UncheckedGet<VtArray<VtDictionary>>();
+            UT_Array<UT_OptionsHolder>  dicts(arr.size(), arr.size());
+            for (exint i = 0, n = arr.size(); i < n; ++i)
+                HUSDconvertDictionary(*dicts[i].makeUnique(), arr[i], aliases);
+            opts.setOptionDictArray(key, dicts);
+        }
+        else
+        {
+            UT_OStringStream    sos;
+            sos << v << std::ends;
+            opts.setOptionS(key, sos.str());
+        }
+    }
+
+    template <typename T> static bool
+    jsonScalar(UT_JSONWriter &w, const T &v)
+    {
+        return w.jsonValue(v);
+    }
+    template <> bool
+    jsonScalar<uint64>(UT_JSONWriter &w, const uint64 &v)
+    {
+        return w.jsonValue(int64(v));
+    }
+
+    template <typename T> static bool
+    jsonQuaternion(UT_JSONWriter &w, const T &q)
+    {
+        const auto &im = q.GetImaginary();
+        typename T::ScalarType  vals[4];
+        vals[0] = q.GetReal();
+        vals[1] = im[0];
+        vals[2] = im[0];
+        vals[3] = im[0];
+        return w.jsonUniformArray(4, vals);
+    }
+    template <> bool
+    jsonScalar<GfQuatf>(UT_JSONWriter &w, const GfQuatf &q)
+    {
+        return jsonQuaternion(w, q);
+    }
+    template <> bool
+    jsonScalar<GfQuatd>(UT_JSONWriter &w, const GfQuatd &q)
+    {
+        return jsonQuaternion(w, q);
+    }
+    template <> bool
+    jsonScalar<std::string>(UT_JSONWriter &w, const std::string &s)
+    {
+        return w.jsonValue(s);
+    }
+    template <> bool
+    jsonScalar<TfToken>(UT_JSONWriter &w, const TfToken &s)
+    {
+        return w.jsonValue(s.GetText());
+    }
+    template <> bool
+    jsonScalar<SdfPath>(UT_JSONWriter &w, const SdfPath &s)
+    {
+        return w.jsonValue(s.GetAsString());
+    }
+
+#define JSON_VECTOR(TYPE, SIZE) \
+    template <> bool \
+    jsonScalar<TYPE>(UT_JSONWriter &w, const TYPE &v) { \
+        return w.jsonUniformArray(SIZE, v.data()); \
+    } \
+    /* end macro */
+JSON_VECTOR(GfVec2i, 2)
+JSON_VECTOR(GfVec2f, 2)
+JSON_VECTOR(GfVec2d, 2)
+JSON_VECTOR(GfVec3i, 3)
+JSON_VECTOR(GfVec3f, 3)
+JSON_VECTOR(GfVec3d, 3)
+JSON_VECTOR(GfVec4i, 4)
+JSON_VECTOR(GfVec4f, 4)
+JSON_VECTOR(GfVec4d, 4)
+JSON_VECTOR(GfMatrix2f, 4)
+JSON_VECTOR(GfMatrix2d, 4)
+JSON_VECTOR(GfMatrix3f, 9)
+JSON_VECTOR(GfMatrix3d, 9)
+JSON_VECTOR(GfMatrix4f, 16)
+JSON_VECTOR(GfMatrix4d, 16)
+
+    bool saveJSONValue(UT_JSONWriter &w, const VtValue &v);
+
+    // Now something crazy
+    template <> bool
+    jsonScalar<VtDictionary>(UT_JSONWriter &w, const VtDictionary &v)
+    {
+        bool    ok = w.jsonBeginMap();
+        for (const auto &item : v)
+        {
+            ok = ok && w.jsonKey(UT_StringHolder(item.first));
+            ok = ok && saveJSONValue(w, item.second);
+            if (!ok)
+                break;
+        }
+        return ok && w.jsonEndMap();
+    }
+
+    template <typename T> static bool
+    jsonScalarArray(UT_JSONWriter &w, const VtArray<T> &v)
+    {
+        bool ok = w.jsonBeginArray();
+        for (exint i = 0, n = v.size(); ok && i < n; ++i)
+            ok = ok && jsonScalar(w, v[i]);
+        return ok && w.jsonEndArray();
+    }
+
+    bool
+    saveJSONValue(UT_JSONWriter &w, const VtValue &v)
+    {
+        if (v.IsEmpty())
+            return w.jsonNull();
+#define SCALAR(CTYPE) \
+        if (v.IsHolding<CTYPE>()) \
+            return jsonScalar(w, v.UncheckedGet<CTYPE>()); \
+        if (v.IsHolding<VtArray<CTYPE>>()) \
+            return jsonScalarArray(w, v.UncheckedGet<VtArray<CTYPE>>()); \
+        /* end macro */
+        SCALAR(bool);
+        SCALAR(int8);
+        SCALAR(uint8);
+        SCALAR(int16);
+        SCALAR(uint16);
+        SCALAR(int32);
+        SCALAR(uint32);
+        SCALAR(int64);
+        SCALAR(uint64);
+        SCALAR(fpreal32);
+        SCALAR(fpreal64);
+        SCALAR(UT_StringHolder);
+        SCALAR(std::string);
+        SCALAR(TfToken);
+        SCALAR(SdfPath);
+        SCALAR(GfVec2i)
+        SCALAR(GfVec2f)
+        SCALAR(GfVec2d)
+        SCALAR(GfVec3i)
+        SCALAR(GfVec3f)
+        SCALAR(GfVec3d)
+        SCALAR(GfVec4i)
+        SCALAR(GfVec4f)
+        SCALAR(GfVec4d)
+        SCALAR(GfMatrix2f)
+        SCALAR(GfMatrix2d)
+        SCALAR(GfMatrix3f)
+        SCALAR(GfMatrix3d)
+        SCALAR(GfMatrix4f)
+        SCALAR(GfMatrix4d)
+        SCALAR(VtDictionary)
+#undef SCALAR
+        // Now we've done the easy cases, we need to handle some more
+        // complicated types.
+        if (v.IsHolding<VtArray<VtValue>>())
+        {
+            const VtArray<VtValue> &arr = v.UncheckedGet<const VtArray<VtValue>>();
+            bool ok = w.jsonBeginArray();
+            for (exint i = 0, n = arr.size(); i < n; ++i)
+                ok = ok && saveJSONValue(w, arr[i]);
+            return ok && w.jsonEndArray();
+        }
+
+        UTdebugFormat("Unhandled type: {}", v.GetType().GetTypeName());
+        UT_OStringStream    sos;
+        sos << v;       // Don't include the '\0'
+        return w.jsonString(sos.str().buffer(), sos.str().length());
+    }
+}
+
+bool
+HUSDconvertDictionary(UT_Options &opts,
+        const VtDictionary &dict,
+        const UT_StringMap<UT_StringHolder> *aliases)
+{
+    opts.clear();
+    UT_StringMap<UT_StringHolder>::const_iterator     alias;
+    for (const auto &item : dict)
+    {
+        UT_StringHolder key(item.first);
+        const VtValue   &v = item.second;
+        if (aliases && (alias = aliases->find(key)) != aliases->end())
+            key = alias->second;
+        setOption(opts, key, v, aliases);
+    }
+    return true;
+}
+
+bool
+HUSDconvertDictionary(UT_JSONWriter &w,
+        const VtDictionary &dict,
+        const UT_StringMap<UT_StringHolder> *aliases)
+{
+    UT_StringMap<UT_StringHolder>::const_iterator     alias;
+    bool    ok = w.jsonBeginMap();
+    for (const auto &item : dict)
+    {
+        UT_StringRef key = UT_StringRef(item.first);
+        if (aliases && (alias = aliases->find(key)) != aliases->end())
+            key = alias->second;
+        ok = ok && w.jsonKey(key);
+        ok = ok && saveJSONValue(w, item.second);
+        if (!ok)
+            break;
+    }
+    return ok && w.jsonEndMap();
+}
+
+bool
+HUSDconvertValue(UT_JSONWriter &w, const VtValue &value)
+{
+    return saveJSONValue(w, value);
+}
+
+void
+HUSDconvertVariantSelectionFallbacks(
+        const UT_StringMap<UT_StringArray> &utfallbacks,
+        PcpVariantFallbackMap &fallbacks)
+{
+    for (auto &&it : utfallbacks)
+    {
+        std::vector<std::string> stdarray;
+        UTarrayToStdVectorOfStrings(it.second, stdarray);
+        fallbacks.emplace(it.first.toStdString(), stdarray);
+    }
+}
+
+void
+HUSDconvertVariantSelectionFallbacks(
+        const PcpVariantFallbackMap &fallbacks,
+        UT_StringMap<UT_StringArray> &utfallbacks)
+{
+    for (auto &&it : fallbacks)
+    {
+        UT_StringArray utarray;
+        UTarrayFromStdVectorOfStrings(utarray, it.second);
+        utfallbacks.emplace(it.first.c_str(), utarray);
+    }
+}
+
+
+PXR_NAMESPACE_CLOSE_SCOPE

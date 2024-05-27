@@ -61,6 +61,14 @@ public:
     // Render settings metadata
     bool                 setRenderSettings(const UT_StringRef &primpath) const;
 
+    // This function sets a stage variable on the layer.
+    // Supported UT_ValueTypes can be found in HUSD_CustomData.h.
+    // Make sure to explicitly cast to one of these data types, even if
+    // implicit conversions exist.
+    template<typename UtValueType>
+    bool		 setStageVariable(const UT_StringRef &key,
+                                const UtValueType &value) const;
+
 private:
     HUSD_AutoWriteLock	&myWriteLock;
     bool                 myModifyRootLayer;

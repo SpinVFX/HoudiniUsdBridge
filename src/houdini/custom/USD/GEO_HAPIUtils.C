@@ -17,8 +17,6 @@
 #include "GEO_HAPIUtils.h"
 #include "GEO_HAPIPart.h"
 #include <GT/GT_CountArray.h>
-#include <GT/GT_DAIndirect.h>
-#include <GT/GT_DANumeric.h>
 #include <HUSD/HUSD_Utils.h>
 #include <UT/UT_Map.h>
 #include <UT/UT_Quaternion.h>
@@ -63,7 +61,7 @@ GEOhapiExtractString(const HAPI_Session &session,
 }
 
 void
-GEOhapiSendCookError(const HAPI_Session &session)
+GEOhapiSendCookError(const HAPI_Session &session, HAPI_NodeId node_id)
 {
     PXR_NAMESPACE_USING_DIRECTIVE
     UT_WorkBuffer buf;
@@ -76,6 +74,26 @@ GEOhapiSendCookError(const HAPI_Session &session)
     HAPI_GetStatusString(&session, HAPI_STATUS_COOK_RESULT, str, len);
     // HAPI_GetStatusStringBufLength included the null terminator.
     buf.releaseSetLength(len - 1);
+
+    TF_WARN("%s", buf.buffer());
+
+    // Also add any node warnings / errors.
+    HAPI_Result result = HAPI_ComposeNodeCookResult(
+            &session, node_id, HAPI_STATUSVERBOSITY_WARNINGS, &len);
+    if (result != HAPI_RESULT_SUCCESS)
+    {
+        GEOhapiSendError(session);
+        return;
+    }
+
+    str = buf.lock(0, len);
+    result = HAPI_GetComposedNodeCookResult(&session, str, len);
+    buf.releaseSetLength(len - 1);
+    if (result != HAPI_RESULT_SUCCESS)
+    {
+        GEOhapiSendError(session);
+        return;
+    }
 
     TF_WARN("%s", buf.buffer());
 }
@@ -96,6 +114,25 @@ GEOhapiSendError(const HAPI_Session &session)
     buf.releaseSetLength(len - 1);
 
     TF_WARN("%s", buf.buffer());
+}
+
+void
+GEOhapiSendConnectionError()
+{
+    PXR_NAMESPACE_USING_DIRECTIVE
+
+    int len;
+    HAPI_GetConnectionErrorLength(&len);
+    if (len == 0)
+        return;
+
+    UT_WorkBuffer buf;
+    char *str = buf.lock(0, len);
+    HAPI_GetConnectionError(str, len, /*clear=*/ true);
+    // HAPI_GetConnectionErrorLength included the null terminator.
+    buf.releaseSetLength(len - 1);
+
+    TF_WARN("Connection error: %s", buf.buffer());
 }
 
 GT_Type
@@ -465,36 +502,6 @@ GEOhapiInitVDBGrid(openvdb::GridBase::Ptr &grid,
     return true;
 }
 
-GT_DataArrayHandle
-GEOhapiApplyIndirectToFlattenedArray(
-    const GT_DataArrayHandle &arrData,
-    const GT_DataArrayHandle &arrLengths,
-    const GT_DataArrayHandle &indirect)
-{
-    UT_ASSERT(arrLengths->entries() == indirect->entries());
-
-    // The offset array will map array indices to their offset on the flattened
-    // array
-    GT_CountArray arrayOffsets(arrLengths);
-
-    GT_Int32Array *flatIndirect = new GT_Int32Array(arrData->entries(), 1);
-    int32 currentFlatIndex = 0;
-
-    const int32 arrayCount = arrLengths->entries();
-    for (int32 i = 0; i < arrayCount; i++)
-    {
-        const int32 start = arrayOffsets.getOffset(indirect->getI32(i));
-        const int32 len = arrLengths->getI32(i);
-        const int32 end = start + len;
-	for (int32 j = start; j < end; j++)
-	{
-            flatIndirect->set(j, currentFlatIndex++);
-	}
-    }
-
-    return new GT_DAIndirect(flatIndirect, arrData);
-}
-
 // USD functions
 PXR_NAMESPACE_OPEN_SCOPE
 
@@ -532,7 +539,9 @@ SdfPath
 GEOhapiNameToNewPath(const UT_StringHolder &name, const SdfPath &parentPath)
 {
     UT_String out = name.c_str();
-    HUSDmakeValidUsdPath(out, false);
+
+    // The passed in name is allowed to be a relative path.
+    HUSDmakeValidUsdPath(out, false, true);
 
     if (name[0] == '/')
     {
@@ -597,12 +606,15 @@ GEOhapiAppendDefaultPathName(HAPI_PartType type,
 }
 
 SdfPath
-GEOhapiGetPrimPath(const GEO_HAPIPart &part,
-                   const SdfPath &parentPath,
-                   GEO_HAPIPrimCounts &counts,
-                   const GEO_ImportOptions &options)
+GEOhapiGetPrimPath(
+        const GEO_HAPIPart &part,
+        HAPI_AttributeOwner partition_attrib_owner,
+        const SdfPath &parentPath,
+        GEO_HAPIPrimCounts &counts,
+        const GEO_ImportOptions &options)
 {
-    const UT_StringMap<GEO_HAPIAttributeHandle> &attrs = part.getAttribMap();
+    const UT_StringMap<GEO_HAPIAttributeHandle> &attrs
+            = part.getAttribMap(partition_attrib_owner);
 
     // First check if the path was specified by a path name attribute
     for (exint i = 0, n = options.myPathAttrNames.entries(); i < n; i++)

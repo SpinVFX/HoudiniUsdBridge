@@ -24,13 +24,26 @@
 
 #include "HUSD_Info.h"
 #include "HUSD_Constants.h"
+#include "HUSD_DataHandle.h"
 #include "HUSD_ErrorScope.h"
+#include "HUSD_FindPrims.h"
 #include "HUSD_Path.h"
+#include "HUSD_PathSet.h"
+#include "HUSD_PythonConverter.h"
+#include "HUSD_TimeCode.h"
 #include "XUSD_Data.h"
 #include "XUSD_Utils.h"
 #include "XUSD_AttributeUtils.h"
 #include "XUSD_FindPrimsTask.h"
+#include "XUSD_ShaderRegistry.h"
+#include <gusd/stageCache.h>
+#include <gusd/USD_XformCache.h>
 #include <gusd/UT_Gf.h>
+#include <PY/PY_CallMethod.h>
+#include <PY/PY_CPythonAPI.h>
+#include <PY/PY_EvaluationContext.h>
+#include <PY/PY_InterpreterAutoLock.h>
+#include <PY/PY_OpaqueObject.h>
 #include <PY/PY_Python.h>
 #include <PY/PY_Result.h>
 #include <UT/UT_BoundingBox.h>
@@ -39,10 +52,13 @@
 #include <UT/UT_InfoTree.h>
 #include <UT/UT_Matrix4.h>
 #include <UT/UT_Options.h>
+#include <UT/UT_StdUtil.h>
 #include <UT/UT_ThreadSpecificValue.h>
 #include <SYS/SYS_Hash.h>
 #include <pxr/usd/usdRender/settings.h>
-#include <pxr/usd/usdLux/shapingAPI.h>
+#include <pxr/usd/usdGeom/bboxCache.h>
+#include <pxr/usd/usdGeom/xformCache.h>
+#include <pxr/usd/usdGeom/camera.h>
 #include <pxr/usd/usdGeom/curves.h>
 #include <pxr/usd/usdGeom/imageable.h>
 #include <pxr/usd/usdGeom/mesh.h>
@@ -51,16 +67,22 @@
 #include <pxr/usd/usdGeom/points.h>
 #include <pxr/usd/usdGeom/primvarsAPI.h>
 #include <pxr/usd/usdGeom/xformable.h>
+#include <pxr/usd/usdGeom/xform.h>
+#include <pxr/usd/usd/collectionAPI.h>
+#include <pxr/usd/usd/modelAPI.h>
 #include <pxr/usd/usd/schemaBase.h>
 #include <pxr/usd/usd/schemaRegistry.h>
+#include <pxr/usd/usd/stage.h>
 #include <pxr/usd/usd/tokens.h>
 #include <pxr/usd/usd/variantSets.h>
-#include <pxr/usd/usd/collectionAPI.h>
 #include <pxr/usd/usdShade/materialBindingAPI.h>
-#include <pxr/usd/usd/modelAPI.h>
+#include <pxr/usd/usdUtils/introspection.h>
+#include <pxr/usd/usdUtils/dependencies.h>
 #include <pxr/usd/sdf/layer.h>
+#include <pxr/usd/sdf/variableExpression.h>
 #include <pxr/usd/kind/registry.h>
 #include <pxr/usd/ar/resolverContextBinder.h>
+#include <pxr/usd/ar/resolver.h>
 #include <pxr/base/tf/type.h>
 #include <pxr/base/gf/vec2f.h>
 #include <pxr/base/gf/vec2d.h>
@@ -133,7 +155,7 @@ namespace {
         std::string              savepath;
         std::string              creator;
 
-        if (layer->IsAnonymous())
+        if (HUSDisLopLayer(layer))
         {
             UT_WorkBuffer	 buf;
 
@@ -165,7 +187,7 @@ namespace {
             else
                 buf.append("<unknown name>");
 
-            buf.stealIntoStringHolder(label);
+            label = std::move(buf);
         }
         else
             label = layer->GetDisplayName();
@@ -173,13 +195,64 @@ namespace {
         return label;
     }
 
+    ////////////////////////////////////////////////////////////////////
+    /// XUSD_FindPrimCountTaskData - simple multithreaded prim counting
+    ////////////////////////////////////////////////////////////////////
+
+    class XUSD_FindPrimCountTaskData : public XUSD_FindPrimsTaskData
+    {
+    public:
+                 XUSD_FindPrimCountTaskData();
+                ~XUSD_FindPrimCountTaskData() override;
+        void addToThreadData(const UsdPrim &prim, bool *prune) override;
+
+        exint getTotalCount();
+
+    private:
+        typedef UT_ThreadSpecificValue<exint>
+            FindPrimCountTaskThreadDataTLS;
+
+        FindPrimCountTaskThreadDataTLS    myThreadData;
+    };
+
+    XUSD_FindPrimCountTaskData::XUSD_FindPrimCountTaskData()
+    {
+    }
+
+    XUSD_FindPrimCountTaskData::~XUSD_FindPrimCountTaskData()
+    {
+    }
+
+    void
+    XUSD_FindPrimCountTaskData::addToThreadData(
+            const UsdPrim &prim, bool *prune)
+    {
+        exint &threadData = myThreadData.get();
+        threadData++;
+    }
+
+    exint
+    XUSD_FindPrimCountTaskData::getTotalCount()
+    {
+        exint total = 0;
+
+        for(auto it = myThreadData.begin(); it != myThreadData.end(); ++it)
+            total += it.get();
+
+        return total;
+    }
+
+    ////////////////////////////////////////////////////////////////////
+    /// XUSD_FindPrimStatsTaskData - multithreaded prim stats gathering
+    ////////////////////////////////////////////////////////////////////
+
     class XUSD_FindPrimStatsTaskData : public XUSD_FindPrimsTaskData
     {
     public:
                  XUSD_FindPrimStatsTaskData(
                         HUSD_Info::DescendantStatsFlags flags);
                 ~XUSD_FindPrimStatsTaskData() override;
-        void addToThreadData(UsdPrim &prim) override;
+        void addToThreadData(const UsdPrim &prim, bool *prune) override;
 
         void gatherStatsFromThreads(UT_Options &stats);
 
@@ -200,7 +273,7 @@ namespace {
             public:
                 UT_StringMap<size_t> myStats[NUM_STAT_GROUPS];
                 PurposeInfoMap myPurposeMap;
-                std::map<SdfPath, size_t> myMasterPrims;
+                std::map<SdfPath, size_t> myPrototypePrims;
         };
         typedef UT_ThreadSpecificValue<FindPrimStatsTaskThreadData *>
             FindPrimStatsTaskThreadDataTLS;
@@ -234,7 +307,7 @@ namespace {
         }
 
         UT_StringMap<size_t> &
-        getStats(UsdPrim &prim, FindPrimStatsTaskThreadData &threadData)
+        getStats(const UsdPrim &prim, FindPrimStatsTaskThreadData &threadData)
         {
             if ((myFlags & HUSD_Info::STATS_PURPOSE_COUNTS) != 0 &&
                 prim.IsA<UsdGeomImageable>())
@@ -275,7 +348,7 @@ namespace {
     }
 
     void
-    XUSD_FindPrimStatsTaskData::addToThreadData(UsdPrim &prim)
+    XUSD_FindPrimStatsTaskData::addToThreadData(const UsdPrim &prim, bool *)
     {
         auto *&threadData = myThreadData.get();
         if(!threadData)
@@ -287,9 +360,9 @@ namespace {
             primtype = "Untyped";
         stats[primtype]++;
 
-        UsdPrim master(prim.GetMaster());
-        if (master)
-            threadData->myMasterPrims[master.GetPath()]++;
+        UsdPrim prototype(prim.GetPrototype());
+        if (prototype)
+            threadData->myPrototypePrims[prototype.GetPath()]++;
 
         if ((myFlags & HUSD_Info::STATS_GEOMETRY_COUNTS) == 0)
             return;
@@ -392,7 +465,7 @@ namespace {
             ":Guide",
         };
         UT_WorkBuffer statbuf;
-        std::map<SdfPath, size_t> masterprims;
+        std::map<SdfPath, size_t> prototypeprims;
 
         for(auto it = myThreadData.begin(); it != myThreadData.end(); ++it)
         {
@@ -419,26 +492,85 @@ namespace {
                     }
                 }
 
-                // Make a unified map of all master prims.
-                for (auto it = tdata->myMasterPrims.begin();
-                          it != tdata->myMasterPrims.end(); ++it)
-                    masterprims[it->first] += it->second;
+                // Make a unified map of all prototype prims.
+                for (auto it = tdata->myPrototypePrims.begin();
+                          it != tdata->myPrototypePrims.end(); ++it)
+                    prototypeprims[it->first] += it->second;
             }
         }
-        if (!masterprims.empty())
+        if (!prototypeprims.empty())
         {
             size_t   totalinstances = 0;
 
-            for (auto &&it : masterprims)
+            for (auto &&it : prototypeprims)
                 totalinstances += it.second;
-            stats.setOptionI("Instance Masters", masterprims.size());
+            stats.setOptionI("Instance Prototypes", prototypeprims.size());
             stats.setOptionI("Instances", totalinstances);
+        }
+    }
+
+    PY_OpaqueObject
+    getUsdPrimIconsModule()
+    {
+        static PY_OpaqueObject theUsdPrimIconsModule;
+
+        if (!theUsdPrimIconsModule.opaqueObject())
+        {
+            PY_Result result = PYrunPythonExpressionAndExpectNoErrors(
+                "__import__('usdprimicons')", PY_Result::PY_OBJECT);
+            if (result.myResultType == PY_Result::PY_OBJECT)
+                theUsdPrimIconsModule = result.myOpaquePyObject;
+            else
+                theUsdPrimIconsModule.resetToNone();
+        }
+
+        return theUsdPrimIconsModule;
+    }
+
+    void
+    stringVecToArraySkipEmpty(const std::vector<std::string> &vec,
+            UT_StringArray &arr)
+    {
+        for (auto &&s : vec)
+        {
+            if (!s.empty())
+                arr.append(s);
         }
     }
 };
 
+class husd_InfoPrivate
+{
+public:
+    UsdGeomBBoxCache &
+    getBBoxCache(const UsdTimeCode &usd_tc, const TfTokenVector &tf_purposes)
+    {
+        if (!myBBoxCache ||
+            myBBoxCache->GetTime() != usd_tc ||
+            myBBoxCache->GetIncludedPurposes() != tf_purposes)
+            myBBoxCache.reset(new UsdGeomBBoxCache(usd_tc, tf_purposes, true));
+
+        return *myBBoxCache;
+    }
+
+    UsdGeomXformCache &
+    getXformCache(const UsdTimeCode &usd_tc)
+    {
+        if (!myXformCache ||
+            myXformCache->GetTime() != usd_tc)
+            myXformCache.reset(new UsdGeomXformCache(usd_tc));
+
+        return *myXformCache;
+    }
+
+private:
+    UT_UniquePtr<UsdGeomBBoxCache>   myBBoxCache;
+    UT_UniquePtr<UsdGeomXformCache>  myXformCache;
+};
+
 HUSD_Info::HUSD_Info(HUSD_AutoAnyLock &lock)
-    : myAnyLock(lock)
+    : myAnyLock(lock),
+      myPrivate(new husd_InfoPrivate())
 {
 }
 
@@ -487,10 +619,54 @@ HUSD_Info::getPrimitiveKinds(UT_StringArray &kinds)
     }
 }
 
+/* static */ bool
+HUSD_Info::isModelKind(const UT_StringRef &kind)
+{
+    TfToken		 kind_tk(kind.toStdString());
+
+    return KindRegistry::IsA(kind_tk, KindTokens->model);
+}
+
+/* static */ bool
+HUSD_Info::isGroupKind(const UT_StringRef &kind)
+{
+    TfToken		 kind_tk(kind.toStdString());
+
+    return KindRegistry::IsA(kind_tk, KindTokens->group);
+}
+
+/* static */ bool
+HUSD_Info::isComponentKind(const UT_StringRef &kind)
+{
+    TfToken		 kind_tk(kind.toStdString());
+
+    return KindRegistry::IsA(kind_tk, KindTokens->component);
+}
+
+/* static */ bool
+HUSD_Info::isPathInPrototype(const HUSD_Path &primpath)
+{
+    return UsdPrim::IsPathInPrototype(primpath.sdfPath());
+}
+
+/* static */ void
+HUSD_Info::getGlobalVariantSelectionFallbacks(
+        UT_StringMap<UT_StringArray> &variantselections)
+{
+    HUSDconvertVariantSelectionFallbacks(
+        UsdStage::GetGlobalVariantFallbacks(), variantselections);
+}
+
+/* static */ bool
+HUSD_Info::isStageVariableExpression(const UT_StringRef &expr,
+        bool check_for_errors)
+{
+    return HUSDisStageVariableExpression(expr, check_for_errors);
+}
+
 /* static */ void
 HUSD_Info::getUsdVersionInfo(UT_StringMap<UT_StringHolder> &info)
 {
-
     static constexpr UT_StringLit thePackageUrlTag("packageurl");
     static constexpr UT_StringLit thePackageRevisionTag("packagerevision");
     static constexpr UT_StringLit theUsdVersionTag("usdversion");
@@ -504,85 +680,152 @@ HUSD_Info::getUsdVersionInfo(UT_StringMap<UT_StringHolder> &info)
     #ifndef PXR_PACKAGE_REVISION
         #define PXR_PACKAGE_REVISION ""
     #endif
-    versionbuf.sprintf("%d.%d", PXR_VERSION / 100, PXR_VERSION % 100);
+    versionbuf.sprintf("%d.%02d", PXR_VERSION / 100, PXR_VERSION % 100);
     info[thePackageUrlTag.asHolder()] = PXR_PACKAGE_URL;
     info[thePackageRevisionTag.asHolder()] = PXR_PACKAGE_REVISION;
     info[theUsdVersionTag.asHolder()] = versionbuf.buffer();
 }
 
 /* static */ bool
-HUSD_Info::reload(const UT_StringRef &filepath, bool recursive)
+HUSD_Info::reload(const UT_StringRef &filepath,
+                  bool recursive,
+                  bool force_load /*=false*/)
 {
-    SdfLayerHandle		 layer = SdfLayer::Find(filepath.toStdString());
+    // In some circumstances (the Load Layer LOP for example), we may be working
+    // with a *copy* of an on-disk SdfLayer, such that the SdfLayerRegistry no
+    // longer knows about the actual file. This then means SdfLayer::Find will
+    // not find a layer in the registry (based on the filepath passed in), and
+    // we can then not inspect it for references and reload recursively.
+    // A solution, then, is to allow the user to explicitly request the layer be
+    // force-loaded, even if it's not currently in the registry.
+    // NOTE: The lifetime of layer_ref is important. This reference effectively
+    //       keeps the SdfLayer alive. If it goes out of scope too early, then
+    //       the layer SdfLayerHandle will become null. 
+    SdfLayerRefPtr layer_ref = force_load
+            ? SdfLayer::FindOrOpen(filepath.toStdString())
+            : nullptr;
+    SdfLayerHandle layer = force_load
+            ? SdfLayerHandle(layer_ref)
+            : SdfLayer::Find(filepath.toStdString());
 
     if (layer)
     {
 	// Create an error scope to eat any errors triggered by the reload.
-	UT_ErrorManager		 errmgr;
-	HUSD_ErrorScope		 scope(&errmgr);
+	UT_ErrorManager	errmgr;
+	HUSD_ErrorScope	scope(&errmgr);
+        std::set<SdfLayerHandle> all_layers;
+        static auto theMtlxFormat = SdfFileFormat::FindByExtension("foo.mtlx");
 
-	// We don't want to call reload on anonymous layers, but if we are
-	// passed an anonymous layer to reload, we still want to scan it for
+	// We don't want to call reload on lop layers, but if we are
+	// passed a lop layer to reload, we still want to scan it for
 	// external references and reload those.
-	if (!layer->IsAnonymous())
-            layer->Reload(true);
+	if (!HUSDisLopLayer(layer))
+        {
+            // We also don't want to call Reload on Mtlx layers. There is a
+            // bug in the file format implementation that causes reloading
+            // mtlx layers to lose all the contents of the file. Bug 123553.
+            if (layer->GetFileFormat() != theMtlxFormat)
+                all_layers.insert(layer);
+        }
 
 	if (recursive)
 	{
 	    std::set<std::string>	 all_layer_paths;
 	    std::vector<SdfLayerHandle>	 layers_to_scan;
-            std::set<SdfLayerHandle>     all_layers;
 
 	    all_layer_paths.insert(filepath.toStdString());
 	    layers_to_scan.push_back(layer);
             while (layers_to_scan.size() > 0)
             {
                 std::vector<SdfLayerHandle>      new_layers_to_scan;
-                std::set<SdfLayerHandle>         layers_to_reload;
 
                 for (int i = 0; i < layers_to_scan.size(); i++)
                 {
-                    std::set<std::string>	 refs;
+                    auto refs = HUSDgetExternalReferences(layers_to_scan[i]);
 
-                    refs = layers_to_scan[i]->GetExternalReferences();
-                    for (auto &&path : refs)
+                    for (auto &&it : refs)
                     {
-                        if (!SdfLayer::IsAnonymousLayerIdentifier(path))
-                        {
-                            std::string	 fullpath;
+                        auto path = it.first;
+                        if (HUSDisLopLayer(path))
+                            continue;
 
-                            fullpath = layers_to_scan[i]->
-                                ComputeAbsolutePath(path);
-                            if (all_layer_paths.find(fullpath) ==
-                                    all_layer_paths.end())
-                            {
-                                layer = SdfLayer::Find(fullpath);
-                                if (layer &&
-                                    all_layers.find(layer) == all_layers.end())
-                                {
-                                    layers_to_reload.insert(layer);
-                                    new_layers_to_scan.push_back(layer);
-                                    all_layers.insert(layer);
-                                    all_layer_paths.insert(fullpath);
-                                }
-                            }
+                        std::string	 testpath;
+
+                        // Get the path in a form that will work on any
+                        // layer (even an anonymous one).
+                        testpath = layers_to_scan[i]->ComputeAbsolutePath(path);
+
+                        if (all_layer_paths.find(testpath) ==
+                                all_layer_paths.end())
+                        {
+                            layer = SdfLayer::Find(testpath);
+                            if (!layer)
+                                continue;
+
+                            // Skip over MaterialX layers (see comment above).
+                            if (layer->GetFileFormat() == theMtlxFormat)
+                                continue;
+
+                            if (all_layers.find(layer) != all_layers.end())
+                                continue;
+
+                            new_layers_to_scan.push_back(layer);
+                            all_layers.insert(layer);
+                            all_layer_paths.insert(testpath);
                         }
                     }
                 }
-                SdfLayer::ReloadLayers(layers_to_reload, true);
                 layers_to_scan.swap(new_layers_to_scan);
             }
 	}
+
+        // Get the paths for all layers we are going to reload, and clear
+        // them from the stage cache.
+        UT_StringSet             paths;
+        GusdStageCacheWriter	 cache;
+        for (auto &&layer : all_layers)
+            paths.insert(layer->GetIdentifier());
+        cache.Clear(paths);
+
+        UT_AutoLock lockscope(HUSDgetLayerReloadLock());
 
         // Clear the whole cache of automatic ref prim paths, because the
         // layers we are reloading may be used by any stage, and so may affect
         // the default/automatic default prim of any stage.
         HUSDclearBestRefPathCache();
 
+        // Do the actual reloading of the layers.
+        SdfLayer::ReloadLayers(all_layers, true);
+
 	return true;
     }
 
     return false;
+}
+
+bool
+HUSD_Info::reloadWithContext(const UT_StringRef &filepath,
+                             bool recursive,
+                             bool force_load /*=false*/) const
+{
+    if (myAnyLock.constData() &&
+	myAnyLock.constData()->isStageValid())
+    {
+	ArResolverContextBinder binder(
+	    myAnyLock.constData()->stage()->GetPathResolverContext());
+
+        return reload(filepath, recursive, force_load);
+    }
+
+    return reload(filepath, recursive, force_load);
+}
+
+void
+HUSD_Info::clearGusdXformCache() const
+{
+    UT_StringHolder identifier;
+    if (getStageRootLayer(identifier))
+        GusdUSD_XformCache::GetInstance().Clear({identifier});
 }
 
 bool
@@ -600,7 +843,7 @@ HUSD_Info::isStageValid() const
 bool
 HUSD_Info::getSourceLayers(UT_StringArray &names,
 	UT_StringArray &identifiers,
-	UT_IntArray &anonymous,
+	UT_IntArray &fromlops,
         UT_IntArray &fromsops) const
 {
     bool		 success = false;
@@ -615,7 +858,7 @@ HUSD_Info::getSourceLayers(UT_StringArray &names,
 	for (int i = sublayers.size(); i --> 0; )
 	{
 	    names.append(husdGetLayerLabel(sublayers(i).myLayer));
-	    anonymous.append(sublayers(i).myLayer->IsAnonymous());
+	    fromlops.append(HUSDisLopLayer(sublayers(i).myLayer));
 	    fromsops.append(HUSDisSopLayer(sublayers(i).myLayer));
 	    identifiers.append(sublayers(i).myIdentifier);
 	}
@@ -734,6 +977,34 @@ HUSD_Info::getStageRootLayer(UT_StringHolder &identifier) const
 	identifier = myAnyLock.constData()->stage()->
 	    GetRootLayer()->GetIdentifier();
 	success = true;
+    }
+
+    return success;
+}
+
+bool
+HUSD_Info::isLopLayer(const UT_StringRef &identifier)
+{
+    return HUSDisLopLayer(identifier.toStdString());
+}
+
+bool
+HUSD_Info::getLayerSavePath(const UT_StringHolder &identifier,
+        const UT_StringMap<UT_StringHolder> &refargs,
+        UT_StringHolder &savepath)
+{
+    bool                 success = false;
+
+    SdfLayer::FileFormatArguments args;
+    HUSDconvertToFileFormatArguments(refargs, args);
+
+    SdfLayerRefPtr layer = SdfLayer::Find(identifier.toStdString(), args);
+    if (layer)
+    {
+        std::string               savelocation;
+
+        success = HUSDgetSavePath(layer, savelocation);
+        savepath = savelocation;
     }
 
     return success;
@@ -878,6 +1149,102 @@ HUSD_Info::getAllRenderSettings(UT_StringArray &paths) const
     }
 
     return success;
+}
+
+HUSD_Path
+HUSD_Info::getBestRenderSettings(const UT_StringRef &explicit_path,
+        bool pick_first_of_many) const
+{
+    if (myAnyLock.constData() &&
+        myAnyLock.constData()->isStageValid())
+    {
+        auto stage = myAnyLock.constData()->stage();
+
+        // First priority goes to the explicitly provided path.
+        if (explicit_path.isstring())
+        {
+            SdfPath testpath = HUSDgetSdfPath(explicit_path);
+            if (!testpath.IsEmpty())
+            {
+                UsdPrim prim = stage->GetPrimAtPath(testpath);
+
+                if (UsdRenderSettings(prim))
+                    return testpath;
+            }
+        }
+
+        // Second priority goes to the current settings prim specified in
+        // the stage layer metadata.
+        auto settings = UsdRenderSettings::GetStageRenderSettings(stage);
+        if (settings)
+            return settings.GetPath();
+
+        // Third priority goes to the one and only render settings prim.
+        UT_StringArray all_settings;
+        getAllRenderSettings(all_settings);
+        if (!all_settings.isEmpty() &&
+            (all_settings.size() == 1 || pick_first_of_many))
+            return HUSDgetSdfPath(*all_settings.begin());
+    }
+
+    // No good candidate render settings prim was found.
+    return HUSD_Path();
+}
+
+HUSD_Path
+HUSD_Info::getBestCamera(const UT_StringRef &explicit_path,
+        const UT_StringHolder &render_settings,
+        bool pick_first_of_many) const
+{
+    if (myAnyLock.constData() &&
+        myAnyLock.constData()->isStageValid())
+    {
+        auto stage = myAnyLock.constData()->stage();
+
+        // First priority goes to the explicitly provided path.
+        if (explicit_path.isstring())
+        {
+            SdfPath testpath = HUSDgetSdfPath(explicit_path);
+            if (!testpath.IsEmpty())
+            {
+                UsdPrim prim = stage->GetPrimAtPath(testpath);
+
+                if (UsdGeomCamera(prim))
+                    return testpath;
+            }
+        }
+
+        // Second priority goes to the camera on the render settings prim
+        // specified by the render_settings parameter.
+        if (render_settings.isstring())
+        {
+            SdfPath testpath = HUSDgetSdfPath(render_settings);
+            if (!testpath.IsEmpty())
+            {
+                UsdPrim prim = stage->GetPrimAtPath(testpath);
+                UsdRenderSettings settings(prim);
+                SdfPathVector settings_cameras;
+
+                if (settings &&
+                    settings.GetCameraRel().GetTargets(&settings_cameras) &&
+                    settings_cameras.size() > 0 &&
+                    UsdGeomCamera(stage->GetPrimAtPath(settings_cameras[0])))
+                    return settings_cameras[0];
+            }
+        }
+
+        // Third priority goes to the one and only camera prim.
+        HUSD_FindPrims findprims(myAnyLock);
+        findprims.addPattern("%type(Camera)",
+            OP_INVALID_NODE_ID, HUSD_TimeCode());
+        const HUSD_PathSet &cams = findprims.getExpandedPathSet();
+        if (!cams.empty() &&
+            (cams.size() == 1 || pick_first_of_many))
+            return *cams.begin();
+    }
+
+    // No good candidate camera prim was found.
+    return HUSD_Path();
 }
 
 bool
@@ -1100,66 +1467,134 @@ HUSD_Info::getCollections(const UT_StringRef &primpath,
 }
 
 UT_StringHolder
-HUSD_Info::getAncestorOfKind(const UT_StringRef &primpath,
-	const UT_StringRef &kind) const
+HUSD_Info::getSelectionAncestor(const UT_StringRef &primpath,
+        const UT_StringRef &kindhint,
+        bool allow_kind_mismatch,
+        bool allow_instance_proxies,
+        bool allow_hidden_prims) const
 {
-    UT_StringHolder	 kindpath;
+    if (!myAnyLock.constData() ||
+        !myAnyLock.constData()->isStageValid())
+        return primpath;
 
-    if (myAnyLock.constData() &&
-	myAnyLock.constData()->isStageValid())
+    SdfPath sdfpath(HUSDgetSdfPath(primpath));
+    auto prim = myAnyLock.constData()->stage()->GetPrimAtPath(sdfpath);
+
+    // If instance proxies aren't allowed, climb up to the instance root
+    // before doing anything else.
+    if (!allow_instance_proxies)
     {
-	SdfPath sdfpath(HUSDgetSdfPath(primpath));
-	TfToken tfkind(kind.toStdString());
-	auto prim = myAnyLock.constData()->stage()->GetPrimAtPath(sdfpath);
-
-	while (prim)
-	{
-	    UsdModelAPI	 modelapi(prim);
-	    TfToken	 primkind;
-
-	    if (modelapi &&
-		modelapi.GetKind(&primkind) &&
-		KindRegistry::IsA(primkind, tfkind))
-	    {
-		kindpath = HUSD_Path(prim.GetPath()).pathStr();
-		break;
-	    }
-	    else
-		prim = prim.GetParent();
-	}
+        while (prim)
+        {
+            if (!prim.IsInstanceProxy())
+                break;
+            else
+                prim = prim.GetParent();
+        }
     }
 
-    return kindpath;
-}
-
-UT_StringHolder
-HUSD_Info::getAncestorInstanceRoot(const UT_StringRef &primpath) const
-{
-    UT_StringHolder	 instancerootpath;
-
-    if (myAnyLock.constData() &&
-	myAnyLock.constData()->isStageValid())
+    // If hidden prims aren't allowed, climb up to the first non-hidden
+    // prim before going any further.
+    if (!allow_hidden_prims)
     {
-	SdfPath sdfpath(HUSDgetSdfPath(primpath));
-	auto prim = myAnyLock.constData()->stage()->GetPrimAtPath(sdfpath);
-
-	while (prim)
-	{
-	    if (!prim.IsInstanceProxy())
-	    {
-		instancerootpath = HUSD_Path(prim.GetPath()).pathStr();
-		break;
-	    }
-	    else
-		prim = prim.GetParent();
-	}
+        while (prim)
+        {
+            if (!prim.IsHidden())
+                break;
+            else
+                prim = prim.GetParent();
+        }
     }
 
-    return instancerootpath;
+    // Special case for the fake "xform primitives" kind.
+    if (kindhint == HUSD_Constants::getFakeKindXform())
+    {
+        while (prim)
+        {
+            if (prim.IsA<UsdGeomXform>())
+                return HUSD_Path(prim.GetPath()).pathStr();
+            prim = prim.GetParent();
+        }
+
+        // We didn't find a strict match for an xform prim.
+        if (!allow_kind_mismatch)
+            return UT_StringHolder::theEmptyString;
+
+        // We didn't find a match, but mismatches are okay, so return the
+        // path that was originally passed to us.
+        return primpath;
+    }
+
+    // Every other kind string is handled as a real kind.
+    if (kindhint.isstring())
+    {
+        TfToken tfkind(kindhint.toStdString());
+        bool find_most_nested = true;
+
+        while (!tfkind.IsEmpty())
+        {
+            UsdPrim bestprim;
+            UsdPrim testprim = prim;
+
+            while (testprim)
+            {
+                UsdModelAPI modelapi(testprim);
+                TfToken primkind;
+
+                // If we find a prim of the requested kind, return it.
+                if (modelapi &&
+                    modelapi.GetKind(&primkind) &&
+                    KindRegistry::IsA(primkind, tfkind))
+                {
+                    bestprim = testprim;
+                    if (find_most_nested)
+                        break;
+                }
+                testprim = testprim.GetParent();
+            }
+            if (bestprim)
+                return HUSD_Path(bestprim.GetPath()).pathStr();
+
+            // We didn't find a strict match for the requested kind.
+            if (!allow_kind_mismatch)
+                return UT_StringHolder::theEmptyString;
+
+            // If we reach the "model" kind root and still can't find a
+            // match, just give up and return the original prim.
+            if (tfkind == KindTokens->model)
+                break;
+            // Otherwise try looking for a prim of the ancestor "kind".
+            // If we reach the root of the hierarchy without going through
+            // "model" then we were asked to find a subcomponent. In which
+            // case we want to return the most nested model (rather than
+            // the leaf).
+            tfkind = KindRegistry::GetBaseKind(tfkind);
+            if (tfkind.IsEmpty())
+                tfkind = KindTokens->model;
+
+            // If we make it all the way up to the base "model" kind,
+            // we once again want to search for the most nested match.
+            // The logic here is that if we don't find a "group", we
+            // should return the first "component", because they shouldn't
+            // be nested anyway. If we fail to find a "component", we
+            // should return the most nested "group" rather than the
+            // least nested group, because we presumably want to stay
+            // as close to the leaf as possible or we wouldn't have
+            // asked to select a component kind.
+            find_most_nested = (tfkind == KindTokens->model);
+        }
+    }
+
+    // If we are just returning the passed in prim path, we don't need to
+    // waste our time converting the SdfPath to a UT_StringHolder.
+    if (prim.GetPath() == sdfpath)
+        return primpath;
+
+    return HUSD_Path(prim.GetPath()).pathStr();
 }
 
 static inline UsdPrim
-husdGetPrimAtPath(HUSD_AutoAnyLock &lock, const UT_StringRef &primpath) 
+husdGetPrimAtPath(const HUSD_AutoAnyLock &lock, const UT_StringRef &primpath)
 {
     UsdPrim prim;
 
@@ -1175,19 +1610,14 @@ husdGetPrimAtPath(HUSD_AutoAnyLock &lock, const UT_StringRef &primpath)
 }
 
 bool
-HUSD_Info::isPrimAtPath(const UT_StringRef &primpath,
-	const UT_StringRef &prim_type) const
+HUSD_Info::isPrimAtPath(const UT_StringRef &primpath) const
 {
-    bool isprim = false;
-
     auto prim = husdGetPrimAtPath(myAnyLock, primpath);
-    if (prim &&
-	(!prim_type.isstring() || prim_type == prim.GetTypeName().GetString()))
-    {
-	isprim = true;
-    }
 
-    return isprim;
+    if (prim)
+        return true;
+
+    return false;
 }
 
 bool
@@ -1263,6 +1693,26 @@ HUSD_Info::isKind(const UT_StringRef &primpath, const UT_StringRef &kind) const
 }
 
 UT_StringHolder
+HUSD_Info::getSpecifier(const UT_StringRef &primpath) const
+{
+    return HUSDgetSpecifier(husdGetPrimAtPath(myAnyLock, primpath));
+}
+
+bool
+HUSD_Info::isAbstract(const UT_StringRef &primpath) const
+{
+    auto prim = husdGetPrimAtPath(myAnyLock, primpath);
+    return prim && prim.IsAbstract();
+}
+
+bool
+HUSD_Info::isModel(const UT_StringRef &primpath) const
+{
+    auto prim = husdGetPrimAtPath(myAnyLock, primpath);
+    return prim && prim.IsModel();
+}
+
+UT_StringHolder
 HUSD_Info::getPrimType(const UT_StringRef &primpath) const
 {
     UT_StringHolder	 primtype;
@@ -1302,61 +1752,16 @@ HUSD_Info::hasPayload(const UT_StringRef &primpath) const
 UT_StringHolder
 HUSD_Info::getIcon(const UT_StringRef &primpath) const
 {
-    UsdPrim     	 prim(husdGetPrimAtPath(myAnyLock, primpath));
-    UT_StringHolder	 icon;
+    PY_InterpreterAutoLock   pylock;
+    HUSD_PythonConverter     converter(myAnyLock);
+    PY_AutoObject            pyobj((PY_PyObject *)converter.getPrim(primpath));
+    UT_StringHolder	     icon;
 
-    // This function's logic must be kept in sync with the ptyhon function
-    // usdprimicons.getIconForPrim().
-    if (prim)
-    {
-        auto data = prim.GetCustomData();
-        auto it = data.find(HUSD_Constants::getIconCustomDataName().c_str());
-
-        if (it != data.end())
-            icon = it->second.Get<std::string>();
-
-        if (!icon.isstring())
-        {
-            UsdLuxShapingAPI     shaping(prim);
-
-            if (shaping)
-                icon = "SCENEGRAPH_shapedlight";
-        }
-
-        if (!icon.isstring())
-        {
-            static UT_Map<PrimInfo, UT_StringHolder> thePrimIconMap;
-            TfToken primtype;
-            TfToken primkind;
-
-            primtype = prim.GetTypeName();
-            UsdModelAPI(prim).GetKind(&primkind);
-            const PrimInfo priminfo = {
-                UT_StringHolder(primtype.GetString()),
-                UT_StringHolder(primkind.GetString())
-            };
-
-            if (!thePrimIconMap.contains(priminfo))
-            {
-                UT_WorkBuffer	 expr;
-                PY_Result	 result;
-
-                expr.sprintf(
-                    "__import__('usdprimicons')."
-                    "getIconForPrimTypeAndKind('%s', '%s')",
-                    primtype.GetString().c_str(),
-                    primkind.GetString().c_str());
-                result = PYrunPythonExpression(
-                    expr.buffer(), PY_Result::STRING);
-                if (result.myResultType == PY_Result::STRING)
-                    thePrimIconMap[priminfo] = result.myStringValue;
-                else
-                    thePrimIconMap[priminfo] = "";
-            }
-
-            icon = thePrimIconMap[priminfo];
-        }
-    }
+    PY_Result result = PYcallMethodOnPythonObjectWithArgs(
+        getUsdPrimIconsModule().opaqueObject(), "getIconForPrim",
+        PY_Result::STRING, "O", pyobj.ptr());
+    if (result.myResultType == PY_Result::STRING)
+        icon = result.myStringValue;
 
     return icon;
 }
@@ -1386,6 +1791,25 @@ HUSD_Info::getDrawMode(const UT_StringRef &primpath) const
     }
 
     return drawmode;
+}
+
+bool
+HUSD_Info::isEditable(const UT_StringRef &primpath) const
+{
+    return HUSDisPrimEditable(husdGetPrimAtPath(myAnyLock, primpath));
+}
+
+bool
+HUSD_Info::isSelectable(const UT_StringRef &primpath,
+        UT_Map<HUSD_Path, bool> *cache) const
+{
+    return HUSDisPrimSelectable(husdGetPrimAtPath(myAnyLock, primpath), cache);
+}
+
+bool
+HUSD_Info::isHiddenInUi(const UT_StringRef &primpath) const
+{
+    return HUSDisPrimHiddenInUi(husdGetPrimAtPath(myAnyLock, primpath));
 }
 
 UT_StringHolder
@@ -1436,6 +1860,24 @@ HUSD_Info::getChildren(const UT_StringRef &primpath,
     }
 }
 
+exint
+HUSD_Info::getDescendantCount(const UT_StringRef &primpath,
+        HUSD_PrimTraversalDemands demands) const
+{
+    auto		 prim = husdGetPrimAtPath(myAnyLock, primpath);
+
+    if (prim)
+    {
+        auto predicate = HUSDgetUsdPrimPredicate(demands);
+        XUSD_FindPrimCountTaskData data;
+        XUSDfindPrims(prim, data, predicate, nullptr, nullptr);
+
+        return data.getTotalCount();
+    }
+
+    return 0;
+}
+
 void
 HUSD_Info::getDescendantStats(const UT_StringRef &primpath,
         UT_Options &stats,
@@ -1450,12 +1892,187 @@ HUSD_Info::getDescendantStats(const UT_StringRef &primpath,
             HUSD_TRAVERSAL_ALLOW_INSTANCE_PROXIES);
         auto predicate = HUSDgetUsdPrimPredicate(demands);
         XUSD_FindPrimStatsTaskData data(flags);
-        auto &task = *new(UT_Task::allocate_root())
-            XUSD_FindPrimsTask(prim, data, predicate, nullptr, nullptr);
-        UT_Task::spawnRootAndWait(task);
+        XUSDfindPrims(prim, data, predicate, nullptr, nullptr);
 
         data.gatherStatsFromThreads(stats);
     }
+}
+
+// Get stats for the stage ptr associated with this HUSD_Info instance
+bool
+HUSD_Info::computeStageStats(UT_Options &stats) const
+{
+    if (myAnyLock.constData() &&
+        myAnyLock.constData()->isStageValid())
+    {
+        const auto &stagePtr = myAnyLock.constData()->stage();
+        VtDictionary dict;
+        // Does not report approxMemoryInMb since TfMallocTag is not initialized
+        UsdUtilsComputeUsdStageStats(stagePtr, &dict);
+
+        if (dict.size() == 0)
+            return false;
+
+        return HUSDconvertDictionary(stats, dict);
+    }
+    return false;
+}
+
+bool
+HUSD_Info::computeStageStats(const UT_StringRef &path,
+        UT_Options &stats)
+{
+    VtDictionary dict;
+    UsdUtilsComputeUsdStageStats(path.toStdString(), &dict);
+
+    // Did not populate the dictionary for some reason.
+    if (dict.size() == 0)
+        return false;
+
+    return HUSDconvertDictionary(stats, dict);
+}
+
+bool
+HUSD_Info::computeAllDependencies(const UT_StringRef &path,
+        UT_StringArray &layers,
+        UT_StringArray &resolved,
+        UT_StringArray &unresolved)
+{
+    SdfAssetPath sap(path.toStdString());
+    // Passed empty string or path could not be resolved.
+    if (sap == SdfAssetPath())
+        return false;
+    std::vector<SdfLayerRefPtr> resolved_layers;
+    std::vector<std::string> resolved_deps;
+    std::vector<std::string> unresolved_deps;
+    bool res = UsdUtilsComputeAllDependencies(sap,
+                    &resolved_layers, &resolved_deps, &unresolved_deps);
+    if (!res)
+        return false;
+    for (auto &&resolved_layer : resolved_layers)
+    {
+        std::string name = resolved_layer->GetIdentifier();
+        if (!name.empty())
+            layers.append(name);
+    }
+    // The USD API functions might produce empty strings as
+    // a result of errors related to Bug #124172.
+    // For now, just filter them out.
+    stringVecToArraySkipEmpty(resolved_deps, resolved);
+    stringVecToArraySkipEmpty(unresolved_deps, unresolved);
+
+    return true;
+}
+
+bool
+HUSD_Info::extractExternalReferences(const UT_StringRef &path,
+        UT_StringArray &sub_layers,
+        UT_StringArray &references,
+        UT_StringArray &payloads)
+{
+    std::vector<std::string> sub_layers_vec, references_vec, payloads_vec;
+    UsdUtilsExtractExternalReferences(path.toStdString(), &sub_layers_vec,
+                                        &references_vec, &payloads_vec);
+    
+    stringVecToArraySkipEmpty(sub_layers_vec, sub_layers);
+    stringVecToArraySkipEmpty(references_vec, references);
+    stringVecToArraySkipEmpty(payloads_vec, payloads);
+    
+    return true;
+}
+
+bool
+HUSD_Info::getExpandedPathSet(const UT_StringRef &filepath,
+        const UT_StringRef &primpattern,
+        HUSD_PathSet &paths)
+{
+    HUSD_DataHandle datahandle(filepath);
+
+    if (datahandle.hasData())
+    {
+        HUSD_AutoReadLock lock(datahandle);
+        HUSD_FindPrims findprims(lock);
+
+        findprims.addPattern(primpattern, OP_INVALID_NODE_ID, HUSD_TimeCode());
+        paths = findprims.getExpandedPathSet();
+
+        return true;
+    }
+
+    return false;
+}
+
+bool
+HUSD_Info::getLayerRootPrims(const UT_StringRef &filepath,
+        const UT_StringMap<UT_StringHolder> &fileargs,
+        HUSD_PathSet &rootprims)
+{
+    bool                 success = false;
+
+    if (filepath.isstring())
+    {
+        SdfFileFormat::FileFormatArguments args;
+        HUSDconvertToFileFormatArguments(fileargs, args);
+        std::string layer_path = SdfLayer::CreateIdentifier(
+            filepath.toStdString(), args);
+
+        SdfLayerRefPtr layer = SdfLayer::FindOrOpen(layer_path);
+        if (layer)
+        {
+            static const HUSD_Path theLayerInfoPrimPath(
+                HUSD_Constants::getHoudiniLayerInfoPrimPath());
+
+            for (auto &&prim : layer->GetRootPrims())
+                if (prim->GetPath() != theLayerInfoPrimPath.sdfPath())
+                    rootprims.insert(prim->GetPath());
+            success = true;
+        }
+    }
+
+    return success;
+}
+
+bool
+HUSD_Info::hasAnyPrimsOutside(const UT_StringRef &filepath,
+        const UT_StringMap<UT_StringHolder> &fileargs,
+        const UT_StringRef &primpath)
+{
+    if (filepath.isstring())
+    {
+        SdfFileFormat::FileFormatArguments args;
+        HUSDconvertToFileFormatArguments(fileargs, args);
+        std::string layer_path = SdfLayer::CreateIdentifier(
+            filepath.toStdString(), args);
+
+        SdfLayerRefPtr layer = SdfLayer::FindOrOpen(layer_path);
+        if (layer)
+        {
+            static const HUSD_Path theLayerInfoPrimPath(
+                HUSD_Constants::getHoudiniLayerInfoPrimPath());
+            SdfPath sdfprimpath = HUSDgetSdfPath(primpath);
+            SdfPrimSpecHandle sdfprimspec = layer->GetPrimAtPath(sdfprimpath);
+
+            if (sdfprimspec)
+            {
+                SdfPrimSpecHandle parent = sdfprimspec;
+                while ((parent = parent->GetRealNameParent()))
+                {
+                    for (auto &&child : parent->GetNameChildren())
+                        if (!sdfprimpath.HasPrefix(child->GetPath()) &&
+                            child->GetPath() != theLayerInfoPrimPath.sdfPath())
+                            return true;
+                }
+            }
+            else
+            {
+                for (auto &&child : layer->GetRootPrims())
+                    if (child->GetPath() != theLayerInfoPrimPath.sdfPath())
+                        return true;
+            }
+        }
+    }
+
+    return false;
 }
 
 UT_StringHolder	
@@ -1476,24 +2093,19 @@ HUSD_Info::getBoundMaterial(const UT_StringRef &primpath) const
 
 template <typename F>
 UT_Matrix4D
-husdGetXformMatrix(HUSD_AutoAnyLock &lock, const UT_StringRef &primpath,
+husdGetXformMatrix(const HUSD_AutoAnyLock &lock,
+        husd_InfoPrivate &info,
+        const UT_StringRef &primpath,
 	const HUSD_TimeCode &tc, F callback)
 {
+    UsdPrim              prim(husdGetPrimAtPath(lock, primpath));
+    if (!prim)
+        return UT_Matrix4D::getIdentityMatrix();
 
-    UsdGeomXformable	 xformable(husdGetPrimAtPath(lock, primpath));
-    UT_Matrix4D		 xform;
+    UsdTimeCode          usd_tc = HUSDgetNonDefaultUsdTimeCode(tc);
+    UsdGeomXformCache   &xform_cache = info.getXformCache(usd_tc);
 
-    xform.zero();
-    if( !xformable )
-	return xform;
-
-    UsdTimeCode usd_tc = HUSDgetNonDefaultUsdTimeCode(tc);
-
-    GfMatrix4d	gf_xform;
-    if( callback( xformable, gf_xform, usd_tc ))
-	xform = GusdUT_Gf::Cast(gf_xform);
-
-    return xform;
+    return GusdUT_Gf::Cast(callback(xform_cache, prim));
 }
 
 UT_Matrix4D
@@ -1504,13 +2116,11 @@ HUSD_Info::getLocalXform(const UT_StringRef &primpath,
 	*time_sampling = HUSDgetLocalTransformTimeSampling(
 		husdGetPrimAtPath(myAnyLock, primpath));
 
-    return husdGetXformMatrix( myAnyLock, primpath, time_code,
-	    []( const UsdGeomXformable &xformable, GfMatrix4d &gf_xform,
-		 UsdTimeCode usd_tc )
+    return husdGetXformMatrix( myAnyLock, *myPrivate, primpath, time_code,
+	    [] (UsdGeomXformCache &xform_cache, const UsdPrim &prim)
 	    {
 		bool is_reset;
-		return xformable.GetLocalTransformation(&gf_xform, &is_reset, 
-			usd_tc);
+                return xform_cache.GetLocalTransformation(prim, &is_reset);
 	    });
 }
 
@@ -1522,30 +2132,53 @@ HUSD_Info::getWorldXform(const UT_StringRef &primpath,
 	*time_sampling = HUSDgetWorldTransformTimeSampling(
 		husdGetPrimAtPath(myAnyLock, primpath));
 
-    return husdGetXformMatrix( myAnyLock, primpath, time_code,
-	    []( const UsdGeomXformable &xformable, GfMatrix4d &gf_xform,
-		 UsdTimeCode usd_tc )
+    return husdGetXformMatrix( myAnyLock, *myPrivate, primpath, time_code,
+	    [] (UsdGeomXformCache &xform_cache, const UsdPrim &prim)
 	    {
-		gf_xform = xformable.ComputeLocalToWorldTransform( usd_tc );
-		return true;
+		return xform_cache.GetLocalToWorldTransform(prim);
 	    });
 }
 
 UT_Matrix4D
 HUSD_Info::getParentXform(const UT_StringRef &primpath,
-	const HUSD_TimeCode &time_code, HUSD_TimeSampling *time_sampling) const
+        const HUSD_TimeCode &time_code, HUSD_TimeSampling *time_sampling) const
 {
-    auto prim = husdGetPrimAtPath(myAnyLock, primpath);
-    if( time_sampling != nullptr && prim )
-	*time_sampling = HUSDgetWorldTransformTimeSampling( prim.GetParent() );
+    if( time_sampling != nullptr )
+        *time_sampling = HUSDgetWorldTransformTimeSampling(
+                husdGetPrimAtPath(myAnyLock, primpath));
 
-    return husdGetXformMatrix( myAnyLock, primpath, time_code,
-	    []( const UsdGeomXformable &xformable, GfMatrix4d &gf_xform,
-		 UsdTimeCode usd_tc )
-	    {
-		gf_xform = xformable.ComputeParentToWorldTransform( usd_tc );
-		return true;
-	    });
+    return husdGetXformMatrix( myAnyLock, *myPrivate, primpath, time_code,
+            [] (UsdGeomXformCache &xform_cache, const UsdPrim &prim)
+            {
+                return xform_cache.GetParentToWorldTransform(prim);
+            });
+}
+
+UT_Matrix4D
+HUSD_Info::getXformFromOpOrder(const UT_StringRef &primpath,
+        const HUSD_TimeCode &time_code,
+        const UT_StringArray &xformOpOrder,
+        HUSD_TimeSampling *time_sampling) const
+{
+    if( time_sampling != nullptr )
+        *time_sampling = HUSDgetWorldTransformTimeSampling(
+                husdGetPrimAtPath(myAnyLock, primpath));
+
+    UsdPrim prim(husdGetPrimAtPath(myAnyLock, primpath));
+    if (!prim)
+        return UT_Matrix4D::getIdentityMatrix();
+
+    GfMatrix4d xform{1.0};
+    UT_StringArray::const_reverse_iterator it = xformOpOrder.rbegin();
+    for (; it != xformOpOrder.rend(); ++it)
+    {
+        const UsdAttribute &xformAttr =
+                prim.GetAttribute(TfToken((*it).toStdString()));
+        VtValue xformVal;
+        xformAttr.Get(&xformVal, UsdTimeCode::EarliestTime());
+        xform *= xformVal.Get<GfMatrix4d>();
+    }
+    return GusdUT_Gf::Cast(xform);
 }
 
 bool
@@ -1592,8 +2225,8 @@ HUSD_Info::getBounds(const UT_StringRef &primpath,
     for (auto &&purpose : purposes)
 	tf_purposes.push_back( TfToken( purpose.toStdString() ));
 
-    auto		usd_tc = HUSDgetNonDefaultUsdTimeCode(time_code);
-    UsdGeomBBoxCache	bbox_cache( usd_tc, tf_purposes );
+    UsdTimeCode       usd_tc = HUSDgetNonDefaultUsdTimeCode(time_code);
+    UsdGeomBBoxCache &bbox_cache = myPrivate->getBBoxCache(usd_tc, tf_purposes);
 
     GfBBox3d gf_bbox   = bbox_cache.ComputeUntransformedBound( prim );
     GfRange3d gf_range = gf_bbox.ComputeAlignedRange();
@@ -1680,8 +2313,8 @@ HUSD_Info::getPointInstancerBounds(const UT_StringRef &primpath,
     for (auto &&purpose : purposes)
 	tf_purposes.push_back( TfToken( purpose.toStdString() ));
 
-    auto		usd_tc = HUSDgetNonDefaultUsdTimeCode(time_code);
-    UsdGeomBBoxCache	bbox_cache( usd_tc, tf_purposes );
+    UsdTimeCode       usd_tc = HUSDgetNonDefaultUsdTimeCode(time_code);
+    UsdGeomBBoxCache &bbox_cache = myPrivate->getBBoxCache(usd_tc, tf_purposes);
 
     GfBBox3d gf_bbox = bbox_cache.ComputePointInstanceUntransformedBound(
 	    api, instance_index );
@@ -1691,6 +2324,17 @@ HUSD_Info::getPointInstancerBounds(const UT_StringRef &primpath,
 	    gf_range.GetMin()[0], gf_range.GetMin()[1], gf_range.GetMin()[2],
 	    gf_range.GetMax()[0], gf_range.GetMax()[1], gf_range.GetMax()[2] );
     return bbox;
+}
+
+int
+HUSD_Info::getPointInstancerInstanceCount(const UT_StringRef &primpath,
+        const HUSD_TimeCode &time_code) const
+{
+    UsdGeomPointInstancer api(husdGetPrimAtPath(myAnyLock, primpath));
+    if (!api)
+        return 0;
+
+    return api.GetInstanceCount(HUSDgetNonDefaultUsdTimeCode(time_code));
 }
 
 static inline UT_StringHolder
@@ -1713,6 +2357,8 @@ husdGetObjAtPath( HUSD_AutoAnyLock &lock, const UT_StringRef &path)
 	lock.constData() && lock.constData()->isStageValid())
     {
 	SdfPath sdfpath(HUSDgetSdfPath(path));
+        if (sdfpath.IsAbsoluteRootPath())
+            return lock.constData()->stage()->GetPseudoRoot().As<T>();
 	auto obj = lock.constData()->stage()->GetObjectAtPath(sdfpath);
 	result = obj.As<T>();
     }
@@ -1747,13 +2393,12 @@ HUSD_Info::isAttribAtPath(const UT_StringRef &primpath,
     return isAttribAtPath(husdPropertyPath(primpath, attribname), query);
 }
 
-exint
-HUSD_Info::getAttribLength(const UT_StringRef &attribpath,
-	const HUSD_TimeCode &time_code, HUSD_TimeSampling *time_sampling ) const
+static inline exint
+husdGetAttribLength(const UsdAttribute &attrib,
+	const HUSD_TimeCode &time_code, HUSD_TimeSampling *time_sampling ) 
 {
     exint length = 0;
 
-    auto attrib = husdGetAttribAtPath(myAnyLock, attribpath);
     if (attrib && !attrib.GetTypeName().IsArray())
     {
 	// Non-array values have a conceptual length of 1.
@@ -1776,20 +2421,28 @@ HUSD_Info::getAttribLength(const UT_StringRef &attribpath,
 }
 
 exint
+HUSD_Info::getAttribLength(const UT_StringRef &attribpath,
+	const HUSD_TimeCode &time_code, HUSD_TimeSampling *time_sampling ) const
+{
+    auto attrib( husdGetAttribAtPath( myAnyLock, attribpath ));
+    return husdGetAttribLength( attrib, time_code, time_sampling );
+}
+
+exint
 HUSD_Info::getAttribLength(const UT_StringRef &primpath,
 	const UT_StringRef &attribname, 
 	const HUSD_TimeCode &time_code, HUSD_TimeSampling *time_sampling ) const
 {
-    return getAttribLength(husdPropertyPath(primpath, attribname), time_code,
-	    time_sampling);
+    auto attribpath( husdPropertyPath( primpath, attribname ));
+    auto attrib( husdGetAttribAtPath( myAnyLock, attribpath ));
+    return husdGetAttribLength( attrib, time_code, time_sampling );
 }
 
-exint
-HUSD_Info::getAttribSize(const UT_StringRef &attribpath) const
+static inline exint
+husdGetAttribSize(const UsdAttribute &attrib)
 {
     exint size = 0;
 
-    auto attrib = husdGetAttribAtPath(myAnyLock, attribpath);
     if (attrib && attrib.GetTypeName().GetDimensions().size == 0)
 	size = 1; // plain scalar; not a tuple
     else if (attrib && attrib.GetTypeName().GetDimensions().size == 1)
@@ -1802,10 +2455,19 @@ HUSD_Info::getAttribSize(const UT_StringRef &attribpath) const
 }
 
 exint
+HUSD_Info::getAttribSize(const UT_StringRef &attribpath) const
+{
+    auto attrib( husdGetAttribAtPath( myAnyLock, attribpath ));
+    return husdGetAttribSize( attrib );
+}
+
+exint
 HUSD_Info::getAttribSize(const UT_StringRef &primpath,
 	const UT_StringRef &attribname) const
 {
-    return getAttribSize(husdPropertyPath(primpath, attribname));
+    auto attribpath( husdPropertyPath( primpath, attribname ));
+    auto attrib( husdGetAttribAtPath( myAnyLock, attribpath ));
+    return husdGetAttribSize( attrib );
 }
 
 UT_StringHolder	
@@ -1900,7 +2562,7 @@ HUSD_Info::extractAttributes(const UT_StringRef &primpath,
 
 	    if (prim)
 	    {
-		auto		    time = HUSDgetUsdTimeCode(tc);
+		auto		    time = HUSDgetNonDefaultUsdTimeCode(tc);
 		HUSD_TimeSampling   sampling = HUSD_TimeSampling::NONE;
 
 		if ((which_attribs.empty() ||
@@ -2033,20 +2695,24 @@ HUSD_Info::extractAttributes(const UT_StringRef &primpath,
 
 static inline UsdGeomPrimvar
 husdGetPrimvar( HUSD_AutoAnyLock &lock, const UT_StringRef &primpath,
-	const UT_StringRef &primvarname)
+	const UT_StringRef &primvarname, bool allow_inheritance)
 {
     UsdGeomPrimvarsAPI api(husdGetPrimAtPath(lock, primpath));
     if (!api)
 	return UsdGeomPrimvar(UsdAttribute());
 
-    return api.GetPrimvar(TfToken(primvarname.toStdString()));
+    TfToken name(primvarname.toStdString());
+    if (allow_inheritance)
+	return api.FindPrimvarWithInheritance(name);
+
+    return api.GetPrimvar(name);
 }
 
 bool
 HUSD_Info::isPrimvarAtPath(const UT_StringRef &primpath,
-	const UT_StringRef &primvarname, QueryAspect query ) const
+	const UT_StringRef &primvarname, QueryAspect query, bool inherit) const
 {
-    auto primvar(husdGetPrimvar(myAnyLock, primpath, primvarname));
+    auto primvar(husdGetPrimvar(myAnyLock, primpath, primvarname, inherit));
     if (!primvar)
 	return false;
 
@@ -2058,13 +2724,15 @@ HUSD_Info::isPrimvarAtPath(const UT_StringRef &primpath,
 
 void
 HUSD_Info::getPrimvarNames(const UT_StringRef &primpath,
-	UT_ArrayStringSet &primvar_names) const
+	UT_ArrayStringSet &primvar_names, bool inherit) const
 {
     UsdGeomPrimvarsAPI api(husdGetPrimAtPath(myAnyLock, primpath));
     if (!api)
 	return;
 
-    auto primvars = api.GetPrimvars();
+    auto primvars = (inherit)
+	? api.FindPrimvarsWithInheritance()
+	: api.GetPrimvars();
     for( auto &&primvar : primvars )
 	primvar_names.emplace(primvar.GetName().GetString());
 }
@@ -2072,24 +2740,25 @@ HUSD_Info::getPrimvarNames(const UT_StringRef &primpath,
 exint
 HUSD_Info::getPrimvarLength(const UT_StringRef &primpath,
 	const UT_StringRef &primvarname, const HUSD_TimeCode &time_code,
-	HUSD_TimeSampling *time_sampling ) const
+	HUSD_TimeSampling *time_sampling, bool inherit) const
 {
-    return getAttribLength(primpath, HUSDgetPrimvarAttribName(primvarname), 
-	    time_code, time_sampling);
+    auto primvar(husdGetPrimvar(myAnyLock, primpath, primvarname, inherit));
+    return husdGetAttribLength(primvar.GetAttr(), time_code, time_sampling);
 }
 
 exint
 HUSD_Info::getPrimvarSize(const UT_StringRef &primpath,
-	const UT_StringRef &primvarname) const
+	const UT_StringRef &primvarname, bool inherit) const
 {
-    return getAttribSize(primpath, HUSDgetPrimvarAttribName(primvarname));
+    auto primvar(husdGetPrimvar(myAnyLock, primpath, primvarname, inherit));
+    return husdGetAttribSize(primvar.GetAttr());
 }
 
 UT_StringHolder	
 HUSD_Info::getPrimvarTypeName(const UT_StringRef &primpath,
-	const UT_StringRef &primvarname) const
+	const UT_StringRef &primvarname, bool inherit) const
 {
-    auto primvar(husdGetPrimvar(myAnyLock, primpath, primvarname));
+    auto primvar(husdGetPrimvar(myAnyLock, primpath, primvarname, inherit));
     if (!primvar)
 	return UT_StringHolder();
 
@@ -2098,9 +2767,10 @@ HUSD_Info::getPrimvarTypeName(const UT_StringRef &primpath,
 
 bool
 HUSD_Info::getPrimvarTimeSamples(const UT_StringRef &primpath,
-	const UT_StringRef &primvarname, UT_FprealArray &time_samples) const
+	const UT_StringRef &primvarname, UT_FprealArray &time_samples,
+	bool inherit) const
 {
-    auto primvar(husdGetPrimvar(myAnyLock, primpath, primvarname));
+    auto primvar(husdGetPrimvar(myAnyLock, primpath, primvarname, inherit));
     if (!primvar)
 	return false;
 
@@ -2286,7 +2956,7 @@ HUSD_Info::isActiveLayerPrimAtPath(const UT_StringRef &primpath,
 bool
 HUSD_Info::getActiveLayerSubLayers(UT_StringArray &names,
 	UT_StringArray &identifiers,
-	UT_IntArray &anonymous,
+	UT_IntArray &fromlops,
         UT_IntArray &fromsops) const
 {
     bool		 success = false;
@@ -2312,7 +2982,7 @@ HUSD_Info::getActiveLayerSubLayers(UT_StringArray &names,
 
 		names.append(husdGetLayerLabel(sublayer));
 		identifiers.append((std::string)path);
-		anonymous.append(sublayer->IsAnonymous());
+		fromlops.append(HUSDisLopLayer(sublayer));
 		fromsops.append(HUSDisSopLayer(sublayer));
 	    }
 	}
@@ -2322,4 +2992,110 @@ HUSD_Info::getActiveLayerSubLayers(UT_StringArray &names,
 
     return success;
 }
+
+void
+HUSD_Info::getShaderInputAttributeNames( const UT_StringRef &primpath,
+	UT_ArrayStringSet &attrib_names) const
+{
+    UT_StringArray input_names;
+    auto prim = husdGetPrimAtPath(myAnyLock, primpath);
+    XUSD_ShaderRegistry::getShaderInputNames(prim, input_names);
+
+    UT_WorkBuffer buffer;
+    for( auto &&name : input_names )
+    {
+	buffer = UsdShadeTokens->inputs.GetString(); 
+	buffer.append( name );
+
+	attrib_names.emplace( buffer );
+    }
+}
+
+template<typename UtValueType>
+bool
+HUSD_Info::getMetadata(const UT_StringRef &object_path,
+        const UT_StringRef &name, UtValueType &value) const
+{
+    auto obj = husdGetObjAtPath<UsdObject>(myAnyLock, object_path);
+    if( !obj )
+        return false;
+
+    TfToken key_path( name.toStdString() );
+    return HUSDgetMetadata(obj, key_path, value);
+}
+
+template<typename UtValueType>
+bool
+HUSD_Info::getCustomData(const UT_StringRef &object_path,
+        const UT_StringRef &name, UtValueType &value) const
+{
+    auto obj = husdGetObjAtPath<UsdObject>(myAnyLock, object_path);
+    if( !obj )
+        return false;
+
+    TfToken key_path( name.toStdString() );
+    return HUSDgetCustomData(obj, key_path, value);
+}
+
+template<typename UtValueType>
+bool
+HUSD_Info::getAssetInfo(const UT_StringRef &object_path,
+        const UT_StringRef &name, UtValueType &value) const
+{
+    auto obj = husdGetObjAtPath<UsdObject>(myAnyLock, object_path);
+    if( !obj )
+        return false;
+
+    TfToken key_path( name.toStdString() );
+    return HUSDgetAssetInfo(obj, key_path, value);
+}
+
+//----------------------------------------------------------------------------
+// Instantiate the template types explicitly
+
+#define HUSD_EXPLICIT_INSTANTIATION(UtType)                             \
+    template HUSD_API_TINST bool HUSD_Info::getMetadata(                \
+	const UT_StringRef	&obj_path,                              \
+	const UT_StringRef	&metadata_name,                         \
+	UtType			&value) const;                          \
+    template HUSD_API_TINST bool HUSD_Info::getCustomData(              \
+        const UT_StringRef	&obj_path,                              \
+        const UT_StringRef	&metadata_name,                         \
+        UtType			&value) const;                          \
+    template HUSD_API_TINST bool HUSD_Info::getAssetInfo(               \
+        const UT_StringRef	&obj_path,                              \
+        const UT_StringRef	&metadata_name,                         \
+        UtType			&value) const;
+
+#define HUSD_EXPLICIT_INSTANTIATION_PAIR(UtType)                        \
+    HUSD_EXPLICIT_INSTANTIATION(UtType)                                 \
+    HUSD_EXPLICIT_INSTANTIATION(UT_Array<UtType>)
+
+HUSD_EXPLICIT_INSTANTIATION_PAIR(bool)
+HUSD_EXPLICIT_INSTANTIATION_PAIR(int)
+HUSD_EXPLICIT_INSTANTIATION_PAIR(int64)
+HUSD_EXPLICIT_INSTANTIATION_PAIR(fpreal32)
+HUSD_EXPLICIT_INSTANTIATION_PAIR(fpreal64)
+HUSD_EXPLICIT_INSTANTIATION_PAIR(UT_StringHolder)
+HUSD_EXPLICIT_INSTANTIATION_PAIR(UT_Vector2i)
+HUSD_EXPLICIT_INSTANTIATION_PAIR(UT_Vector3i)
+HUSD_EXPLICIT_INSTANTIATION_PAIR(UT_Vector4i)
+HUSD_EXPLICIT_INSTANTIATION_PAIR(UT_Vector2F)
+HUSD_EXPLICIT_INSTANTIATION_PAIR(UT_Vector3F)
+HUSD_EXPLICIT_INSTANTIATION_PAIR(UT_Vector4F)
+HUSD_EXPLICIT_INSTANTIATION_PAIR(UT_Vector2D)
+HUSD_EXPLICIT_INSTANTIATION_PAIR(UT_Vector3D)
+HUSD_EXPLICIT_INSTANTIATION_PAIR(UT_Vector4D)
+HUSD_EXPLICIT_INSTANTIATION_PAIR(UT_QuaternionH)
+HUSD_EXPLICIT_INSTANTIATION_PAIR(UT_QuaternionF)
+HUSD_EXPLICIT_INSTANTIATION_PAIR(UT_QuaternionD)
+HUSD_EXPLICIT_INSTANTIATION_PAIR(UT_Matrix2F)
+HUSD_EXPLICIT_INSTANTIATION_PAIR(UT_Matrix3F)
+HUSD_EXPLICIT_INSTANTIATION_PAIR(UT_Matrix4F)
+HUSD_EXPLICIT_INSTANTIATION_PAIR(UT_Matrix2D)
+HUSD_EXPLICIT_INSTANTIATION_PAIR(UT_Matrix3D)
+HUSD_EXPLICIT_INSTANTIATION_PAIR(UT_Matrix4D)
+
+#undef HUSD_EXPLICIT_INSTANTIATION
+#undef HUSD_EXPLICIT_INSTANTIATION_PAIR
 

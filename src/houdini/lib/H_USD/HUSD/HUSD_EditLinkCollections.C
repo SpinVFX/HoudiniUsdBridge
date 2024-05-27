@@ -36,7 +36,7 @@
 #include <pxr/usd/sdf/path.h>
 #include <pxr/usd/usd/collectionAPI.h>
 #include <pxr/usd/usd/prim.h>
-#include <pxr/usd/usdLux/light.h>
+#include <pxr/usd/usdLux/lightAPI.h>
 #include <pxr/usd/usdLux/listAPI.h>
 #include <algorithm>
 
@@ -95,26 +95,26 @@ husdGetCollectionAPI(HUSD_AutoWriteLock &lock, const SdfPath &sdfpath,
 
     if (type == HUSD_EditLinkCollections::LightLink)
     {
-	UsdLuxLight	 light(prim);
-	if (!prim.IsValid())
+	UsdLuxLightAPI	 lightapi(prim);
+	if (!lightapi)
 	{
 	    if (errors)
-		errors->append("Prim not a UsdLuxLight");
+		errors->append("Prim hasn't applied the UsdLuxLightAPI schema");
 	    return UsdCollectionAPI();
 	}
-	return light.GetLightLinkCollectionAPI();
+	return lightapi.GetLightLinkCollectionAPI();
     }
 
     if (type == HUSD_EditLinkCollections::ShadowLink)
     {
-	UsdLuxLight	 light(prim);
-	if (!prim.IsValid())
+	UsdLuxLightAPI	 lightapi(prim);
+	if (!lightapi)
 	{
 	    if (errors)
-		errors->append("Prim not a UsdLuxLight");
+		errors->append("Prim hasn't applied the UsdLuxLightAPI schema");
 	    return UsdCollectionAPI();
 	}
-	return light.GetShadowLinkCollectionAPI();
+	return lightapi.GetShadowLinkCollectionAPI();
     }
 
     if (errors)
@@ -132,24 +132,39 @@ getLinkData(const SdfPath &sdfpath,
         husd_EditLinkCollectionsPrivate::LinkDefinitionsMap &linkdefs,
         UT_StringArray *errors)
 {
-    auto collection=husdGetCollectionAPI(writelock, sdfpath, linktype, errors);
-    auto linkpair=linkdefs.find(sdfpath);
+    UsdCollectionAPI collection(husdGetCollectionAPI(writelock, sdfpath, linktype, errors));
+    auto linkpair = linkdefs.find(sdfpath);
 
     if (linkpair == linkdefs.end())
     {
-	SdfPathVector		 sdfpaths;
-
 	linkpair = linkdefs.emplace(sdfpath,
 	    husd_EditLinkCollectionsPrivate::LinkDefinition()).first;
 
-	// Add any existing includes/excludes
-	if (collection.GetIncludesRel().GetTargets(&sdfpaths))
-            includes.sdfPathSet().insert(sdfpaths.begin(), sdfpaths.end());
+	if (collection)
+        {
+	    SdfPathVector		 sdfpaths;
+	    std::string			 reason;
+	    if (!collection.Validate(&reason))
+            {
+                errors->append(reason);
+                linkpair->second.myIncludeRoot = false;
+            }
+	    else
+	    {
+		// Add any existing includes/excludes
+		if (collection.GetIncludesRel().GetTargets(&sdfpaths))
+		    includes.sdfPathSet().insert(sdfpaths.begin(), sdfpaths.end());
 
-	if (collection.GetExcludesRel().GetTargets(&sdfpaths))
-            excludes.sdfPathSet().insert(sdfpaths.begin(), sdfpaths.end());
+		if (collection.GetExcludesRel().GetTargets(&sdfpaths))
+		    excludes.sdfPathSet().insert(sdfpaths.begin(), sdfpaths.end());
 
-	collection.GetIncludeRootAttr().Get(&linkpair->second.myIncludeRoot);
+		collection.GetIncludeRootAttr().Get(&linkpair->second.myIncludeRoot);
+	    }
+        }
+        else
+        {
+            linkpair->second.myIncludeRoot = false;
+        }
     }
     linkpair->second.myIncludes.swap(includes);
     linkpair->second.myExcludes.swap(excludes);
@@ -178,7 +193,7 @@ HUSD_EditLinkCollections::addReverseLinkItems(const HUSD_FindPrims &linksource,
         UT_StringArray *errors)
 {
     auto			 outdata = myWriteLock.data();
-    bool			 success = true;
+    int				 old_numerrors = errors ? errors->entries() : 0;
 
     if (!outdata || !outdata->isStageValid())
     {
@@ -250,7 +265,7 @@ HUSD_EditLinkCollections::addReverseLinkItems(const HUSD_FindPrims &linksource,
 	getLinkData(sdfpath, includes, excludes, myLinkType,
 	    myWriteLock, myPrivate->myLinkDefinitions, errors);
     }
-    return success;
+    return (errors == nullptr) || (old_numerrors == errors->entries());
 }
 
 void
@@ -269,6 +284,7 @@ HUSD_EditLinkCollections::addLinkItems(const HUSD_FindPrims &linksource,
 {
     auto			 outdata = myWriteLock.data();
     bool			 success = true;
+    int				 old_numerrors = errors ? errors->entries() : 0;
 
     if (!outdata || !outdata->isStageValid())
     {
@@ -307,7 +323,7 @@ HUSD_EditLinkCollections::addLinkItems(const HUSD_FindPrims &linksource,
 	if (!includeprims.getIsEmpty())
 	    linkdata.myIncludeRoot = false;
     }
-    return success;
+    return (errors == nullptr) || (old_numerrors == errors->entries());
 }
 
 bool
@@ -335,7 +351,8 @@ HUSD_EditLinkCollections::createCollections(UT_StringArray * errors)
 	if (!editor.createCollection(collection.GetPath().GetString().c_str(),
                 collection.GetName().GetText(),
                 HUSD_Constants::getExpansionExpandPrims(),
-                includes, excludes, true, true))
+                includes, excludes, true, true,
+                /*forceapply=*/false))
 	    return false;
     }
 

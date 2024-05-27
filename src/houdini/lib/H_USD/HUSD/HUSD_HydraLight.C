@@ -37,8 +37,9 @@ using namespace UT::Literal;
 HUSD_HydraLight::HUSD_HydraLight(PXR_NS::TfToken const& typeId,
 				 PXR_NS::SdfPath const& primId,
 				 HUSD_Scene &scene)
-    : HUSD_HydraPrim(scene, HUSD_Path(primId).pathStr()),
+    : HUSD_HydraPrim(scene, primId),
       myLightType(LIGHT_POINT),
+      myShaderId(),
       myExposure(0.0),
       myIntensity(1.0),
       myClipNear(0.1),
@@ -59,6 +60,7 @@ HUSD_HydraLight::HUSD_HydraLight(PXR_NS::TfToken const& typeId,
       myProjectAngle(45.0),
       myActiveRadius(1.0),
       myHasActiveRadius(false),
+      myIsDirty(true),
       myIsCone(false),
       myIsShadowed(false),
       myNormalize(true),
@@ -76,8 +78,12 @@ HUSD_HydraLight::HUSD_HydraLight(PXR_NS::TfToken const& typeId,
       myFogScatterPara(-1.0),
       myFogScatterPerp(-1.0),
       myFogIntensity(-1.0),
+      myFocus(0.0),
+      myFocusTint(1.0,1.0,1.0),
       myUseColorTemp(false),
-      myColorTemp(6500.0)
+      myColorTemp(6500.0),
+      myGuideScale(1.0),
+      myShowInMenu(true)
 {
     myHydraLight = new PXR_NS::XUSD_HydraLight(typeId, primId, *this);
 }

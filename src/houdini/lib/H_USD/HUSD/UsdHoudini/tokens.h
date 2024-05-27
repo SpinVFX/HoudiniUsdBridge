@@ -58,18 +58,102 @@ PXR_NAMESPACE_OPEN_SCOPE
 /// Use UsdHoudiniTokens like so:
 ///
 /// \code
-///     gprim.GetMyTokenValuedAttr().Set(UsdHoudiniTokens->fieldIndex);
+///     gprim.GetMyTokenValuedAttr().Set(UsdHoudiniTokens->houdiniBackgroundimage);
 /// \endcode
 struct UsdHoudiniTokensType {
     USDHOUDINI_API UsdHoudiniTokensType();
-    /// \brief "fieldIndex"
+    /// \brief "houdini:backgroundimage"
     /// 
-    /// UsdHoudiniHoudiniFieldAsset
-    const TfToken fieldIndex;
-    /// \brief "fieldName"
+    /// UsdHoudiniHoudiniCameraPlateAPI
+    const TfToken houdiniBackgroundimage;
+    /// \brief "houdini:clippingRange"
     /// 
-    /// UsdHoudiniHoudiniFieldAsset
-    const TfToken fieldName;
+    /// UsdHoudiniHoudiniViewportLightAPI
+    const TfToken houdiniClippingRange;
+    /// \brief "houdini:editable"
+    /// 
+    /// UsdHoudiniHoudiniEditableAPI
+    const TfToken houdiniEditable;
+    /// \brief "houdini:foregroundimage"
+    /// 
+    /// UsdHoudiniHoudiniCameraPlateAPI
+    const TfToken houdiniForegroundimage;
+    /// \brief "houdini:guidescale"
+    /// 
+    /// UsdHoudiniHoudiniViewportGuideAPI
+    const TfToken houdiniGuidescale;
+    /// \brief "houdini:inviewermenu"
+    /// 
+    /// UsdHoudiniHoudiniViewportGuideAPI
+    const TfToken houdiniInviewermenu;
+    /// \brief "houdiniProcedural"
+    /// 
+    /// Property namespace prefix for the UsdHoudiniHoudiniProceduralAPI schema.
+    const TfToken houdiniProcedural;
+    /// \brief "houdiniProcedural:__INSTANCE_NAME__:houdini:active"
+    /// 
+    /// UsdHoudiniHoudiniProceduralAPI
+    const TfToken houdiniProcedural_MultipleApplyTemplate_HoudiniActive;
+    /// \brief "houdiniProcedural:__INSTANCE_NAME__:houdini:animated"
+    /// 
+    /// UsdHoudiniHoudiniProceduralAPI
+    const TfToken houdiniProcedural_MultipleApplyTemplate_HoudiniAnimated;
+    /// \brief "houdiniProcedural:__INSTANCE_NAME__:houdini:priority"
+    /// 
+    /// UsdHoudiniHoudiniProceduralAPI
+    const TfToken houdiniProcedural_MultipleApplyTemplate_HoudiniPriority;
+    /// \brief "houdiniProcedural:__INSTANCE_NAME__:houdini:procedural:args"
+    /// 
+    /// UsdHoudiniHoudiniProceduralAPI
+    const TfToken houdiniProcedural_MultipleApplyTemplate_HoudiniProceduralArgs;
+    /// \brief "houdiniProcedural:__INSTANCE_NAME__:houdini:procedural:path"
+    /// 
+    /// UsdHoudiniHoudiniProceduralAPI
+    const TfToken houdiniProcedural_MultipleApplyTemplate_HoudiniProceduralPath;
+    /// \brief "houdiniProcedural:__INSTANCE_NAME__:houdini:procedural:type"
+    /// 
+    /// UsdHoudiniHoudiniProceduralAPI
+    const TfToken houdiniProcedural_MultipleApplyTemplate_HoudiniProceduralType;
+    /// \brief "houdini:selectable"
+    /// 
+    /// UsdHoudiniHoudiniSelectableAPI
+    const TfToken houdiniSelectable;
+    /// \brief "HoudiniCameraPlateAPI"
+    /// 
+    /// Schema identifer and family for UsdHoudiniHoudiniCameraPlateAPI
+    const TfToken HoudiniCameraPlateAPI;
+    /// \brief "HoudiniEditableAPI"
+    /// 
+    /// Schema identifer and family for UsdHoudiniHoudiniEditableAPI
+    const TfToken HoudiniEditableAPI;
+    /// \brief "HoudiniFieldAsset"
+    /// 
+    /// Schema identifer and family for UsdHoudiniHoudiniFieldAsset
+    const TfToken HoudiniFieldAsset;
+    /// \brief "HoudiniLayerInfo"
+    /// 
+    /// Schema identifer and family for UsdHoudiniHoudiniLayerInfo
+    const TfToken HoudiniLayerInfo;
+    /// \brief "HoudiniMetaCurves"
+    /// 
+    /// Schema identifer and family for UsdHoudiniHoudiniMetaCurves
+    const TfToken HoudiniMetaCurves;
+    /// \brief "HoudiniProceduralAPI"
+    /// 
+    /// Schema identifer and family for UsdHoudiniHoudiniProceduralAPI
+    const TfToken HoudiniProceduralAPI;
+    /// \brief "HoudiniSelectableAPI"
+    /// 
+    /// Schema identifer and family for UsdHoudiniHoudiniSelectableAPI
+    const TfToken HoudiniSelectableAPI;
+    /// \brief "HoudiniViewportGuideAPI"
+    /// 
+    /// Schema identifer and family for UsdHoudiniHoudiniViewportGuideAPI
+    const TfToken HoudiniViewportGuideAPI;
+    /// \brief "HoudiniViewportLightAPI"
+    /// 
+    /// Schema identifer and family for UsdHoudiniHoudiniViewportLightAPI
+    const TfToken HoudiniViewportLightAPI;
     /// A vector of all of the tokens listed above.
     const std::vector<TfToken> allTokens;
 };
@@ -78,7 +162,7 @@ struct UsdHoudiniTokensType {
 ///
 /// A global variable with static, efficient \link TfToken TfTokens\endlink
 /// for use in all public USD API.  \sa UsdHoudiniTokensType
-extern USDHOUDINI_API TfStaticData<UsdHoudiniTokensType> &UsdHoudiniTokens();
+extern USDHOUDINI_API TfStaticData<UsdHoudiniTokensType> UsdHoudiniTokens;
 
 PXR_NAMESPACE_CLOSE_SCOPE
 

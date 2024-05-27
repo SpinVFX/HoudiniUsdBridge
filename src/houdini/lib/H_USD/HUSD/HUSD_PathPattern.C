@@ -22,19 +22,20 @@
  *
  */
 
-#include "HUSD_PathPattern.h"
 #include "HUSD_Constants.h"
 #include "HUSD_Cvex.h"
 #include "HUSD_CvexCode.h"
 #include "HUSD_ErrorScope.h"
 #include "HUSD_Path.h"
+#include "HUSD_PathPattern.h"
+#include "HUSD_PerfMonAutoCookEvent.h"
 #include "HUSD_Preferences.h"
 #include "XUSD_AutoCollection.h"
 #include "XUSD_Data.h"
 #include "XUSD_FindPrimsTask.h"
 #include "XUSD_PathPattern.h"
-#include "XUSD_PerfMonAutoCookEvent.h"
 #include "XUSD_Utils.h"
+#include <UT/UT_Function.h>
 #include <UT/UT_StringSet.h>
 #include <UT/UT_WorkArgs.h>
 #include <pxr/usd/usd/collectionAPI.h>
@@ -109,10 +110,10 @@ namespace
         getAncestors(stage, predicate, origpaths, newpaths);
     }
 
-    typedef std::function<void (const UsdStageRefPtr &stage,
-                                const Usd_PrimFlagsPredicate &predicate,
-                                XUSD_PathSet &origpaths,
-                                XUSD_PathSet &newpaths)> PrecedingGroupFn;
+    typedef UT_Function<void (const UsdStageRefPtr &stage,
+                              const Usd_PrimFlagsPredicate &predicate,
+                              XUSD_PathSet &origpaths,
+                              XUSD_PathSet &newpaths)> PrecedingGroupFn;
     class PrecedingGroupOperator
     {
     public:
@@ -218,7 +219,7 @@ HUSD_PathPattern::HUSD_PathPattern(const UT_StringRef &pattern,
 	const HUSD_TimeCode &timecode)
     : UT_PathPattern(pattern, case_sensitive, assume_wildcards)
 {
-    XUSD_PerfMonAutoCookEvent perf(nodeid, "Primitive pattern evaluation");
+    HUSD_PerfMonAutoCookEvent perf("Primitive pattern evaluation");
 
     initializeSpecialTokens(lock, demands, nodeid, timecode);
 }
@@ -417,7 +418,8 @@ HUSD_PathPattern::initializeSpecialTokens(HUSD_AutoAnyLock &lock,
 		    collection_data.append(data);
 		}
 	    }
-            else if (!token.myHasWildcards)
+            else if (!token.myHasWildcards &&
+                     !getAssumeWildcardsAroundPlainTokens())
             {
                 UT_String                tokenstr(token.myString.c_str());
 
@@ -536,6 +538,9 @@ HUSD_PathPattern::initializeSpecialTokens(HUSD_AutoAnyLock &lock,
                     auto_collection_data(i)->
                         myRandomAccessAutoCollection->matchPrimitives(
                             auto_collection_data(i)->myCollectionlessPathSet);
+                    auto_collection_data(i)->myMayBeTimeVarying =
+                        auto_collection_data(i)->
+                            myRandomAccessAutoCollection->getMayBeTimeVarying();
                     auto_collection_data(i)->
                         myRandomAccessAutoCollection.reset();
                 }
@@ -567,6 +572,7 @@ HUSD_PathPattern::initializeSpecialTokens(HUSD_AutoAnyLock &lock,
 			    insert(SdfPath(path.toStdString()));
 		}
                 vex_data(i)->myInitialized = true;
+                vex_data(i)->myMayBeTimeVarying = cvex.getIsTimeVarying();
 	    }
 	}
 	if (preceding_group_tokens.size() > 0)
@@ -595,12 +601,10 @@ HUSD_PathPattern::initializeSpecialTokens(HUSD_AutoAnyLock &lock,
                     XUSD_FindPrimPathsTaskData data;
                     auto allpredicate = HUSDgetUsdPrimPredicate(
                         HUSD_TRAVERSAL_ALLOW_INSTANCE_PROXIES);
-                    auto &task = *new(UT_Task::allocate_root())
-                        XUSD_FindPrimsTask(root, data,
+                    XUSDfindPrims(root, data,
                             preceding_group_operator.myUsePermissivePredicate
                                 ? allpredicate : predicate,
                             composing_pattern.get(), nullptr);
-                    UT_Task::spawnRootAndWait(task);
 
                     data.gatherPathsFromThreads(paths);
                 }
@@ -698,3 +702,24 @@ HUSD_PathPattern::matchSpecialToken(const UT_StringRef &path,
     return false;
 }
 
+bool
+HUSD_PathPattern::getMayBeTimeVarying() const
+{
+    for (int tokenidx = 0, n = myTokens.size(); tokenidx < n; ++tokenidx)
+    {
+        XUSD_SpecialTokenData *xusddata =
+            static_cast<XUSD_SpecialTokenData *>(
+                myTokens(tokenidx).mySpecialTokenDataPtr.get());
+
+        if (xusddata)
+        {
+            if (xusddata->myMayBeTimeVarying)
+                return true;
+            if (xusddata->myRandomAccessAutoCollection &&
+                xusddata->myRandomAccessAutoCollection->getMayBeTimeVarying())
+                return true;
+        }
+    }
+
+    return false;
+}

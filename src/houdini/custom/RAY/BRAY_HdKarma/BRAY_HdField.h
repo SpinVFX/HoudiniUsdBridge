@@ -36,11 +36,11 @@
 PXR_NAMESPACE_OPEN_SCOPE
 
 ///
-/// HdField represents an actual data of field that might not be 
+/// HdField represents an actual data of field that might not be
 /// actually renderable.
-/// 
+///
 
-class BRAY_HdField : public HdField
+class BRAY_HdField final : public HdField
 {
 public:
 
@@ -48,9 +48,10 @@ public:
 
     ~BRAY_HdField() override = default;
 
-    virtual void		Sync(HdSceneDelegate* sceneDelegate,
-				     HdRenderParam* renderParam,
-				     HdDirtyBits* dirtyBits) override;
+    void        Sync(HdSceneDelegate* sceneDelegate,
+                     HdRenderParam* renderParam,
+                     HdDirtyBits* dirtyBits) override;
+    void        Finalize(HdRenderParam *renderParam) override;
 
     GT_PrimitiveHandle		getGTPrimitive() const
 				{ return myField; }
@@ -69,8 +70,7 @@ public:
 
 protected:
 
-    virtual HdDirtyBits		GetInitialDirtyBitsMask() const override
-				{ return AllDirty; }
+    HdDirtyBits GetInitialDirtyBitsMask() const override { return AllDirty; }
 
     void			dirtyVolumes(HdSceneDelegate* sceneDelegate);
 

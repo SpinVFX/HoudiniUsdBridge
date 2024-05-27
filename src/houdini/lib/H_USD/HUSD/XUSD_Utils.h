@@ -32,6 +32,7 @@
 #include <OP/OP_ItemId.h>
 #include <UT/UT_StringHolder.h>
 #include <UT/UT_StringArray.h>
+#include <UT/UT_StringMap.h>
 #include <UT/UT_StringMMPattern.h>
 #include <UT/UT_Map.h>
 #include <pxr/base/vt/value.h>
@@ -43,17 +44,23 @@
 #include <pxr/usd/usd/stage.h>
 #include <pxr/usd/usd/timeCode.h>
 #include <pxr/usd/usd/stagePopulationMask.h>
+#include <pxr/usd/usdGeom/xformOp.h>
+#include <pxr/usd/usdUtils/dependencies.h>
 
 class HUSD_LayerOffset;
 class HUSD_LoadMasks;
 class HUSD_PathSet;
 class HUSD_TimeCode;
 class UT_OptionEntry;
+class UT_JSONWriter;
 
 PXR_NAMESPACE_OPEN_SCOPE
 
 class UsdGeomPrimvar;
+class UsdGeomXformable;
 class UsdGeomXformCache;
+class XUSD_Data;
+class XUSD_ExistenceTracker;
 
 class XUSD_StageFactory
 {
@@ -73,16 +80,23 @@ extern "C" {
 	UT_Array<XUSD_StageFactory *> *factories);
 };
 
+enum XUSD_ExternalRefType {
+    XUSD_EXTERNAL_REF_VALUE_CLIP,
+    XUSD_EXTERNAL_REF_OTHER
+};
+
 class XUSD_SavePathInfo
 {
 public:
     explicit		 XUSD_SavePathInfo()
-			     : myNodeBasedPath(false),
+			     : myReferenceType(XUSD_EXTERNAL_REF_OTHER),
+                               myNodeBasedPath(false),
                                myTimeDependent(false),
                                myWarnedAboutMixedTimeDependency(false)
 			 { }
     explicit		 XUSD_SavePathInfo(const UT_StringHolder &finalpath)
-			     : myFinalPath(finalpath),
+			     : myReferenceType(XUSD_EXTERNAL_REF_OTHER),
+                               myFinalPath(finalpath),
                                myOriginalPath(finalpath),
 			       myNodeBasedPath(false),
                                myTimeDependent(false),
@@ -90,10 +104,12 @@ public:
 			 { }
     explicit		 XUSD_SavePathInfo(const UT_StringHolder &finalpath,
                                 const UT_StringHolder &originalpath,
+                                XUSD_ExternalRefType reference_type,
 				bool node_based_path,
                                 bool time_dependent)
 			     : myFinalPath(finalpath),
                                myOriginalPath(originalpath),
+                               myReferenceType(reference_type),
 			       myNodeBasedPath(node_based_path),
                                myTimeDependent(time_dependent),
                                myWarnedAboutMixedTimeDependency(false)
@@ -101,13 +117,23 @@ public:
 
     UT_StringHolder	 myFinalPath;
     UT_StringHolder	 myOriginalPath;
+    XUSD_ExternalRefType myReferenceType;
     bool		 myNodeBasedPath;
     bool                 myTimeDependent;
     bool                 myWarnedAboutMixedTimeDependency;
 };
 
+class XUSD_ReferenceInfo
+{
+public:
+    SdfLayerRefPtr       myLayer;
+    XUSD_ExternalRefType myReferenceType;
+};
+
 typedef UT_Map<std::string, SdfLayerRefPtr>
     XUSD_IdentifierToLayerMap;
+typedef UT_Map<std::string, XUSD_ReferenceInfo>
+    XUSD_IdentifierToReferenceInfoMap;
 typedef UT_Map<std::string, XUSD_SavePathInfo>
     XUSD_IdentifierToSavePathMap;
 
@@ -120,21 +146,34 @@ HUSD_API std::string HUSDgetTag(const XUSD_DataLockPtr &datalock);
 
 HUSD_API const TfToken &HUSDgetDataIdToken();
 HUSD_API const TfToken &HUSDgetSavePathToken();
+HUSD_API const TfToken &HUSDgetOverrideSavePathToken();
 HUSD_API const TfToken &HUSDgetSavePathIsTimeDependentToken();
 HUSD_API const TfToken &HUSDgetSaveControlToken();
 HUSD_API const TfToken &HUSDgetCreatorNodeToken();
 HUSD_API const TfToken &HUSDgetEditorNodesToken();
-HUSD_API const TfToken &HUSDgetMaterialIdToken();
-HUSD_API const TfToken &HUSDgetMaterialBindingIdToken();
-HUSD_API const TfToken &HUSDgetIsAutoPreviewShaderToken();
 HUSD_API const TfToken &HUSDgetSoloLightPathsToken();
 HUSD_API const TfToken &HUSDgetSoloGeometryPathsToken();
-HUSD_API const TfToken &HUSDgetPrimEditorNodeIdToken();
+HUSD_API const TfToken &HUSDgetTreatAsSopLayerToken();
+HUSD_API const TfToken &HUSDgetVolumeFilePathsToken();
+
+HUSD_API const TfToken &HUSDgetMaterialIdToken();
+HUSD_API const TfToken &HUSDgetHasAutoPreviewShaderToken();
+HUSD_API const TfToken &HUSDgetIsAutoCreatedShaderToken();
+HUSD_API const TfToken &HUSDgetPreviewTagsToken();
+HUSD_API const TfToken &HUSDgetPreviewDefaultValueKeyPathToken();
+HUSD_API const TfToken &HUSDgetPrimEditorNodesToken();
 HUSD_API const TfToken &HUSDgetSourceNodeToken();
+HUSD_API const TfToken &HUSDgetDialogScriptToken();
 
 HUSD_API const TfType  &HUSDfindType(const UT_StringRef &type_name);
 HUSD_API bool		HUSDisDerivedType(const UsdPrim &prim,
 				const TfType &base_type);
+
+HUSD_API UT_StringHolder HUSDgetSpecifier(const UsdPrim &prim);
+HUSD_API bool           HUSDisPrimEditable(const UsdPrim &prim);
+HUSD_API bool           HUSDisPrimSelectable(const UsdPrim &prim,
+                                UT_Map<HUSD_Path, bool> *cache = nullptr);
+HUSD_API bool           HUSDisPrimHiddenInUi(const UsdPrim &prim);
 
 // Path conversion functions.
 HUSD_API SdfPath	HUSDgetSdfPath(const UT_StringRef &path);
@@ -154,7 +193,6 @@ HUSD_API HUSD_TimeCode	HUSDgetEffectiveTimeCode(
 				const HUSD_TimeCode &timecode,
 				const UsdAttribute &attr);
 
-
 // Layer offset conversion.
 HUSD_API SdfLayerOffset
 HUSDgetSdfLayerOffset(const HUSD_LayerOffset &layeroffset);
@@ -170,12 +208,20 @@ HUSD_API UsdStagePopulationMask
 HUSDgetUsdStagePopulationMask(const HUSD_LoadMasks &load_masks);
 HUSD_API SdfVariability
 HUSDgetSdfVariability(HUSD_Variability variability);
+HUSD_API SdfSpecifier
+HUSDgetSdfSpecifier(const UT_StringRef &specifier, bool *valid = nullptr);
 
 // Determine if a layer comes from a SOP or not.
 HUSD_API bool
 HUSDisSopLayer(const std::string &identifier);
 HUSD_API bool
 HUSDisSopLayer(const SdfLayerHandle &layer);
+
+// Determine if a layer was created by LOPs or not.
+HUSD_API bool
+HUSDisLopLayer(const std::string &identifier);
+HUSD_API bool
+HUSDisLopLayer(const SdfLayerHandle &layer);
 
 // Determine if the specified layer should be saved to disk when saving a
 // LOP network which sublayers or references this layer.
@@ -202,12 +248,24 @@ HUSDgetLayerInfoPrim(const SdfLayerHandle &layer, bool create);
 HUSD_API void
 HUSDsetSavePath(const SdfLayerHandle &layer,
 	const UT_StringRef &savepath,
-        bool savepath_is_time_dependent);
+        bool savepath_is_time_dependent,
+        const UT_StringRef &overrides_savepath = UT_StringRef());
 HUSD_API bool
 HUSDgetSavePath(const SdfLayerHandle &layer,
 	std::string &savepath);
 HUSD_API bool
+HUSDgetOverrideSavePath(const SdfLayerHandle &layer,
+        std::string &savepath);
+HUSD_API bool
 HUSDgetSavePathIsTimeDependent(const SdfLayerHandle &layer);
+
+// Add locked geos for volume file paths listed on the HoudiniLayerInfo.
+HUSD_API void
+HUSDaddVolumeLockedGeos(XUSD_Data &outdata,
+        const SdfLayerRefPtr &layer);
+HUSD_API void
+HUSDaddVolumeLockedGeos(XUSD_LockedGeoSet &locked_geos,
+        const SdfLayerRefPtr &layer);
 
 // Get or set the save control token which modified how the USD ROP treats
 // this layer when it is being saved with various options.
@@ -220,23 +278,16 @@ HUSDgetSaveControl(const SdfLayerHandle &layer,
 
 HUSD_API void
 HUSDsetCreatorNode(const SdfLayerHandle &layer, int node_id);
-HUSD_API void
-HUSDsetCreatorNode(const SdfLayerHandle &layer, const std::string &nodepath);
 HUSD_API bool
 HUSDgetCreatorNode(const SdfLayerHandle &layer, std::string &nodepath);
 
 HUSD_API void
 HUSDsetSourceNode(const UsdPrim &prim, int node_id);
-HUSD_API bool
-HUSDgetSourceNode(const UsdPrim &prim, std::string &nodepath);
 
 HUSD_API void
 HUSDclearEditorNodes(const SdfLayerHandle &layer);
 HUSD_API void
 HUSDaddEditorNode(const SdfLayerHandle &layer, int node_id);
-HUSD_API bool
-HUSDgetEditorNodes(const SdfLayerHandle &layer,
-	std::vector<std::string> &nodepaths);
 
 // Set the list of SdfPaths of all solo'ed lights. This information is stored
 // as custom data on the HoudiniLayerInfo prim. These methods should only be
@@ -258,20 +309,48 @@ HUSD_API bool
 HUSDgetSoloGeometryPaths(const SdfLayerHandle &layer,
 	HUSD_PathSet &paths);
 
+// Get or set a flag on a layer that causes it to be treated as a SOP layer
+// for the sake of flattening operations (which can optionally flatten SOP
+// layers along with implicit layers).
+HUSD_API void
+HUSDsetTreatAsSopLayer(const SdfLayerHandle &layer, bool treatassoplayer);
+HUSD_API bool
+HUSDgetTreatAsSopLayer(const SdfLayerHandle &layer);
+
 // Set the Editor node for a specific USD primitive. This is stored as custom
 // data on the primitive, and indicates the node that last modified this
 // primitive, and so the node that we should use for any future requests to
 // edit the prim.
 HUSD_API void
-HUSDsetPrimEditorNodeId(const UsdPrim &prim, int node_id);
+HUSDaddPrimEditorNodeId(const UsdPrim &prim, int node_id);
 HUSD_API void
-HUSDsetPrimEditorNodeId(const SdfPrimSpecHandle &prim, int node_id);
+HUSDaddPrimEditorNodeId(const SdfPrimSpecHandle &prim, int node_id);
+HUSD_API void
+HUSDclearPrimEditorNodeIds(const UsdPrim &prim);
+HUSD_API void
+HUSDclearPrimEditorNodeIds(const SdfPrimSpecHandle &prim);
+HUSD_API void
+HUSDaddPropertyEditorNodeId(const UsdProperty &property, int nodeid);
+HUSD_API void
+HUSDclearPropertyEditorNodeIds(const UsdProperty &property);
+
+HUSD_API void
+HUSDbumpPropertiesForHydra(const UsdAttributeVector &attrs);
 
 HUSD_API void
 HUSDclearDataId(const UsdAttribute &attr);
 
 HUSD_API TfToken
 HUSDgetParentKind(const TfToken &kind);
+
+// Test if a prim and all existing ancestors of the provided path are active.
+// If the ancestors don't exist at all, that is okay too. This test is primarily
+// for use by HUSDcreatePrimInLayer which can still create the primitive
+// in the active layer, but we don't actually want it to. Note that path
+// must be an absolute SdfPath or this function will return false.
+HUSD_API bool
+HUSDprimAndAllExistingAncestorsActive(const UsdStageWeakPtr &stage,
+	const SdfPath &path);
 
 // Create a new primitive in the specified layer. The stage parameter may or
 // may not include the layer. It is used only to look up any existing prims
@@ -283,7 +362,8 @@ HUSDcreatePrimInLayer(const UsdStageWeakPtr &stage,
 	const SdfLayerHandle &layer,
 	const SdfPath &path,
 	const TfToken &kind,
-	bool parent_prims_define,
+        SdfSpecifier specifier,
+        SdfSpecifier parent_prims_specifier,
 	const std::string &parent_prims_type);
 
 HUSD_API bool
@@ -296,6 +376,13 @@ HUSDcopySpec(const SdfLayerHandle &srclayer,
 	const fpreal frameoffset = 0,
 	const fpreal frameratescale = 1);
 
+// Wrapper around UsdUtilsModifyAssetPaths which restores the layer offsets of
+// sublayers after updating the asset paths. The core function clears the layer
+// offset of any sublayer path that gets updated.
+HUSD_API void
+HUSDmodifyAssetPaths(const SdfLayerHandle &layer,
+        const UsdUtilsModifyAssetPathFn &modifyFn);
+
 // This function duplicates the functionality of
 // SdfLayer::UpdateExternalRefernce, but can retarget a bunch of references
 // with a single method call, and thus a single traversal.
@@ -303,23 +390,42 @@ HUSD_API bool
 HUSDupdateExternalReferences(const SdfLayerHandle &layer,
 	const std::map<std::string, std::string> &pathmap);
 
+// Calls SdfLayer::GetExternalReferences, but also gathers asset paths from
+// clips defined on the layer.
+HUSD_API std::map<std::string, XUSD_ExternalRefType>
+HUSDgetExternalReferences(const SdfLayerRefPtr &layer);
+
 // Utility function used for stitching stages together and saving them.
 HUSD_API void
 HUSDaddExternalReferencesToLayerMap(const SdfLayerRefPtr &layer,
-	XUSD_IdentifierToLayerMap &layermap,
-	bool recursive);
+        XUSD_IdentifierToReferenceInfoMap &referenceinfomap,
+	bool recursive,
+        bool include_placeholders = false);
 
 // Calls the USD stitch function but with a callback that looks for SOP data
 // ids on the attributes to avoid creating duplicate time samples.
 HUSD_API void
 HUSDstitchLayers(const SdfLayerHandle &strongLayer,
-	const SdfLayerHandle &weakLayer);
+	const SdfLayerHandle &weakLayer,
+	HUSD_PathSet *varyingDefaultPaths = nullptr);
 // Stitch two stages together by stitching together their "corresponding"
 // layers, as determined by the requested save paths for each layer.
 HUSD_API bool
 HUSDaddStageTimeSample(const UsdStageWeakPtr &src,
 	const UsdStageRefPtr &dest,
-	SdfLayerRefPtrVector &hold_layers);
+        const UsdTimeCode &timecode,
+	XUSD_LayerSet &held_layers,
+        bool force_notifiable_file_format,
+        bool set_layer_override_save_paths,
+        XUSD_ExistenceTracker *existence_tracker,
+        HUSD_PathSet *varying_default_paths = nullptr);
+
+// This function returns the identifier that should be passed to
+// UsdStage::CreateInMemory when creating a stage for use in a LOP
+// network. This identifier is important as it allows Houdini to
+// recognize the stage root layer as having been created by LOPs.
+HUSD_API const std::string &
+HUSDgetStageRootLayerIdentifier();
 
 // Create a new in-memory stage. Use this method instead of calling
 // UsdStage::CreateInMemory directly, as we want to configure the stage
@@ -338,13 +444,27 @@ HUSDcreateStageInMemory(const HUSD_LoadMasks *load_masks,
 	const UsdStageWeakPtr &context_stage = UsdStageWeakPtr(),
 	int resolver_context_nodeid = OP_INVALID_ITEM_ID,
 	const ArResolverContext *resolver_context = nullptr);
+HUSD_API UsdStageRefPtr
+HUSDcreateStageFromRootLayer(const SdfLayerRefPtr &rootlayer,
+        const HUSD_LoadMasks *load_masks,
+        const UsdStageWeakPtr &context_stage);
+
+// Copies meters per unit, up axis, fps, and tcps from the stage's root
+// layer onto the supplied layer. New sublayers added to a stage should
+// match these stage settings to avoid unintended mismatches for these
+// critical setting. The tcps in particular can actually affect composition,
+// and so matching the stage value (at least as a default) is extremely
+// important.
+HUSD_API void
+HUSDcopyMinimalRootPrimMetadata(const SdfLayerRefPtr &dest,
+        const SdfLayerHandle &src);
 
 // Create a new anonymous layer. Use this method instead of calling
 // SdfLayer::CreateAnonymous directly, as we want to configure the layer
-// with some common default data.
+// with root prim data from a source layer.
 HUSD_API SdfLayerRefPtr
 HUSDcreateAnonymousLayer(
-        const UsdStageWeakPtr &context_stage = UsdStageWeakPtr(),
+        const SdfLayerHandle &context_layer = SdfLayerHandle(),
         const std::string &tag = std::string());
 
 // Create a new anonymous layer that is a copy of the provided source layer.
@@ -378,13 +498,20 @@ HUSDflattenLayers(const UsdStageWeakPtr &stage);
 // only contains creator node information.
 HUSD_API bool
 HUSDisLayerEmpty(const SdfLayerHandle &layer,
-        const UsdStageRefPtr &compare_stage_root_prim = UsdStageRefPtr());
+        const UsdStageRefPtr &compare_stage_root_prim = UsdStageRefPtr(),
+        bool ignore_sublayers = false);
 // Check if the supplied layer is a placeholder layer.
 HUSD_API bool
 HUSDisLayerPlaceholder(const SdfLayerHandle &layer);
 // As above, but takes an identifier, which is used to find the layer handle.
 HUSD_API bool
 HUSDisLayerPlaceholder(const std::string &identifier);
+
+// Test if a string is a stage variable expression. Optionally try to parse
+// the expression, and raise an error if it is an invalid expression.
+HUSD_API bool
+HUSDisStageVariableExpression(const UT_StringRef &expr,
+        bool check_for_errors);
 
 // Return the SdfPath that should be passed to create a reference to the
 // specified layer. This gives priority to any passed in ref prim path
@@ -406,7 +533,7 @@ HUSDgetValueTimeSampling(const UsdAttribute &attrib);
 HUSD_API HUSD_TimeSampling
 HUSDgetValueTimeSampling(const UsdGeomPrimvar &pvar);
 HUSD_API HUSD_TimeSampling
-HUSDgetLocalTransformTimeSampling(const UsdPrim &pr);
+HUSDgetLocalTransformTimeSampling(const UsdPrim &pr, bool* resets = nullptr);
 HUSD_API HUSD_TimeSampling
 HUSDgetWorldTransformTimeSampling(const UsdPrim &pr);
 
@@ -421,10 +548,10 @@ HUSD_API void
 HUSDupdateValueTimeSampling( HUSD_TimeSampling &sampling,
         const UsdGeomPrimvar &primvar);
 HUSD_API void
-HUSDupdateLocalTransformTimeSampling(HUSD_TimeSampling &samplig,
+HUSDupdateLocalTransformTimeSampling(HUSD_TimeSampling &sampling,
         const UsdPrim &prim);
 HUSD_API void
-HUSDupdateWorldTransformTimeSampling(HUSD_TimeSampling &samplig,
+HUSDupdateWorldTransformTimeSampling(HUSD_TimeSampling &sampling,
         const UsdPrim &prim);
 
 // Returns ture if an attribute (or any aspect of a local transform) 
@@ -449,6 +576,80 @@ HUSDgetMinimalPathsForInheritableProperty(
         bool skip_point_instancers,
         const UsdStageRefPtr &stage,
         XUSD_PathSet &paths);
+// Takes a set of paths, and compares them to a stage. In any case where all
+// the children of a prim are in the set, remove that prim from the set,
+// leaving only the children. This eliminates redundant parent entries in
+// the set which are already covered by having all the children in the set.
+HUSD_API void
+HUSDgetMinimalMostNestedPathsForInheritableProperty(
+    const UsdStageRefPtr &stage,
+    XUSD_PathSet &paths);
+
+// Generates a unique suffix (stored in the `suffix` parameter) that can be used
+// as the `opSuffix` argument to `UsdGeomXformable::AddTransformOp()`.
+//
+// If `test_base_xform` is `true` then there will be a first test to see if it
+// would be valid to call `AddTransformOp` with no suffix (and, if so, `suffix`
+// will be cleared to indicate this).
+//
+// In the above, "unique" is defined as "there is no existing attribute on the
+// prim that has a matching name" and, thus, there is no risk of clobbering
+// existing data". Note that this is different than a definition that says
+// "there is no existing entry in the xformOpOrder list that has a matching name"
+// (which would allow for the possiblity of attribute reuse).
+HUSD_API void
+HUSDgenerateUniqueTransformOpSuffix(
+        UT_StringHolder &suffix,
+        const UsdGeomXformable &xformable,
+        UsdGeomXformOp::Type type = UsdGeomXformOp::TypeTransform,
+        bool test_base_xform = false);
+
+// Convert a UT map of strings to strings into an
+// SdfFileFormat::FileFormatArguments equivalent. One trick here is that any
+// arguments with "/"s in them will have all multi-slash sequences collapsed
+// to a single slash. This is required so that as a layer identifier gets
+// created from the FileFormatArguments, and the resulting identifier gets
+// passed through the ArResolver's URI handling, then back into a
+// FileFormatArguments structure, the argument values never change. The Ar
+// library URI parser splits the whole identifier on "/"s, and then rebuilds
+// the identifier from the components, putting only a single slash between
+// each component.
+HUSD_API void
+HUSDconvertToFileFormatArguments(
+        const UT_StringMap<UT_StringHolder> &ut_args,
+        SdfFileFormat::FileFormatArguments &sdf_args);
+
+// Caclculate the time sampling of the bounding box of a prim. This can be
+// either the world space bounding box (which takes ancestor xforms into
+// account), or local space bounds, which ignore ancestor prims. The former
+// test is useful to know if two prim bounding boxes have potentially
+// animated overlaping. The latter is useful when we are interested in
+// whether the extentsHint attribute of a prim need to be time varying.
+HUSD_TimeSampling
+HUSDgetBoundsTimeSampling(const UsdPrim& prim, bool world_space_bounds);
+
+// Convert a VtDictionary to a UT_Options
+HUSD_API bool
+HUSDconvertDictionary(UT_Options &options, const VtDictionary &dict,
+        const UT_StringMap<UT_StringHolder> *aliases = nullptr);
+// Save out a VtDictionary as JSON.
+HUSD_API bool
+HUSDconvertDictionary(UT_JSONWriter &w, const VtDictionary &dict,
+        const UT_StringMap<UT_StringHolder> *aliases = nullptr);
+// Save a single VtValue as JSON.
+HUSD_API bool
+HUSDconvertValue(UT_JSONWriter &w, const VtValue &value);
+
+// Create a PcpVariantSelectionMap from an equivalent UT data structure.
+HUSD_API void
+HUSDconvertVariantSelectionFallbacks(
+        const UT_StringMap<UT_StringArray> &utfallbacks,
+        PcpVariantFallbackMap &fallbacks);
+// Create a UT data structure from an equivalent PcpVariantSelectionMap.
+HUSD_API void
+HUSDconvertVariantSelectionFallbacks(
+        const PcpVariantFallbackMap &fallbacks,
+        UT_StringMap<UT_StringArray> &utfallbacks);
 
 PXR_NAMESPACE_CLOSE_SCOPE
 
