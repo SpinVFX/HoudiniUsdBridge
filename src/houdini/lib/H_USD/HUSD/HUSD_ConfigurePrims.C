@@ -76,10 +76,7 @@ husdConfigPrim(HUSD_AutoWriteLock &lock,
 	UsdPrim prim = stage->GetPrimAtPath(sdfpath);
 
 	if (!prim || !config_fn(prim))
-        {
             success = false;
-            break;
-        }
     }
 
     return success;
