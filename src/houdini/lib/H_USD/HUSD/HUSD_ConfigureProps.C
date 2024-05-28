@@ -71,14 +71,11 @@ husdConfigProps(HUSD_AutoWriteLock &lock,
 	if (obj)
 	{
 	    UsdDerivedType	 derived = obj.As<UsdDerivedType>();
-	    if (derived)
-                config_fn(derived);
+	    if (derived && !config_fn(derived))
+                success = false;
 	}
 	else
-        {
             success = false;
-            break;
-        }
     }
 
     return success;
