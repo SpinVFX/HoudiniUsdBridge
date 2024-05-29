@@ -316,8 +316,6 @@ protected:
 
     SdfPath _ComputeControllerPath(const HdPluginRenderDelegateUniqueHandle &);
 
-    static TfToken _GetDefaultRendererPluginId();
-
 private:
     // Registers app-managed scene indices with the scene index plugin registry.
     // This needs to be called once *before* the render index is constructed.

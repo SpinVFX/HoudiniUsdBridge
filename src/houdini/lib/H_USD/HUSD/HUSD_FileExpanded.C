@@ -25,15 +25,19 @@
 #include <tools/henv.h>
 #include <UT/UT_WorkBuffer.h>
 #include <UT/UT_VarScan.h>
+#include <UT/UT_Debug.h>
 
 #include "HUSD_FileExpanded.h"
 
  /// Holds data for a frame
 struct FrameVars
 {
-    FrameVars(fpreal ff, fpreal inc, int i)
+    FrameVars(fpreal ff, fpreal inc, const std::vector<fpreal> *frameList, int i)
     {
-	myFF = ff + i * inc;
+        if (frameList && i >= 0 && frameList->size() > i)
+            myFF = (*frameList)[i];
+        else
+            myFF = ff + i * inc;
 	myF = SYSrint(myFF);
 	myN = i + 1;
     };
@@ -147,13 +151,17 @@ expandPercent(UT_WorkBuffer& store, const char* str,
 }
 
 UT_StringHolder
-HUSD_FileExpanded::expand(const char* str, fpreal ff, fpreal inc, int i,
-			  bool& changed)
+HUSD_FileExpanded::expand(const char* str,
+        fpreal ff,
+        fpreal inc,
+        const std::vector<fpreal> *frameList,
+        int i,
+        bool& changed)
 {
     if (!UTisstring(str))
         return UT_StringHolder::theEmptyString;
 
-    FrameVars            fvars(ff, inc, i);
+    FrameVars            fvars(ff, inc, frameList, i);
     const char          *ofile = str;
     UT_WorkBuffer        percent_store;
     UT_WorkBuffer        expanded;

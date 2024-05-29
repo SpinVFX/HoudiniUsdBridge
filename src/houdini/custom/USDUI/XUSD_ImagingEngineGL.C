@@ -308,14 +308,6 @@ XUSD_ImagingEngineGL::XUSD_ImagingEngineGL(const Parameters &params)
         _InitGL();
 
     _InitializeHgiIfNecessary();
-    
-    // _renderIndex, _taskController, and _sceneDelegate are initialized
-    // by the plugin system.
-    if (!SetRendererPlugin(!params.rendererPluginId.IsEmpty() ?
-                  params.rendererPluginId : _GetDefaultRendererPluginId())) {
-        TF_CODING_ERROR("No renderer plugins found! "
-                        "Check before creation.");
-    }
 }
 
 bool
@@ -1611,33 +1603,6 @@ XUSD_ImagingEngineGL::_ComputeRenderTags(UsdImagingGLRenderParams const& params,
     if (params.showRender) {
         renderTags->push_back(HdRenderTagTokens->render);
     }
-}
-
-/* static */
-TfToken
-XUSD_ImagingEngineGL::_GetDefaultRendererPluginId()
-{
-    static const std::string defaultRenderer = TfGetenv("HD_DEFAULT_RENDERER",
-        HUSD_Constants::getHoudiniRendererPluginName().toStdString());
-
-    if (defaultRenderer.empty())
-        return TfToken();
-
-    HfPluginDescVector pluginDescs;
-    HdRendererPluginRegistry::GetInstance().GetPluginDescs(&pluginDescs);
-
-    // Look for the one with the matching display name
-    for (size_t i = 0; i < pluginDescs.size(); ++i) {
-        if (pluginDescs[i].id == defaultRenderer ||
-            pluginDescs[i].displayName == defaultRenderer) {
-            return pluginDescs[i].id;
-        }
-    }
-
-    TF_WARN("Failed to find default renderer '%s'.",
-            defaultRenderer.c_str());
-
-    return TfToken();
 }
 
 bool

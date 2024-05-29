@@ -106,6 +106,9 @@ public:
     /// Return the number of frames being rendered
     virtual int		frameCount() const { return 1; }
 
+    /// Start frame for a render sequence
+    virtual const std::vector<fpreal>   *frameList() const { return nullptr; }
+
     /// Return the fps
     virtual fpreal	fps() const { return 24; }
 

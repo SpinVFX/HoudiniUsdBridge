@@ -206,6 +206,7 @@ namespace
 	UT_StringHolder expanded = HUSD_FileExpanded::expand(suffix,
 					0.f,
 					1.f,
+                                        nullptr,
 					index,
 					changed);
 	const char	*ext = strrchr(filename, '.');
@@ -438,6 +439,7 @@ namespace
 	UT_StringHolder expanded = HUSD_FileExpanded::expand(ofile,
 					ctx.startFrame(),
 					ctx.frameInc(),
+                                        ctx.frameList(),
 					i,
 					changed);
 	return expanded;

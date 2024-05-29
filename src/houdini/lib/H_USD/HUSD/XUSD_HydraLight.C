@@ -100,7 +100,8 @@ XUSD_HydraLight::Sync(HdSceneDelegate *del,
     
     SdfPath const &id = GetId();
     myLight.Active(del->GetVisible(id));
-    
+
+    //UTdebugPrint("Sync", id.GetText());
     // Change tracking
     HdDirtyBits bits = *dirtyBits;
 
@@ -275,16 +276,16 @@ XUSD_HydraLight::Sync(HdSceneDelegate *del,
 	{
 	    v = 1.0;
 	    XUSD_HydraUtils::evalLightAttrib(v, del,id,
-                HdLightTokens->width);
+                                             HdLightTokens->width);
 	    myLight.Width(v);
 	    v = 1.0;
 	    XUSD_HydraUtils::evalLightAttrib(v, del,id,
-                HdLightTokens->height);
+                                             HdLightTokens->height);
 	    myLight.Height(v);
 
             bool single = true;
 	    XUSD_HydraUtils::evalLightAttrib(single, del,id,
-                HusdHdLightTokens->singleSided);
+                                             HusdHdLightTokens->singleSided);
             myLight.SingleSided(single);
 	}
 	
@@ -293,7 +294,7 @@ XUSD_HydraLight::Sync(HdSceneDelegate *del,
 	{
 	    bool pnt = false;
 	    XUSD_HydraUtils::evalLightAttrib(pnt, del,id,
-                UsdLuxTokens->treatAsPoint);
+                                             UsdLuxTokens->treatAsPoint);
 	    if(pnt)
 	    {
 		myLight.setType(HUSD_HydraLight::LIGHT_POINT);
@@ -303,7 +304,7 @@ XUSD_HydraLight::Sync(HdSceneDelegate *del,
 		myLight.setType(HUSD_HydraLight::LIGHT_SPHERE);
 		v = 1.0;
 		XUSD_HydraUtils::evalLightAttrib(v, del,id,
-                    HdLightTokens->radius);
+                                                 HdLightTokens->radius);
 		myLight.Radius(v);
 	    }
 
@@ -323,7 +324,7 @@ XUSD_HydraLight::Sync(HdSceneDelegate *del,
 		
 		v = 1.0;
 		XUSD_HydraUtils::evalLightAttrib(v, del,id,
-                    HdLightTokens->radius);
+                                                 HdLightTokens->radius);
 		myLight.Radius(v);
 
 		// TODO: natively support tube lights.
@@ -332,7 +333,7 @@ XUSD_HydraLight::Sync(HdSceneDelegate *del,
 	    
 	    v = 1.0;
 	    XUSD_HydraUtils::evalLightAttrib(v, del,id,
-                HdLightTokens->length);
+                                             HdLightTokens->length);
 	    myLight.Width(v);
 	}
 	
@@ -361,6 +362,66 @@ XUSD_HydraLight::Sync(HdSceneDelegate *del,
 	    myLight.Normalize(norm);
 	}
 
+        // Dome light for Karma Physical Sky - update if the type is ever
+        // changed to something other than 'light'.
+        if(myLight.type() == HUSD_HydraLight::LIGHT_UNKNOWN)
+        {
+            bool sky_light = false;
+            GfVec3f gnd_albedo = { 0.2f, 0.2f, 0.2f };
+            GfVec3f gnd_color =  { 0.2f, 0.2f, 0.2f };
+            fpreal32 horizon_blur = 0.5f;
+            fpreal32 turbidity = 3.0f;
+            // Note: These have to be float here
+            fpreal32 altitude = 45.0f;
+            fpreal32 azimuth = 0.0f;
+            
+	    if(XUSD_HydraUtils::evalLightAttrib(
+                   gnd_albedo, del, id, TfToken("inputs:ground_albedo")))
+            {
+                sky_light = true;
+            }
+	    if(XUSD_HydraUtils::evalLightAttrib(
+                   gnd_color, del, id, TfToken("inputs:ground_color")))
+            {
+                sky_light = true;
+            }
+	    if(XUSD_HydraUtils::evalLightAttrib(
+                   horizon_blur, del, id, TfToken("inputs:horizon_blur")))
+            {
+                sky_light = true;
+            }
+	    if(XUSD_HydraUtils::evalLightAttrib(
+                   turbidity, del, id, TfToken("inputs:turbidity")))
+            {
+                sky_light = true;
+            }
+	    if(XUSD_HydraUtils::evalLightAttrib(
+                   altitude, del, id, TfToken("inputs:solar_altitude")))
+            {
+                sky_light = true;
+            }
+	    if(XUSD_HydraUtils::evalLightAttrib(
+                   azimuth, del, id, TfToken("inputs:solar_azimuth")))
+            {
+                sky_light = true;
+            }
+
+            if(sky_light)
+            {
+                myLight.IsSky(true);
+                myLight.GroundAlbedo(GusdUT_Gf::Cast(gnd_albedo));
+                myLight.GroundColor(GusdUT_Gf::Cast(gnd_color));
+                myLight.HorizonBlur(horizon_blur);
+                myLight.Turbidity(turbidity);
+                myLight.Altitude(altitude);
+                myLight.Azimuth(azimuth);
+            }
+            else
+                myLight.IsSky(false);
+        }
+        else
+            myLight.IsSky(false);
+        
 	myLight.setShaderId(nullptr);
 	if(myLight.type() == HUSD_HydraLight::LIGHT_UNKNOWN)
 	{

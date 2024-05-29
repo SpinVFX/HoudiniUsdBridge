@@ -35,6 +35,7 @@
 #include <GT/GT_Handles.h>
 #include <GU/GU_DetailHandle.h>
 #include <UT/UT_StringHolder.h>
+#include <UT/UT_UniquePtr.h>
 #include <UT/UT_Vector3.h>
 #include <SYS/SYS_Types.h>
 
@@ -55,7 +56,7 @@ public:
 		     HUSD_Scene &scene);
     ~HUSD_HydraLight() override;
 
-    PXR_NS::XUSD_HydraLight     *hydraLight() const { return myHydraLight; }
+    PXR_NS::XUSD_HydraLight *hydraLight() const { return myHydraLight.get(); }
 
     enum LightType
     {
@@ -127,7 +128,15 @@ public:
     HUSD_PARM(FogScatterPerp,fpreal);
     HUSD_PARM(Focus,         fpreal);
     HUSD_PARM(FocusTint,     UT_Vector3F);
-    
+
+    HUSD_PARM(IsSky,         bool);
+    HUSD_PARM(GroundAlbedo,  UT_Vector3F);
+    HUSD_PARM(GroundColor,   UT_Vector3F);
+    HUSD_PARM(HorizonBlur,   fpreal);
+    HUSD_PARM(Turbidity,     fpreal);
+    HUSD_PARM(Altitude,      fpreal);
+    HUSD_PARM(Azimuth,       fpreal);
+        
     bool hasBarnDoors() const;
     
     HUSD_PARM(LightLink,UT_StringHolder);
@@ -139,57 +148,64 @@ public:
     bool        isDirty() const { return myIsDirty; }
     
 private:
-    LightType			 myLightType;
+    LightType			 myLightType = LIGHT_POINT;
     UT_StringHolder		 myShaderId;
-    fpreal			 myExposure;
-    fpreal			 myIntensity;
-    fpreal			 myClipNear;
-    fpreal			 myClipFar;
-    fpreal			 myStart;
-    fpreal			 myAngle;
-    fpreal			 mySoftness;
-    fpreal			 myDiffuse;
-    fpreal			 mySpecular;
-    fpreal                       myColorTemp;
-    UT_Vector3F			 myColor;
-    Attenuation			 myAttenType;
-    fpreal			 myAttenStart;
-    fpreal			 myAttenDist;
-    fpreal			 myWidth;
-    fpreal			 myHeight;
-    fpreal			 myRadius;
-    fpreal			 myProjectAngle;
-    fpreal			 myActiveRadius;
-    fpreal                       myLeftBarn;
-    fpreal                       myLeftBarnEdge;
-    fpreal                       myRightBarn;
-    fpreal                       myRightBarnEdge;
-    fpreal                       myTopBarn;
-    fpreal                       myTopBarnEdge;
-    fpreal                       myBottomBarn;
-    fpreal                       myBottomBarnEdge;
-    fpreal                       myFogIntensity;
-    fpreal                       myFogScatterPara;
-    fpreal                       myFogScatterPerp;
-    fpreal                       myDistantAngle;
-    fpreal                       myGuideScale;
-    fpreal                       myFocus;
-    UT_Vector3F                  myFocusTint;
-    bool                         myShowInMenu;
-    bool			 myHasActiveRadius;
-    bool                         myIsDirty;
+    fpreal			 myExposure = 0.0;
+    fpreal			 myIntensity = 1.0;
+    fpreal			 myClipNear = 0.1;
+    fpreal			 myClipFar = 10000.0;
+    fpreal			 myStart = 0.0;
+    fpreal			 myAngle = 180.0;
+    fpreal			 mySoftness = 0.0;
+    fpreal			 myDiffuse = 1.0;
+    fpreal			 mySpecular = 1.0;
+    fpreal                       myColorTemp = 6500;
+    UT_Vector3F			 myColor = { 1.0f, 1.0f, 1.0f };
+    Attenuation			 myAttenType = ATTEN_PHYS;
+    fpreal			 myAttenStart = 0.0;
+    fpreal			 myAttenDist = 1.0;
+    fpreal			 myWidth = 1.0;
+    fpreal			 myHeight = 1.0;
+    fpreal			 myRadius = 1.0;
+    fpreal			 myProjectAngle = 45.0;
+    fpreal			 myActiveRadius = 1.0;
+    fpreal                       myLeftBarn = 0.0;
+    fpreal                       myLeftBarnEdge = 0.0;
+    fpreal                       myRightBarn = 0.0;
+    fpreal                       myRightBarnEdge = 0.0;
+    fpreal                       myTopBarn = 0.0;
+    fpreal                       myTopBarnEdge = 0.0;
+    fpreal                       myBottomBarn = 0.0;
+    fpreal                       myBottomBarnEdge = 0.0;
+    fpreal                       myFogIntensity = -1.0;
+    fpreal                       myFogScatterPara = -1.0;
+    fpreal                       myFogScatterPerp = -1.0;
+    fpreal                       myDistantAngle = 0.05;
+    fpreal                       myGuideScale = 1.0;
+    fpreal                       myFocus = 0.0;
+    UT_Vector3F                  myFocusTint = { 1.0, 1.0, 1.0 };
+    UT_Vector3F                  myGroundAlbedo = { 1.0, 1.0, 1.0 };
+    UT_Vector3F                  myGroundColor = { 1.0, 1.0, 1.0 };
+    fpreal                       myHorizonBlur = 0.5;
+    fpreal                       myTurbidity = 3.0;
+    fpreal                       myAzimuth = 0.0;
+    fpreal                       myAltitude = 0.0;
+    bool                         myShowInMenu = true;
+    bool			 myHasActiveRadius = false;
+    bool                         myIsDirty = true;
     UT_StringHolder		 myTextureFile;
     UT_StringHolder		 myLightLink;
     UT_StringHolder		 myShadowLink;
-    bool			 myIsCone;
-    bool			 myNormalize;
-    bool			 myIsShadowed;
+    bool			 myIsCone = false;
+    bool			 myNormalize = true;
+    bool			 myIsShadowed = true;
     bool			 myHasProjectMap;
-    bool                         myActive;
-    bool                         mySingleSided;
-    bool                         myUseColorTemp;
+    bool                         myActive = false;
+    bool                         mySingleSided = false;
+    bool                         myUseColorTemp = false;
+    bool                         myIsSky = false;
     GU_ConstDetailHandle         myGuideGeo;
-    PXR_NS::XUSD_HydraLight     *myHydraLight;
+    UT_UniquePtr<PXR_NS::XUSD_HydraLight>  myHydraLight;
 };
 
 #endif

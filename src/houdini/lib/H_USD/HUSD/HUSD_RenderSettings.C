@@ -64,6 +64,7 @@ namespace
         const char      *overridePurpose() const override;
         fpreal           startFrame() const override;
         fpreal           frameInc() const override;
+        const std::vector<fpreal>       *frameList() const override;
         int              frameCount() const override;
         fpreal           fps() const override;
         UsdTimeCode      evalTime() const override;
@@ -707,6 +708,12 @@ fpreal
 husd_RenderSettingsContext::startFrame() const
 {
     return myImpl->startFrame();
+}
+
+const std::vector<fpreal> *
+husd_RenderSettingsContext::frameList() const
+{
+    return myImpl->frameList();
 }
 
 fpreal

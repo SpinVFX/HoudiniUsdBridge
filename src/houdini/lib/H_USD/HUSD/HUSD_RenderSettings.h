@@ -20,6 +20,7 @@
 #include <UT/UT_Vector2.h>
 #include <UT/UT_Vector4.h>
 #include <PXL/PXL_Common.h>
+#include <vector>
 
 PXR_NAMESPACE_OPEN_SCOPE
 class XUSD_RenderSettingsContext;
@@ -184,6 +185,8 @@ public:
     virtual int 	frameCount() const { return 1; }
     /// Return the FPS
     virtual fpreal      fps() const { return 24; }
+    /// Return a list of frames (if available)
+    virtual const std::vector<fpreal>   *frameList() const { return nullptr; }
 
     /// Current frame (when rendering a sequence)
     virtual fpreal	evalTime() const = 0;
