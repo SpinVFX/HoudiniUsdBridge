@@ -2114,11 +2114,6 @@ HUSD_Imaging::runSlapcompIfNeeded(const SlapcompViewInfo* view_info)
         UT_PerfMonAutoViewportDrawEvent perf("LOP Viewer", "Apply Slap Comp",
                                              UT_PERFMON_3D_VIEWPORT);
 
-        // Strip view info for live slap comp if the block is flagged
-        // as uninterested.
-        if (!mySlapcompProgram->expectsLayerCameras())
-            view_info = nullptr;
-
         bool build_success = buildSlapcompProgramAndUpdatePlanes(false);
         // If we failed to build, we can't run slapcomp...
         if (!build_success)
@@ -2129,6 +2124,10 @@ HUSD_Imaging::runSlapcompIfNeeded(const SlapcompViewInfo* view_info)
             !isSlapcompAOV(HdAovTokens->primId.GetText()) &&
             !isSlapcompAOV(HdAovTokens->instanceId.GetText()))
             return;
+        // Strip view info for live slap comp if the block is flagged as
+        // uninterested.
+        if (!mySlapcompProgram->expectsLayerCameras())
+            view_info = nullptr;
 
         // Bind the program inputs...
         for (auto iter : mySlapcompProgram->getProgramInputs())
