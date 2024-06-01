@@ -47,6 +47,7 @@
 #include <gusd/UT_Gf.h>
 #include <OP/OP_Director.h>
 #include <COP/COP_ApexProgram.h>
+#include <COP/COP_Block.h>
 #include <COP/COP_Signature.h>
 #include <COP/COP_SlapcompRegistry.h>
 #include <DEP/DEP_MicroNode.h>
@@ -1252,6 +1253,16 @@ bool
 HUSD_Imaging::buildSlapcompProgramAndUpdatePlanes(bool force)
 {
     UT_ASSERT(!mySlapcompEnabled || mySlapcompProgram);
+
+    // If slapcomp is enabled, but the selected block is no longer registered,
+    // disable slapcomp.
+    if (mySlapcompEnabled && (!mySlapcompProgram->getOutputNode() ||
+        !mySlapcompProgram->getOutputNode()->isSlapcompOutput()))
+    {
+        reportSlapcompWarning("Selected slap comp block deleted or"
+                              " unregistered. Slap comp disabled.");
+        mySlapcompEnabled = false;
+    }
 
     // If slapcomp is disabled, we merely have to reset the layer list.
     if (!mySlapcompEnabled)
