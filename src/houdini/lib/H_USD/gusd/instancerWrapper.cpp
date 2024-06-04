@@ -1484,6 +1484,7 @@ GusdInstancerWrapper::addStandardAttribute(
     const UsdAttribute &attr,
     const UT_StringHolder &attr_name,
     GT_AttributeListHandle &point_attribs,
+    exint num_instances,
     bool convert_to_radians) const
 {
     VtValue val;
@@ -1493,6 +1494,15 @@ GusdInstancerWrapper::addStandardAttribute(
     GT_DataArrayHandle data = convertAttributeData(attr, val);
     if (!data)
         return;
+
+    if (data->entries() != num_instances)
+    {
+        TF_WARN("Invalid size (%d, expected %d) for '%s' (prim <%s>)",
+                int(data->entries()), int(num_instances),
+                attr.GetName().GetText(),
+                m_usdPointInstancer.GetPath().GetText());
+        return;
+    }
 
     if (convert_to_radians)
         data = Gusd_ConvertDegToRad(data);
@@ -1650,16 +1660,20 @@ GusdInstancerWrapper::unpack(UT_Array<GU_DetailHandle> &details,
 
     // Translate the point instancer's attributes back to their Houdini
     // equivalents.
+    const exint num_instances = indices.size();
     addStandardAttribute(m_usdPointInstancer.GetAccelerationsAttr(),
-                         GA_Names::accel, point_attribs);
+                         GA_Names::accel, point_attribs, num_instances);
     addStandardAttribute(
-        m_usdPointInstancer.GetVelocitiesAttr(), GA_Names::v, point_attribs);
+            m_usdPointInstancer.GetVelocitiesAttr(), GA_Names::v, point_attribs,
+            num_instances);
     // USD angular velocity is deg / sec, but Houdini's w attribute is radians.
-    addStandardAttribute(m_usdPointInstancer.GetAngularVelocitiesAttr(),
-                         GA_Names::w, point_attribs,
-                         /* convert_to_radians */ true);
     addStandardAttribute(
-        m_usdPointInstancer.GetIdsAttr(), GA_Names::id, point_attribs);
+            m_usdPointInstancer.GetAngularVelocitiesAttr(), GA_Names::w,
+            point_attribs, num_instances,
+            /* convert_to_radians */ true);
+    addStandardAttribute(
+            m_usdPointInstancer.GetIdsAttr(), GA_Names::id, point_attribs,
+            num_instances);
 
     // Never transfer a primvars:P since that will clobber the instance
     // transforms.

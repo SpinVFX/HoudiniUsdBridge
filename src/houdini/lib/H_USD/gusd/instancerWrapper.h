@@ -124,6 +124,7 @@ private:
     void addStandardAttribute(const UsdAttribute &attr,
                               const UT_StringHolder &attr_name,
                               GT_AttributeListHandle &point_attribs,
+                              exint num_instances,
                               bool convert_to_radians = false) const;
 
 private:

@@ -444,7 +444,7 @@ Gusd_CreatePathAttrib(
                 gdp.addStringTuple(owner, primpath_attr_name, 1));
 
         prim_path_attr.set(
-                GA_Range(gdp.getIndexMap(owner)), prim.GetPath().GetString());
+                GA_Range(gdp.getIndexMap(owner)), prim.GetPath().GetAsString());
     }
 }
 
