@@ -63,6 +63,24 @@ GusdNurbsPatchWrapper::isValid() const
     return static_cast<bool>(m_usdPatch);
 }
 
+static void
+gusdAddVertexAttribute(
+        GT_AttributeListHandle &vertex_attribs,
+        const UT_StringHolder &name,
+        const GT_DataArrayHandle &data,
+        exint num_points,
+        const char *prim_path)
+{
+    if (data->entries() != num_points)
+    {
+        TF_WARN("Invalid size (%d, expected %d) for '%s' (prim <%s>)",
+                int(data->entries()), int(num_points), name.c_str(), prim_path);
+        return;
+    }
+
+    vertex_attribs = vertex_attribs->addAttribute(name, data, true);
+}
+
 bool
 GusdNurbsPatchWrapper::refine(GT_Refine &refiner, const GT_RefineParms *parms) const
 {
@@ -106,6 +124,10 @@ GusdNurbsPatchWrapper::refine(GT_Refine &refiner, const GT_RefineParms *parms) c
     }
     auto vknots = UTmakeIntrusive<GusdGT_VtArray<double>>(vknot_values);
 
+    const int ucount = uknots->entries() - uorder;
+    const int vcount = vknots->entries() - vorder;
+    const exint num_points = ucount * vcount;
+
     VtVec3fArray points;
     if (!m_usdPatch.GetPointsAttr().Get(&points, m_time))
     {
@@ -113,56 +135,52 @@ GusdNurbsPatchWrapper::refine(GT_Refine &refiner, const GT_RefineParms *parms) c
                 m_usdPatch.GetPath().GetText());
         return false;
     }
-    auto P = UTmakeIntrusive<GusdGT_VtArray<GfVec3f>>(points, GT_TYPE_POINT);
-    const int ucount = uknots->entries() - uorder;
-    const int vcount = vknots->entries() - vorder;
-    if (points.size() != (ucount * vcount))
-    {
-        TF_WARN("Invalid size (%d, expected %d) for 'points' (prim <%s>)",
-                int(points.size()), ucount * vcount,
-                m_usdPatch.GetPath().GetText());
-        return false;
-    }
 
-    auto vertex_attribs = GT_AttributeList::createAttributeList(GA_Names::P, P);
+    const char *prim_path = m_usdPatch.GetPath().GetText();
+    auto vertex_attribs = GT_AttributeList::createAttributeList();
+    gusdAddVertexAttribute(
+            vertex_attribs, GA_Names::P,
+            UTmakeIntrusive<GusdGT_VtArray<GfVec3f>>(points, GT_TYPE_POINT),
+            num_points, prim_path);
 
     VtArray<double> weights;
     if (m_usdPatch.GetPointWeightsAttr().Get(&weights, m_time))
     {
-        vertex_attribs = vertex_attribs->addAttribute(
-                GA_Names::Pw, UTmakeIntrusive<GusdGT_VtArray<double>>(weights),
-                true);
+        gusdAddVertexAttribute(
+                vertex_attribs, GA_Names::Pw,
+                UTmakeIntrusive<GusdGT_VtArray<double>>(weights), num_points,
+                prim_path);
     }
 
     VtVec3fArray normals;
     if (m_usdPatch.GetNormalsAttr().Get(&normals, m_time)
         && m_usdPatch.GetNormalsInterpolation() == UsdGeomTokens->vertex)
     {
-        vertex_attribs = vertex_attribs->addAttribute(
-                GA_Names::N,
+        gusdAddVertexAttribute(
+                vertex_attribs, GA_Names::N,
                 UTmakeIntrusive<GusdGT_VtArray<GfVec3f>>(
                         normals, GT_TYPE_NORMAL),
-                true);
+                num_points, prim_path);
     }
 
     VtVec3fArray velocities;
     if (m_usdPatch.GetVelocitiesAttr().Get(&velocities, m_time))
     {
-        vertex_attribs = vertex_attribs->addAttribute(
-                GA_Names::v,
+        gusdAddVertexAttribute(
+                vertex_attribs, GA_Names::v,
                 UTmakeIntrusive<GusdGT_VtArray<GfVec3f>>(
                         velocities, GT_TYPE_VECTOR),
-                true);
+                num_points, prim_path);
     }
 
     VtVec3fArray accelerations;
     if (m_usdPatch.GetAccelerationsAttr().Get(&accelerations, m_time))
     {
-        vertex_attribs = vertex_attribs->addAttribute(
-                GA_Names::accel,
+        gusdAddVertexAttribute(
+                vertex_attribs, GA_Names::accel,
                 UTmakeIntrusive<GusdGT_VtArray<GfVec3f>>(
                         accelerations, GT_TYPE_VECTOR),
-                true);
+                num_points, prim_path);
     }
 
     auto detail_attribs = UTmakeIntrusive<GT_AttributeList>(
