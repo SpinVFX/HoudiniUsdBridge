@@ -435,7 +435,7 @@ sopAddPathAttribs(
             SdfPath sdfpath = packed_usd->primPath();
 
             if (path_handle.isValid())
-                path_handle.set(primoff, sdfpath.GetString());
+                path_handle.set(primoff, sdfpath.GetAsString());
 
             if (name_handle.isValid())
                 name_handle.set(primoff, sdfpath.GetName());

@@ -125,7 +125,7 @@ static const char* theDsFile = R"THEDSFILE(
             label   "Name Attribute"
             type    string
             default { "name" }
-            disablewhen "{ addnameattrib == 0 } { addpathattrib == 0 }"
+            disablewhen "{ addnameattrib == 0 }"
         }
         parm {
             name    "addfilepathattrib"
@@ -492,6 +492,8 @@ sopUnpackUSDPrims(
     UT_StringHolder path_attrib_name;
     if (parms.getAddPathAttrib())
         path_attrib_name = parms.getPathAttrib();
+    else if (parms.getAddNameAttrib())
+        path_attrib_name = "__path"_sh; // Temporary path attrib for building names.
 
     GT_RefineParms refine_parms;
     refine_parms.set(
@@ -507,60 +509,58 @@ sopUnpackUSDPrims(
 
     // Set up the name / path attributes.
     GA_RWHandleS path_attrib;
-    if (parms.getAddPathAttrib())
+    if (path_attrib_name)
     {
         path_attrib = detail.addStringTuple(
-                GA_ATTRIB_PRIMITIVE, parms.getPathAttrib(), 1);
+                GA_ATTRIB_PRIMITIVE, path_attrib_name, 1);
     }
 
     GA_RWHandleS name_attrib;
-    if (parms.getAddNameAttrib() && path_attrib.isValid())
+    if (parms.getAddNameAttrib())
     {
         name_attrib = detail.addStringTuple(
                 GA_ATTRIB_PRIMITIVE, parms.getNameAttrib(), 1);
+
+        // The path attrib is created while unpacking USD packed prims to
+        // polygons. Trim off the last component for the name attribute.
+        UT_ASSERT(path_attrib.isValid());
+        sopSetNameAttrib(path_attrib, name_attrib);
     }
 
     // Just like in the LOP Import SOP, do an optional post-pass to add
     // name and path primitive attributes to any USD primitives or polygons
     // unpacked from USD packed primitives.
-    if (path_attrib.isValid() || name_attrib.isValid())
+    if ((path_attrib.isValid() || name_attrib.isValid())
+        && detail.containsPrimitiveType(GusdGU_PackedUSD::typeId()))
     {
-        // The path attrib is created while unpacking USD packed prims to
-        // polygons. Trim off the last component for the name attribute.
-        if (name_attrib.isValid())
-            sopSetNameAttrib(path_attrib, name_attrib);
-
-        if (detail.containsPrimitiveType(GusdGU_PackedUSD::typeId()))
+        for (GA_Offset primoff : detail.getPrimitiveRange())
         {
-            for (GA_Offset primoff : detail.getPrimitiveRange())
-            {
-                const GA_Primitive *prim = detail.getPrimitive(primoff);
+            const GA_Primitive *prim = detail.getPrimitive(primoff);
 
-                if (prim->getTypeId() != GusdGU_PackedUSD::typeId())
-                    continue;
+            if (prim->getTypeId() != GusdGU_PackedUSD::typeId())
+                continue;
 
-                const GU_PrimPacked *packed
-                        = UTverify_cast<const GU_PrimPacked *>(prim);
-                const GU_PackedImpl *packed_impl
-                        = packed->sharedImplementation();
+            const GU_PrimPacked *packed
+                    = UTverify_cast<const GU_PrimPacked *>(prim);
+            const GU_PackedImpl *packed_impl
+                    = packed->sharedImplementation();
 
-                // NOTE: GCC 6.3 doesn't allow dynamic_cast on non-exported
-                // classes,
-                //       and GusdGU_PackedUSD isn't exported for some reason,
-                //       so to avoid Linux debug builds failing, we static_cast
-                //       instead of UTverify_cast.
-                const GusdGU_PackedUSD *packedUsd =
+            // NOTE: GCC 6.3 doesn't allow dynamic_cast on non-exported
+            // classes,
+            //       and GusdGU_PackedUSD isn't exported for some reason,
+            //       so to avoid Linux debug builds failing, we static_cast
+            //       instead of UTverify_cast.
+            const GusdGU_PackedUSD *packedUsd =
 #if !defined(LINUX)
-                        UTverify_cast<const GusdGU_PackedUSD *>(packed_impl);
+                    UTverify_cast<const GusdGU_PackedUSD *>(packed_impl);
 #else
-                        static_cast<const GusdGU_PackedUSD *>(packed_impl);
+                    static_cast<const GusdGU_PackedUSD *>(packed_impl);
 #endif
-                SdfPath sdfpath = packedUsd->primPath();
-                if (path_attrib.isValid())
-                    path_attrib.set(primoff, sdfpath.GetString());
-                if (name_attrib.isValid())
-                    name_attrib.set(primoff, sdfpath.GetName());
-            }
+            SdfPath sdfpath = packedUsd->primPath();
+            if (path_attrib.isValid())
+                path_attrib.set(primoff, sdfpath.GetAsString());
+            if (name_attrib.isValid())
+                name_attrib.set(primoff, sdfpath.GetName());
         }
     }
 
@@ -574,6 +574,13 @@ sopUnpackUSDPrims(
                 GA_ATTRIB_POINT, parms.getNameAttrib(), 1);
 
         sopSetNameAttrib(point_path_attrib, point_name_attrib);
+    }
+
+    // Remove temporary path attribute if necessary.
+    if (!parms.getAddPathAttrib() && path_attrib_name)
+    {
+        detail.destroyPrimAttrib(path_attrib_name);
+        detail.destroyPointAttrib(path_attrib_name);
     }
 }
 

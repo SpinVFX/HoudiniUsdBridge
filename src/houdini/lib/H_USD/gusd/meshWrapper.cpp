@@ -30,6 +30,7 @@
 #include "USD_XformCache.h"
 #include "UT_Gf.h"
 
+#include <GA/GA_Names.h>
 #include <GT/GT_DAConstantValue.h>
 #include <GT/GT_DAIndirect.h>
 #include <GT/GT_DASubArray.h>
@@ -333,78 +334,51 @@ GusdMeshWrapper::refine(
     GT_AttributeListHandle gtUniformAttrs = new GT_AttributeList( new GT_AttributeMap() );
     GT_AttributeListHandle gtDetailAttrs = new GT_AttributeList( new GT_AttributeMap() );
 
-    gtPointAttrs = gtPointAttrs->addAttribute("P", gtPoints, true);
+    gtPointAttrs = gtPointAttrs->addAttribute(GA_Names::P, gtPoints, true);
 
     UsdAttribute normalsAttr = m_usdMesh.GetNormalsAttr();
-    if( normalsAttr.Get(&vtVec3Array, m_time) ) {
-        
-        GT_DataArrayHandle gtNormals = 
-                new GusdGT_VtArray<GfVec3f>(vtVec3Array, GT_TYPE_NORMAL);
+    if (normalsAttr.Get(&vtVec3Array, m_time))
+    {
         TfToken interp = m_usdMesh.GetNormalsInterpolation();
 
-        if( gtNormals ) {
-            _validateAttrData(
-                "N",
-                normalsAttr.GetBaseName().GetText(),
+        _validateAttrData(
+                GA_Names::N, normalsAttr.GetBaseName().GetText(),
                 m_usdMesh.GetPrim().GetPath().GetText(),
-                gtNormals,
-                interp,
-                usdCounts.size(),
-                usdPoints.size(),
-                usdFaceIndex.size(),
-                &gtVertexAttrs,
-                &gtPointAttrs,
-                &gtUniformAttrs,
-                &gtDetailAttrs );
-        }
+                UTmakeIntrusive<GusdGT_VtArray<GfVec3f>>(
+                        vtVec3Array, GT_TYPE_NORMAL),
+                interp, usdCounts.size(), usdPoints.size(), usdFaceIndex.size(),
+                &gtVertexAttrs, &gtPointAttrs, &gtUniformAttrs, &gtDetailAttrs);
     }
 
     if( !refineForViewport )
     {
         // point velocities
         UsdAttribute velAttr = m_usdMesh.GetVelocitiesAttr();
-        if ( velAttr.Get(&vtVec3Array, m_time) ) {
-            
-            GT_DataArrayHandle gtVel = 
-                    new GusdGT_VtArray<GfVec3f>(vtVec3Array, GT_TYPE_VECTOR);
-            if( gtVel ) {
-                _validateAttrData(
-                    GA_Names::v,
-                    velAttr.GetBaseName().GetText(),
+        if ( velAttr.Get(&vtVec3Array, m_time) )
+        {
+            _validateAttrData(
+                    GA_Names::v, velAttr.GetBaseName().GetText(),
                     m_usdMesh.GetPrim().GetPath().GetText(),
-                    gtVel,
+                    UTmakeIntrusive<GusdGT_VtArray<GfVec3f>>(
+                            vtVec3Array, GT_TYPE_VECTOR),
                     UsdGeomTokens->varying, // Point attribute
-                    usdCounts.size(),
-                    usdPoints.size(),
-                    usdFaceIndex.size(),
-                    &gtVertexAttrs,
-                    &gtPointAttrs,
-                    &gtUniformAttrs,
-                    &gtDetailAttrs );
-            }
+                    usdCounts.size(), usdPoints.size(), usdFaceIndex.size(),
+                    &gtVertexAttrs, &gtPointAttrs, &gtUniformAttrs,
+                    &gtDetailAttrs);
         }
 
         // point accelerations
         UsdAttribute accelAttr = m_usdMesh.GetAccelerationsAttr();
         if ( accelAttr.Get(&vtVec3Array, m_time) ) {
-            
-            GT_DataArrayHandle gtAccel = 
-                    new GusdGT_VtArray<GfVec3f>(vtVec3Array, GT_TYPE_VECTOR);
-            if( gtAccel ) {
-                _validateAttrData(
-                    GA_Names::accel,
-                    accelAttr.GetBaseName().GetText(),
+            _validateAttrData(
+                    GA_Names::accel, accelAttr.GetBaseName().GetText(),
                     m_usdMesh.GetPrim().GetPath().GetText(),
-                    gtAccel,
+                    UTmakeIntrusive<GusdGT_VtArray<GfVec3f>>(
+                            vtVec3Array, GT_TYPE_VECTOR),
                     UsdGeomTokens->varying, // Point attribute
-                    usdCounts.size(),
-                    usdPoints.size(),
-                    usdFaceIndex.size(),
-                    &gtVertexAttrs,
-                    &gtPointAttrs,
-                    &gtUniformAttrs,
-                    &gtDetailAttrs );
-            }
+                    usdCounts.size(), usdPoints.size(), usdFaceIndex.size(),
+                    &gtVertexAttrs, &gtPointAttrs, &gtUniformAttrs,
+                    &gtDetailAttrs);
         }
     }
     
