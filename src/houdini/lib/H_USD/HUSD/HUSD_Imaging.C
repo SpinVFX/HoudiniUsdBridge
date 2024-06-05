@@ -47,7 +47,6 @@
 #include <gusd/UT_Gf.h>
 #include <OP/OP_Director.h>
 #include <COP/COP_ApexProgram.h>
-#include <COP/COP_Block.h>
 #include <COP/COP_Signature.h>
 #include <COP/COP_SlapcompRegistry.h>
 #include <DEP/DEP_MicroNode.h>
@@ -844,17 +843,17 @@ HUSD_Imaging::setFrame(fpreal frame)
 }
 
 void
-HUSD_Imaging::setAspectPolicy(HUSD_Scene::ConformPolicy p)
+HUSD_Imaging::setAspectPolicy(HUSD_AspectConformPolicy p)
 {
-    if(p == HUSD_Scene::EXPAND_APERTURE)
+    if(p == HUSD_AspectConformPolicy::EXPAND_APERTURE)
         myConformPolicy = CameraUtilFit;
-    else if(p == HUSD_Scene::CROP_APERTURE)
+    else if(p == HUSD_AspectConformPolicy::CROP_APERTURE)
         myConformPolicy = CameraUtilCrop;
-    else if(p == HUSD_Scene::ADJUST_HORIZONTAL_APERTURE)
+    else if(p == HUSD_AspectConformPolicy::ADJUST_HAPERTURE)
         myConformPolicy = CameraUtilMatchHorizontally;
-    else if(p == HUSD_Scene::ADJUST_VERTICAL_APERTURE)
+    else if(p == HUSD_AspectConformPolicy::ADJUST_VAPERTURE)
         myConformPolicy = CameraUtilMatchVertically;
-    else if(p == HUSD_Scene::ADJUST_PIXEL_ASPECT)
+    else if(p == HUSD_AspectConformPolicy::ADJUST_PIXEL_ASPECT)
         myConformPolicy = CameraUtilDontConform;
 }
 
@@ -1257,7 +1256,7 @@ HUSD_Imaging::buildSlapcompProgramAndUpdatePlanes(bool force)
     // If slapcomp is enabled, but the selected block is no longer registered,
     // disable slapcomp.
     if (mySlapcompEnabled && (!mySlapcompProgram->getOutputNode() ||
-        !mySlapcompProgram->getOutputNode()->isSlapcompOutput()))
+        !mySlapcompProgram->isOutputNodeSlapComp()))
     {
         reportSlapcompWarning("Selected slap comp block deleted or"
                               " unregistered. Slap comp disabled.");
@@ -1968,6 +1967,71 @@ namespace
         }
         PXL_OCIO::transform(proc, dst, npixels, nchan);
     }
+
+    // Stash a specific buffer and add to the aov list,
+    // along with any extra buffers.
+    void
+    stashSlapAOV(bool dostash,
+            const HUSD_Imaging::SlapcompViewInfo *view_info,
+            UT_Array<COP_SlapcompRegistry::AovInfo> &aovs,
+            UT_StringHolder aov,
+            HUSD_RenderBuffer &buf)
+    {
+        if (!buf.isValid())
+            return;
+
+        COP_Type            coptype = COP_TYPE_UNDEF;
+
+        switch (buf.dataFormat())
+        {
+            case PXL_INT8:
+            case PXL_INT16:
+            case PXL_INT32:
+                coptype = COP_TYPE_INT;
+                break;
+            case PXL_FLOAT16:
+            case PXL_FLOAT32:
+                switch (buf.packing())
+                {
+                    case PACK_SINGLE: coptype = COP_TYPE_FLOAT; break;
+                    case PACK_UV: coptype = COP_TYPE_VECTOR2; break;
+                    case PACK_RGB: coptype = COP_TYPE_VECTOR; break;
+                    case PACK_RGBA: coptype = COP_TYPE_VECTOR4; break;
+
+                    case PACK_DUAL:
+                    case PACK_DUAL_NI:
+                    case PACK_RGB_NI:
+                    case PACK_RGBA_NI:
+                    case PACK_UNKNOWN:
+                        UT_ASSERT(0);
+                        break;
+                }
+                break;
+
+            case PXL_MAX_DATA_FORMAT:
+                UT_ASSERT(0);
+                break;
+        }
+
+        aovs.append( { aov, coptype } );
+
+        if (dostash)
+        {
+            IMX_LayerPtr buf_lay = husd_convertBufferToLayer(buf, view_info);
+            COP_SlapcompRegistry::stashLayer(aov, buf_lay);
+        }
+
+        // Process any secondary buffers.
+        for (int i = 0, n = buf.numExtraBuffers(); i < n; i++)
+        {
+            UT_StringHolder     extraname = buf.extraName(i);
+            HUSD_RenderBuffer   extrabuf = buf.extraBuffer(i);
+            if (!extrabuf.isValid())
+                continue;
+
+            stashSlapAOV(dostash, view_info, aovs, extraname, extrabuf);
+        }
+    }
 }       // end namespace
 
 bool
@@ -1983,70 +2047,6 @@ HUSD_Imaging::isSlapcompAOV(const UT_StringHolder& name) const
     }
     return false;
 }
-
-void
-HUSD_Imaging::stashSlapAOV(bool dostash,
-                           const SlapcompViewInfo *view_info,
-                           UT_Array<COP_SlapcompRegistry::AovInfo> &aovs,
-                           UT_StringHolder aov,
-                           HUSD_RenderBuffer &buf)
-{
-    if (!buf.isValid())
-        return;
-
-    COP_Type            coptype = COP_TYPE_UNDEF;
-
-    switch (buf.dataFormat())
-    {
-        case PXL_INT8:
-        case PXL_INT16:
-        case PXL_INT32:
-            coptype = COP_TYPE_INT;
-            break;
-        case PXL_FLOAT16:
-        case PXL_FLOAT32:
-            switch (buf.packing())
-            {
-                case PACK_SINGLE: coptype = COP_TYPE_FLOAT; break;
-                case PACK_UV: coptype = COP_TYPE_VECTOR2; break;
-                case PACK_RGB: coptype = COP_TYPE_VECTOR; break;
-                case PACK_RGBA: coptype = COP_TYPE_VECTOR4; break;
-
-                case PACK_DUAL:
-                case PACK_DUAL_NI:
-                case PACK_RGB_NI:
-                case PACK_RGBA_NI:
-                case PACK_UNKNOWN:
-                    UT_ASSERT(0);
-                    break;
-            }
-            break;
-
-        case PXL_MAX_DATA_FORMAT:
-            UT_ASSERT(0);
-            break;
-    }
-
-    aovs.append( { aov, coptype } );
-
-    if (dostash)
-    {
-        IMX_LayerPtr buf_lay = husd_convertBufferToLayer(buf, view_info);
-        COP_SlapcompRegistry::stashLayer(aov, buf_lay);
-    }
-
-    // Process any secondary buffers.
-    for (int i = 0, n = buf.numExtraBuffers(); i < n; i++)
-    {
-        UT_StringHolder     extraname = buf.extraName(i);
-        HUSD_RenderBuffer   extrabuf = buf.extraBuffer(i);
-        if (!extrabuf.isValid())
-            continue;
-
-        stashSlapAOV(dostash, view_info, aovs, extraname, extrabuf);
-    }
-}
-
 
 void
 HUSD_Imaging::registerSlapcompAOVs(bool dostash, 

@@ -29,7 +29,7 @@
 #include "HUSD_DataHandle.h"
 #include "HUSD_RenderBuffer.h"
 #include "HUSD_RendererInfo.h"
-#include "HUSD_Scene.h"
+#include "HUSD_Utils.h"
 #include <UT/UT_BoundingBox.h>
 #include <UT/UT_Function.h>
 #include <UT/UT_Matrix3.h>
@@ -40,7 +40,6 @@
 #include <UT/UT_StringArray.h>
 #include <UT/UT_UniquePtr.h>
 #include <UT/UT_Vector2.h>
-#include <COP/COP_SlapcompRegistry.h>
 #include <pxr/pxr.h>
 
 PXR_NAMESPACE_OPEN_SCOPE
@@ -93,7 +92,7 @@ public:
     void                 setHeadlightIntensity(fpreal intensity);
     void		 setLighting(bool enable);
     void		 setMaterials(bool enable);
-    void                 setAspectPolicy(HUSD_Scene::ConformPolicy p);
+    void                 setAspectPolicy(HUSD_AspectConformPolicy p);
 
     enum BufferSet
     {
@@ -324,13 +323,6 @@ private:
     /// Returns true if the given AOV is an output of slapcomp.
     bool                isSlapcompAOV(const UT_StringHolder& name) const;
 
-    /// Stash a specific buffer and add to the aov list,
-    /// along with any extra buffers.
-    void                stashSlapAOV(bool dostash,
-                           const SlapcompViewInfo *view_info,
-                           UT_Array<COP_SlapcompRegistry::AovInfo> &aovs,
-                           UT_StringHolder aov,
-                           HUSD_RenderBuffer &buf);
     /// Registers all active AOVs with the slapcomp registry,
     /// run on terminate or on convergence
     void                registerSlapcompAOVs(bool dostash, const SlapcompViewInfo *view_info);

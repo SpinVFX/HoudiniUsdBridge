@@ -2084,8 +2084,10 @@ BRAY_HdUtil::convertAttribute(const VtValue &val, const TfToken &token)
 }
 
 GT_DataArrayHandle
-BRAY_HdUtil::convertAttribute(const VtValue &val,
-        const VtIntArray &indices, const TfToken &token)
+BRAY_HdUtil::convertAttribute(const SdfPath &id,
+        const VtValue &val,
+        const VtIntArray &indices,
+        const TfToken &token)
 {
     GT_DataArrayHandle  data = convertAttribute(val, token);
     if (indices.size())
@@ -2094,6 +2096,12 @@ BRAY_HdUtil::convertAttribute(const VtValue &val,
             return data;
         GT_DataArrayHandle      indirect = gtArray(indices);
         data = UTmakeIntrusive<GT_DAIndirect>(indirect, data);
+    }
+    else if (data->getStorage() == GT_STORE_STRING)
+    {
+        UT_ErrorLog::format(3,
+                "Non-indexed attribute '{}' string found on {}.{}",
+                token, id, " This may affect performance");
     }
     return data;
 }
@@ -3449,7 +3457,7 @@ BRAY_HdUtil::dformBlur(HdSceneDelegate *sd,
     UT_StackBuffer<GT_DataArrayHandle>	gvalues(usdsegs);
     for (int i = 0; i < usdsegs; ++i)
     {
-	gvalues[i] = convertAttribute(samples.values()[i],
+	gvalues[i] = convertAttribute(id, samples.values()[i],
                                       samples.indices()[i], name);
 	if (!gvalues[i])
 	    return false;

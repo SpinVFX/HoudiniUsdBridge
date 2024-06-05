@@ -2048,7 +2048,7 @@ XUSD_RenderSettings::conformPolicy(HUSD_AspectConformPolicy p)
     return HusdHuskTokens->invalidConformPolicy;
 }
 
-XUSD_RenderSettings::HUSD_AspectConformPolicy
+HUSD_AspectConformPolicy
 XUSD_RenderSettings::conformPolicy(const TfToken &policy)
 {
     static UT_Map<TfToken, HUSD_AspectConformPolicy>	theMap = {
@@ -2069,7 +2069,7 @@ XUSD_RenderSettings::conformPolicy(const TfToken &policy)
     return it->second;
 }
 
-XUSD_RenderSettings::HUSD_AspectConformPolicy
+HUSD_AspectConformPolicy
 XUSD_RenderSettings::conformPolicy(const XUSD_RenderSettingsContext &ctx) const
 {
     TfToken	token;

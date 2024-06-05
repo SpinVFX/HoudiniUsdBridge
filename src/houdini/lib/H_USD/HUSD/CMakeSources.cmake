@@ -182,6 +182,7 @@ set( husd_hdk_headers
     HUSD_GeoSubset.h
     HUSD_GeoUtils.h
     HUSD_GetAttributes.h
+    HUSD_Imaging.h
     HUSD_Info.h
     HUSD_LayerCheckpoint.h
     HUSD_LayerOffset.h
@@ -211,6 +212,7 @@ set( husd_hdk_headers
     HUSD_PropertyHandle.h
     HUSD_Prune.h
     HUSD_PythonConverter.h
+    HUSD_RenderBuffer.h
     HUSD_RendererInfo.h
     HUSD_RenderSettings.h
     HUSD_Save.h
@@ -256,7 +258,6 @@ set( husd_hdk_headers
 
 set( husd_internal_headers
     HUSD_HuskEngine.h
-    HUSD_Imaging.h
     HUSD_Scene.h
     XUSD_ImagingEngine.h
 

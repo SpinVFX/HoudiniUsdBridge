@@ -577,7 +577,8 @@ private:
 
     /// Convert an attribute of the given name
     static
-    GT_DataArrayHandle	    convertAttribute(const VtValue &val,
+    GT_DataArrayHandle	    convertAttribute(const SdfPath &id,
+                                const VtValue &val,
                                 const VtIntArray &indices,
 				const TfToken &token);
 

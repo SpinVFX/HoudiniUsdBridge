@@ -22,6 +22,7 @@
 #define __XUSD_RenderSettings__
 
 #include "HUSD_API.h"
+#include "HUSD_Utils.h"
 #include <PXL/PXL_Common.h>
 #include <UT/UT_Array.h>
 #include <UT/UT_NonCopyable.h>
@@ -414,18 +415,8 @@ public:
     bool	collectAovs(TfTokenVector &aovs,
 			HdAovDescriptorList &descs) const;
 
-    enum class HUSD_AspectConformPolicy
-    {
-	INVALID = -1,
-	EXPAND_APERTURE,
-	CROP_APERTURE,
-	ADJUST_HAPERTURE,
-	ADJUST_VAPERTURE,
-	ADJUST_PIXEL_ASPECT,
-	DEFAULT = EXPAND_APERTURE
-    };
-    static HUSD_AspectConformPolicy	conformPolicy(const TfToken &t);
-    static const TfToken	&conformPolicy(HUSD_AspectConformPolicy policy);
+    static HUSD_AspectConformPolicy conformPolicy(const TfToken &t);
+    static const TfToken &conformPolicy(HUSD_AspectConformPolicy policy);
 
     // Helper function for calculating a UT_DimRect consistently based on
     // floating point reoslution and datawindow fractional values.
@@ -450,19 +441,19 @@ public:
 		    T &vaperture, T &pixel_aspect,
 		    T cam_aspect, T img_aspect) const;
 
-    HUSD_AspectConformPolicy	conformPolicy(
-				    const XUSD_RenderSettingsContext &c) const;
+    HUSD_AspectConformPolicy conformPolicy(
+                    const XUSD_RenderSettingsContext &c) const;
 
     // Return a VtValue for all non-raster render products for the delegate
     // render product interface.
     VtValue             delegateRenderProducts(int product_group) const;
 
     virtual bool        supportedDelegate(const TfToken &name) const;
+
 protected:
     virtual UT_UniquePtr<XUSD_RenderProduct>	newRenderProduct() const
-    {
-	return UTmakeUnique<XUSD_RenderProduct>();
-    }
+    { return UTmakeUnique<XUSD_RenderProduct>(); }
+
     void        partitionProducts();
     void	computeImageWindows(const UsdStageRefPtr &usd,
 			const XUSD_RenderSettingsContext &ctx);
@@ -475,9 +466,7 @@ protected:
     void	buildRenderSettings(const UsdStageRefPtr &usd,
 			const XUSD_RenderSettingsContext &ctx);
     bool        isDefaultProduct() const
-    {
-        return myProducts.size() >= 1 && myProducts[0]->isDefault();
-    }
+    { return myProducts.size() >= 1 && myProducts[0]->isDefault(); }
     /// Check to see whether there have been any unexpected products added (as
     /// in the mplay monitor or the dummy raster product).  Returns true if the
     /// path list size matches.

@@ -26,7 +26,7 @@
 #include "HUSD_Constants.h"
 #include "HUSD_FindPrims.h"
 #include "HUSD_PathSet.h"
-#include <HUSD_Utils.h>
+#include "HUSD_Utils.h"
 #include "XUSD_Data.h"
 #include "XUSD_Utils.h"
 #include "UT/UT_WorkArgs.h"
