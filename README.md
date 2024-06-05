@@ -92,7 +92,7 @@ Changes ordered from oldest to newest at initial release of Houdini 20.5:
 - [850599b68e3f9cc88555fb209578af45c5ff41a2](https://github.com/sideeffects/USD/commit/850599b68e3f9cc88555fb209578af45c5ff41a2):
   - **Required**: Support inherited primvars on point instancer prims.
 - [f41c0f5cb012a60b48cf0dd2a8b956a9de1ece84](https://github.com/sideeffects/USD/commit/f41c0f5cb012a60b48cf0dd2a8b956a9de1ece84):
-  - **Not required**: Add new HdSceneDelegate and HdPrim methods to get a "data sharing id" for an HdPrim.
+  - **Required**: Add new HdSceneDelegate and HdPrim methods to get a "data sharing id" for an HdPrim. Required for HdHDebug delegate.
 - [a9a90da68c4746028359c2e181153e5c70a5aca0](https://github.com/sideeffects/USD/commit/a9a90da68c4746028359c2e181153e5c70a5aca0):
   - **Not required**: Incorporate change to set umask properly when creating USD files, as described here: https://github.com/PixarAnimationStudios/USD/issues/1604
 - [c2e4464404b7c9a4f0c48d7cca4c864f18bdb34c](https://github.com/sideeffects/USD/commit/c2e4464404b7c9a4f0c48d7cca4c864f18bdb34c):
