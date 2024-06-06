@@ -2097,11 +2097,12 @@ BRAY_HdUtil::convertAttribute(const SdfPath &id,
         GT_DataArrayHandle      indirect = gtArray(indices);
         data = UTmakeIntrusive<GT_DAIndirect>(indirect, data);
     }
-    else if (data->getStorage() == GT_STORE_STRING)
+    else if (data->getStorage() == GT_STORE_STRING
+            && data->entries() > 32)
     {
-        UT_ErrorLog::format(3,
-                "Non-indexed attribute '{}' string found on {}.{}",
-                token, id, " This may affect performance");
+        UT_ErrorLog::format(2,
+                "Warning: Non-indexed attribute '{}' string found on {}. {}",
+                token, id, "This may affect performance");
     }
     return data;
 }
