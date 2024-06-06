@@ -140,6 +140,10 @@ namespace
 	    float	par = pixel_aspect;
 	    //UTdebugFormat("Input aperture[{}]: {} {} {}/{} {}", int(policy), hap, vap, hap/vap, imgaspect, pixel_aspect);
 
+            // Aspect for coordsys cameras should be unaffected by conform
+            // policies or pixel aspect.
+	    cprops[i].set(BRAY_CAMERA_COORDSYS_ASPECT, SYSsafediv(hap, vap));
+
             UT_ErrorLog::format(8,
                     "Aspect ratio conform {} H/V: {}/{}, PAR: {}, IAR: {}",
                     int(policy), hap, vap, pixel_aspect, imgaspect);
