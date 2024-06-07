@@ -226,17 +226,23 @@ namespace
     setShaderMaterial(HdSceneDelegate *sd, const SdfPath &id,
             BRAY::CameraPtr &cam, BRAY::ScenePtr &scene)
     {
-        auto                    path = sd->GetMaterialId(id);
-        auto                    mat = sd->GetMaterialResource(path);
+        auto    path = sd->GetMaterialId(id);
+        if (path.IsEmpty())
+            return false;
+
+        auto    mat = sd->GetMaterialResource(path);
         if (!mat.IsHolding<HdMaterialNetworkMap>())
         {
             if (scene.isKarmaXPU())
             {
                 UT_ErrorLog::warning("Custom lens shaders are not supported "
-                        "by KarmaXPU: {}", path);
+                        "by KarmaXPU: '{}' (camera {})", path, id);
             }
             else
-                UT_ErrorLog::error("Bad lens shader {}", path);
+            {
+                UT_ErrorLog::error("Bad lens shader '{}' for camera '{}'",
+                        path, id);
+            }
             return false;
         }
         auto                netmap = mat.UncheckedGet<HdMaterialNetworkMap>();
@@ -245,12 +251,12 @@ namespace
         // BRAY_HdMaterial::dump(netmap);
         if (!numnodes)
         {
-            UT_ErrorLog::error("Empty lens shader {}", path);
+            UT_ErrorLog::error("Empty lens shader '{}' for camera {}", path, id);
             return false;
         }
 
         //auto rootparms = net.nodes[numnodes - 1].parameters;
-        //if (rootparms.count(TfToken(theLensShaderInput.c_str()))) 
+        //if (rootparms.count(TfToken(theLensShaderInput.c_str())))
         if (net.nodes[numnodes - 1].identifier == TfToken(theKarmaPhysicalLens.c_str()))
         {
             // Create or find the material
@@ -260,7 +266,7 @@ namespace
             return true;
         }
         // Invalid lens shader
-        UT_ErrorLog::error("Invalid lens shader {}", path);
+        UT_ErrorLog::error("Invalid lens shader '{}' for camera {}", path, id);
         return false;
     }
 
