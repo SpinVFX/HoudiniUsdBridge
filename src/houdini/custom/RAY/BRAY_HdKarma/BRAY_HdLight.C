@@ -492,6 +492,29 @@ namespace
             }
         }
     }
+
+    static BRAY::SpacePtr
+    domeSpaceFromPoleAxis(HdSceneDelegate *sd, const SdfPath &id)
+    {
+        // identity matrix
+        BRAY::SpacePtr space(UT_Matrix4D(1.f));
+
+        // domelight poleAxis
+        VtValue axis = BRAY_HdUtil::evalLightVtToken(
+            sd, id, UsdLuxTokens->poleAxis);
+        if (axis.IsHolding<TfToken>())
+        {
+            TfToken tok = axis.UncheckedGet<TfToken>();
+            if (tok == UsdLuxTokens->Z)
+            {
+                // The dome light's top pole is aligned with +Z
+                space = UT_Matrix4D::rotationMat(UT_Axis3::XAXIS, M_PI_2);
+            }
+            // identity matrix for
+            // tok == UsdLuxTokens->Y || tok == UsdLuxTokens->scene
+        }
+        return space;
+    }
 }       // End namespace
 
 void
@@ -579,8 +602,21 @@ BRAY_HdLight::Sync(HdSceneDelegate *sd,
                         id, i, myXform[i]);
             }
         }
-	myLight.setTransform(BRAY_HdUtil::makeSpace(myXform.data(),
-		    myXform.size(), oprops));
+        BRAY::SpacePtr space = BRAY_HdUtil::makeSpace(myXform.data(),
+	    myXform.size(), oprops);
+
+        // if dome-light poleAxis has already been set (which means
+        // myLight.type() is set too) we need to honour the
+        // starting alignment space.
+        if (myLight.type() == BRAY_LIGHT_ENVIRONMENT)
+        {
+            // returns identity if poleAxis prim isn't set
+            BRAY::SpacePtr domespace = domeSpaceFromPoleAxis(sd, id);
+            myLight.setTransform(space.mulSpace(domespace));
+        }
+        else
+            myLight.setTransform(space);
+
 	event = event | BRAY_EVENT_XFORM;
     }
 
@@ -619,22 +655,10 @@ BRAY_HdLight::Sync(HdSceneDelegate *sd,
         if (ltype == BRAY_LIGHT_ENVIRONMENT)
         {
             // domelight poleAxis
-            VtValue axis = BRAY_HdUtil::evalLightVtToken(sd, id, UsdLuxTokens->poleAxis);
-            if (axis.IsHolding<TfToken>())
-            {
-                TfToken tok = axis.UncheckedGet<TfToken>();
-                if (!tok.IsEmpty())
-                {
-                    if (tok == UsdLuxTokens->Z)
-                    {
-                        // The dome light's top pole is aligned with the +Z axis.
-                        BRAY::SpacePtr rot(
-                            UT_Matrix4D::rotationMat(UT_Axis3::XAXIS, M_PI_2));
-                        myLight.setTransform(myLight.transform().mulSpace(rot));
-                    }
-                    // no-op for UsdLuxTokens->Y and UsdLuxTokens->scene values
-                }
-            }
+            BRAY::SpacePtr domespace = domeSpaceFromPoleAxis(sd, id);
+            BRAY::SpacePtr currentspace = BRAY_HdUtil::makeSpace(
+                    myXform.data(), myXform.size(), oprops);
+            myLight.setTransform(currentspace.mulSpace(domespace));
         }
 
 	// Determine the VEX light shader
