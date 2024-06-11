@@ -499,19 +499,13 @@ namespace
         // identity matrix
         BRAY::SpacePtr space(UT_Matrix4D(1.f));
 
-        // domelight poleAxis
-        VtValue axis = BRAY_HdUtil::evalLightVtToken(
-            sd, id, UsdLuxTokens->poleAxis);
-        if (axis.IsHolding<TfToken>())
+        // from pxr/usdImaging/usdImaging/domeLight_1Adapter::_GetDomeOffset()
+        // return a matrix that will align the given dome light with its "poleAxis".
+        VtValue val = sd->GetLightParamValue(id, HdLightTokens->domeOffset);
+        if (val.IsHolding<GfMatrix4d>())
         {
-            TfToken tok = axis.UncheckedGet<TfToken>();
-            if (tok == UsdLuxTokens->Z)
-            {
-                // The dome light's top pole is aligned with +Z
-                space = UT_Matrix4D::rotationMat(UT_Axis3::XAXIS, M_PI_2);
-            }
-            // identity matrix for
-            // tok == UsdLuxTokens->Y || tok == UsdLuxTokens->scene
+            space = BRAY_HdUtil::makeSingleSpace(
+                val.UncheckedGet<GfMatrix4d>());
         }
         return space;
     }

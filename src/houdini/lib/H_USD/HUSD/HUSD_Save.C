@@ -1636,6 +1636,7 @@ public:
                                         // layer and geometry files.
                                         mySavedGeoMap.clear();
                                         mySavedPathInfoMap.clear();
+                                        myImageSaveMap.clear();
                                     }
 
     UsdStageRefPtr		        myStage;
