@@ -204,6 +204,10 @@ private:
     HUSD_ShaderTranslator * myTranslator;
     HUSD_AutoWriteLock &    myLock;
     const UT_StringHolder   myUSDMaterialPath;
+
+    // Holding the token as a member automatically manages the count
+    // of active shader translators thru RAII.
+    HUSD_ShaderTranslator::ActiveToken  myActiveToken;
 };
 
 // Note, there should not be many distinct shader translators needed
