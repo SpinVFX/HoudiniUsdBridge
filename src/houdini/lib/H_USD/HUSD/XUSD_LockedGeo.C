@@ -52,14 +52,12 @@ XUSD_LockedGeo::~XUSD_LockedGeo()
 bool
 XUSD_LockedGeo::setGdh(const GU_ConstDetailHandle &gdh)
 {
+    // Note that the only caller of this method,
+    // XUSD_LockedGeoRegistry::createLockedGeo, locked the "reload layer"
+    // lock before calling here, so it is safe to tell USD to reload the
+    // layer associated with this geometry.
     if (myGdh != gdh)
     {
-        // The gdh has changed. Update our gdh to the new value,
-        // and reload the associated layer. But acquire the "reload"
-        // lock first so we can be sure there isn't a background thread
-        // syncing a stage on a background thread using this layer.
-        UT_AutoLock lockscope(HUSDgetLayerReloadLock());
-
         if (myGdh.isValid())
             myGdh.removePreserveRequest();
         myGdh = gdh;

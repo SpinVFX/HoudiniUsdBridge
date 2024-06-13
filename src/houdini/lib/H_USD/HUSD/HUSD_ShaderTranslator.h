@@ -29,6 +29,7 @@
 
 #include <VOP/VOP_Types.h>
 #include <UT/UT_StringArray.h>
+#include <UT/UT_ThreadSpecificValue.h>
 #include <UT/UT_IntArray.h>
 
 #include <utility>
@@ -61,6 +62,29 @@ public:
     virtual void endMaterialTranslation(HUSD_AutoWriteLock &lock,
                         const UT_StringRef &usd_material_path );
     /// @}
+
+    /// Class used for marking the scope as containing an active shader
+    /// translator. This allows checking if any shader translator is actively
+    /// translating shader nodes to USD at the moment.
+    class HUSD_API ActiveToken
+    {
+    public:
+                         ActiveToken();
+                        ~ActiveToken();
+
+        /// Returns true if there are any existing token objects 
+        /// live in the given thread.
+        static bool      hasActiveToken(int thread);
+
+    private:
+        static UT_ThreadSpecificValue<int> theActiveTranslatorCount;
+    };
+
+    /// Returns true if there are any shader translators executing
+    /// on the given thread (ie, if passed current thread's ID, ie
+    /// it checks the call originates from a translator on the call stack).
+    static bool         isTranslatorActive(int thread)
+                            { return ActiveToken::hasActiveToken(thread); }
 
     /// Defines a USD shader primitive that is part of the USD material.
     /// Ie, the translator will connect the shader to the material output.

@@ -52,6 +52,26 @@ HUSD_ShaderTranslator::endMaterialTranslation( HUSD_AutoWriteLock &lock,
 {
 }
 
+UT_ThreadSpecificValue<int>
+HUSD_ShaderTranslator::ActiveToken::theActiveTranslatorCount;
+
+HUSD_ShaderTranslator::ActiveToken::ActiveToken()
+{
+    theActiveTranslatorCount.get()++;
+
+}
+
+HUSD_ShaderTranslator::ActiveToken::~ActiveToken()
+{
+    theActiveTranslatorCount.get()--;
+}
+
+bool      
+HUSD_ShaderTranslator::ActiveToken::hasActiveToken(int thread)
+{
+    return theActiveTranslatorCount.getValueForThread(thread) > 0;
+}
+
 // ============================================================================ 
 namespace
 {

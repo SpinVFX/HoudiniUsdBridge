@@ -42,13 +42,21 @@ XUSD_LockedGeoRegistry::createLockedGeo(
 	const XUSD_LockedGeoArgs &args,
 	const GU_ConstDetailHandle &gdh)
 {
+    // The gdh may have changed. This will require updating our gdh to the
+    // new value, and reloading the associated layer. So we must acquire the
+    // "reload" lock to be sure there isn't a background thread syncing a
+    // stage using this layer. We speculatively (and possibly pointlessly)
+    // grab the layer reload lock before getting theEntriesLock because this
+    // is the order in which the locks are acquired when syncing a stage (from
+    // HUSD_Imaging::launchBackgroundRender).
+    UT_AutoLock lockscope(HUSDgetLayerReloadLock());
     UT_AutoLock l(theEntriesLock);
 
     for (int i = 0, n = theRegistryEntries.size(); i < n; i++)
     {
 	if (theRegistryEntries(i)->matches(nodepath, args))
 	{
-            // This call will no nothing (and return false) if the gdh is
+            // This call will do nothing (and return false) if the gdh is
             // unchanged. But if the gdh has changed, then this node's parms
             // have changed and it has been recooked. So we update our gdh
             // and reload the associated layer.

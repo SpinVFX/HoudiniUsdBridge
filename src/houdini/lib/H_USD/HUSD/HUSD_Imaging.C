@@ -2660,7 +2660,8 @@ HUSD_Imaging::launchBackgroundRender(const UT_Matrix4D &view_matrix,
                 //    the renderer (which may require waiting for the renderer
                 //    to finish whatever buckets it is working on).
                 // 2. The main thread owns the HOM lock, and is waiting for
-                //    the layer reload lock in XUSD_LockedGeo::setGdh (in the
+                //    the layer reload lock in
+                //    XUSD_LockedGeoRegistry::createLockedGeo (in the
                 //    middle of a cook).
                 // 3. A rendering thread is trying to stop, but first it needs
                 //    to finish its current bucket, which involves cooking a
