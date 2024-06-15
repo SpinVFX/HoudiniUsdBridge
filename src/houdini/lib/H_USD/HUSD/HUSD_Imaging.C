@@ -2615,8 +2615,6 @@ HUSD_Imaging::launchBackgroundRender(const UT_Matrix4D &view_matrix,
                                      const UT_Options *render_opts,
                                      bool cam_effects)
 {
-    RunningStatus status = RunningStatus(myRunningInBackground.relaxedLoad());
-    
     // An empty renderer name means clear out our imaging data and exit.
     if (!renderer.isstring())
     {
@@ -2625,6 +2623,7 @@ HUSD_Imaging::launchBackgroundRender(const UT_Matrix4D &view_matrix,
 	return false;
     }
 
+    RunningStatus status = RunningStatus(myRunningInBackground.relaxedLoad());
     if(status != RUNNING_UPDATE_NOT_STARTED)
         return false;
 
@@ -2681,6 +2680,9 @@ HUSD_Imaging::launchBackgroundRender(const UT_Matrix4D &view_matrix,
                         myPrivate->myImagingEngine->PauseRenderer();
                 }
 
+                // This will hold the result of the updateRenderData call.
+                RunningStatus newstatus = RUNNING_UPDATE_IN_BACKGROUND;
+
                 // Make sure nobody calls Reload on any layers while we are
                 // performing our update/sync from the viewport stage. This
                 // is the only way in which code on the main thread might
@@ -2689,18 +2691,22 @@ HUSD_Imaging::launchBackgroundRender(const UT_Matrix4D &view_matrix,
                 {
                     UT_AutoLock lockscope(HUSDgetLayerReloadLock());
 
-                    RunningStatus status = updateRenderData(
+                    newstatus = updateRenderData(
                         view_matrix, proj_matrix, viewport_rect, cam_effects);
-
-                    if (status == RUNNING_UPDATE_NOT_STARTED ||
-                        status == RUNNING_UPDATE_FATAL)
-                        myReadLock.reset();
-                    myRunningInBackground.store(status);
                 }
 
                 // Resume the render if we paused it.
                 if (do_resume_render)
                     myPrivate->myImagingEngine->ResumeRenderer();
+
+                // Change the update status to indicate that we are no
+                // longer updating. Do this after resuming the renderer so
+                // we can't initiate another background update and interleave
+                // pause/resume calls.
+                if (newstatus == RUNNING_UPDATE_NOT_STARTED ||
+                    newstatus == RUNNING_UPDATE_FATAL)
+                    myReadLock.reset();
+                myRunningInBackground.store(newstatus);
             });
     }
     else
@@ -2899,7 +2905,9 @@ HUSD_Imaging::handleCopTextureChange(bool time_changed)
     myHandlingCopTextureChange = true;
 
     // Send a frame number change to the renderer, which forces it to stop.
-    if (myPrivate->myImagingEngine)
+    // We don't need to do this if the update phase is currently running
+    // in the background.
+    if (!isUpdateRunning() && myPrivate->myImagingEngine)
         myPrivate->myImagingEngine->SetRendererSetting(
             HusdHuskTokens->houdini_frame, VtValue(myFrame));
     // Clear our existing dependency information. We are restarting the render,
@@ -2912,7 +2920,10 @@ HUSD_Imaging::handleCopTextureChange(bool time_changed)
     // Render is no longer converged, call finishRender to start it up again.
     myConverged = false;
     myAOVsStashed = false;
-    finishRender(true);
+    // Restart the render (unless we are in an update phase, in which case
+    // it should be safe to assume that whatever code triggered the update
+    // will also trigger the render to start again.
+    checkRender(true);
     // Callback to force a redraw in the viewport, which is needed to keep the
     // viewport refreshing with updating data from the renderer.
     if (myCopTextureChangeCallback)
