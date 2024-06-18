@@ -1961,6 +1961,16 @@ BRAY_HdUtil::convertAttribute(const VtValue &val, const TfToken &token)
         return gtArrayFromScalar(val.UncheckedGet<TYPE>(), typeHint(token)); \
     /* end macro */
 
+#define HANDLE_CAST(TYPE, CAST_TYPE) \
+    case BRAY_UsdResolver<TYPE>::type: \
+	if (is_array) { \
+	    UT_ASSERT_P(val.IsHolding<VtArray<TYPE>>()); \
+	    return gtArray((VtArray<CAST_TYPE> &)val.UncheckedGet<VtArray<TYPE>>(), typeHint(token)); \
+	} \
+	UT_ASSERT_P(val.IsHolding<TYPE>()); \
+        return gtArrayFromScalar((CAST_TYPE)val.UncheckedGet<TYPE>(), typeHint(token)); \
+    /* end macro */
+
 #define HANDLE_TYPE2(TYPE, TYPE2) \
     case BRAY_UsdResolver<TYPE>::type: \
 	if (is_array) { \
@@ -1995,6 +2005,9 @@ BRAY_HdUtil::convertAttribute(const VtValue &val, const TfToken &token)
 	HANDLE_TYPE(int16)
 	HANDLE_TYPE(int32)
 	HANDLE_TYPE(int64)
+	HANDLE_CAST(uint16, int16)
+	HANDLE_CAST(uint32, int32)
+	HANDLE_CAST(uint64, int64)
 	HANDLE_TYPE(fpreal32)
 	HANDLE_TYPE(fpreal64)
 	HANDLE_TYPE2(fpreal16, pxr_half::half)

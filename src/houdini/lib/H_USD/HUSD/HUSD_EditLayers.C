@@ -66,8 +66,10 @@ HUSD_EditLayers::removeLayers(const UT_StringArray &filepaths) const
         else
         {
             auto paths = outdata->activeLayer()->GetSubLayerPaths();
-            SdfChangeBlock changeblock;
+            UT_IntArray remove_indexes;
 
+            // First loop collects the indexes of the sublayer paths that we
+            // want to remove.
             for (auto &&filepath : filepaths)
             {
                 if (filepath.isstring())
@@ -75,9 +77,16 @@ HUSD_EditLayers::removeLayers(const UT_StringArray &filepaths) const
                     int index = paths.Find(filepath.toStdString());
 
                     if (index >= 0)
-                        outdata->activeLayer()->RemoveSubLayerPath(index);
+                        remove_indexes.append(index);
                 }
             }
+
+            // Then inside a change block, run from the highest to lowest
+            // index values, removing the actual sublayer paths.
+            SdfChangeBlock changeblock;
+            remove_indexes.sortAscending();
+            for (int i = remove_indexes.size(); i --> 0; )
+                outdata->activeLayer()->RemoveSubLayerPath(remove_indexes[i]);
         }
 
 	return true;
