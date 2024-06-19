@@ -30,7 +30,7 @@
 #include "HUSD_LockedStage.h"
 #include "HUSD_LockedStageRegistry.h"
 #include "HUSD_PathSet.h"
-#include "HUSD_PropertyHandle.h" // for HUSD_PROPERTY_ISCONNECTION
+#include "HUSD_PropertyHandle.h" // for ISCONNECTION and VALUETYPE_RAMP
 #include "HUSD_TimeCode.h"
 #include "HUSD_UniversalLogUsdSource.h"
 #include "XUSD_AttributeUtils.h"
@@ -41,6 +41,7 @@
 #include <gusd/GU_PackedUSD.h>
 #include <gusd/stageCache.h>
 #include <OP/OP_Node.h>
+#include <PI/PI_EditScriptedParms.h>
 #include <IMG/IMG_File.h>
 #include <PRM/PRM_SpareData.h>
 #include <UT/UT_EnvControl.h>
@@ -847,6 +848,9 @@ HUSDgetPrimvarAttribName(const UT_StringRef &primvar_name)
 UT_StringHolder
 HUSDgetAttribTypeName(const PI_EditScriptedParm &parm)
 {
+    if( parm.getIsRampParm() )
+        return HUSD_PROPERTY_VALUETYPE_RAMP;
+   
     SdfValueTypeName sdftype = HUSDgetAttribSdfTypeName( parm );
     if( sdftype != SdfValueTypeName() )
 	return UT_StringHolder( sdftype.GetAsToken().GetString() );
