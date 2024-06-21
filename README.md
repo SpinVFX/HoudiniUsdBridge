@@ -139,6 +139,8 @@ Changes ordered from oldest to newest at initial release of Houdini 20.5:
   - **Not required**: Export UsdImagingDataSourceFieldAsset constructors so that external libraries can call the static New() method on these classes (which is inlined).
 - [60dab1a9a0441b32d1dff49355286c121aef3629](https://github.com/sideeffects/USD/commit/60dab1a9a0441b32d1dff49355286c121aef3629):
   - **Not required**: Guard against warning C4003 on Windows. Change made after 24.03 to fix issue https://github.com/PixarAnimationStudios/OpenUSD/issues/2624.
+- [94b251716d8fef2013239fb31a51c4ea11c92568](https://github.com/sideeffects/USD/commit/94b251716d8fef2013239fb31a51c4ea11c92568):
+  - **Not required**: Fix rendering of Capsule_1 prims with differing top and bottom radii. Unmerged PR https://github.com/PixarAnimationStudios/OpenUSD/pull/3129 submitted after the USD 24.03 release.
 
 ## Building Houdini libraries
 
