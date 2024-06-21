@@ -2557,6 +2557,14 @@ HUSD_Imaging::getAOVRasters(const UT_Vector2i &res,
                 0, 0, raster_other->getXres(), raster_other->getYres(),
                 cropx, cropy, sizex, sizey);
         }
+        else if (raster_other->getXres() != res.x() ||
+                 raster_other->getYres() != res.y())
+        {
+            image->scaledInsertFromRaster(
+                raster_other.get(), UT_FILTER_BOX,
+                0, 0, raster_other->getXres(), raster_other->getYres(),
+                0, 0, res.x(), res.y());
+        }
         else
             image->copy(*raster_other);
 
