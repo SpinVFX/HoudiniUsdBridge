@@ -798,7 +798,9 @@ BRAY_HdMesh::Sync(HdSceneDelegate *sceneDelegate,
                                 // compute normals upon first insert
                                 UT_UniquePtr<bray_HdMeshShareItem> item =
                                     UTmakeUnique<bray_HdMeshShareItem>();
-                                item->myPrim = computeNormals();
+                                UTisolate([&]() {
+                                    item->myPrim = computeNormals();
+                                });
                                 item->myCuspAngle = cuspangle;
                                 found->second = std::move(item);
                             }

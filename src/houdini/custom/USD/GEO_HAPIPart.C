@@ -139,7 +139,7 @@ GEO_HAPIPart::loadPartData(
     {
     case HAPI_PARTTYPE_MESH:
     {
-        myData.reset(new MeshData);
+        myData = UTmakeUnique<MeshData>();
         MeshData *mData = UTverify_cast<MeshData *>(myData.get());
         mData->numPoints = part.pointCount;
 
@@ -148,7 +148,7 @@ GEO_HAPIPart::loadPartData(
 
         if (numFaces > 0)
         {
-            GT_DANumeric<int> *faceCounts = new GT_DANumeric<int>(numFaces, 1);
+            auto faceCounts = UTmakeIntrusive<GT_DANumeric<int>>(numFaces, 1);
             mData->faceCounts = faceCounts;
 
             ENSURE_SUCCESS(
@@ -164,7 +164,7 @@ GEO_HAPIPart::loadPartData(
 
         if (numVertices > 0)
         {
-            GT_DANumeric<int> *vertices = new GT_DANumeric<int>(numVertices, 1);
+            auto vertices = UTmakeIntrusive<GT_DANumeric<int>>(numVertices, 1);
             mData->vertices = vertices;
 
             ENSURE_SUCCESS(
@@ -190,7 +190,7 @@ GEO_HAPIPart::loadPartData(
 
     case HAPI_PARTTYPE_CURVE:
     {
-        myData.reset(new CurveData);
+        myData = UTmakeUnique<CurveData>();
         CurveData *cData = UTverify_cast<CurveData *>(myData.get());
         HAPI_CurveInfo cInfo;
 
@@ -206,8 +206,7 @@ GEO_HAPIPart::loadPartData(
 
         if (numCurves > 0)
         {
-            GT_DANumeric<int> *curveCounts = new GT_DANumeric<int>(
-                    numCurves, 1);
+            auto curveCounts = UTmakeIntrusive<GT_DANumeric<int>>(numCurves, 1);
             cData->curveCounts = curveCounts;
 
             ENSURE_SUCCESS(
@@ -219,7 +218,7 @@ GEO_HAPIPart::loadPartData(
             // If the order varies between curves
             if (!cData->constantOrder)
             {
-                GT_DANumeric<int> *curveOrders = new GT_DANumeric<int>(
+                auto curveOrders = UTmakeIntrusive<GT_DANumeric<int>>(
                         numCurves, 1);
                 cData->curveOrders = curveOrders;
 
@@ -237,8 +236,7 @@ GEO_HAPIPart::loadPartData(
 
         if (numKnots > 0)
         {
-            GT_DANumeric<float> *curveKnots = new GT_DANumeric<float>(
-                    numKnots, 1);
+            auto curveKnots = UTmakeIntrusive<GT_DANumeric<float>>(numKnots, 1);
             cData->curveKnots = curveKnots;
 
             ENSURE_SUCCESS(
@@ -262,7 +260,7 @@ GEO_HAPIPart::loadPartData(
 
     case HAPI_PARTTYPE_VOLUME:
     {
-        myData.reset(new VolumeData);
+        myData = UTmakeUnique<VolumeData>();
         VolumeData *vData = UTverify_cast<VolumeData *>(myData.get());
         HAPI_VolumeInfo vInfo;
 
@@ -406,12 +404,12 @@ GEO_HAPIPart::loadPartData(
 
     case HAPI_PARTTYPE_INSTANCER:
     {
-        myData.reset(new InstanceData);
+        myData = UTmakeUnique<InstanceData>();
         InstanceData *iData = UTverify_cast<InstanceData *>(myData.get());
 
         // Get data for all parts to instance
         int partCount = part.instancedPartCount;
-        UT_UniquePtr<HAPI_PartId> instanceIds(new HAPI_PartId[partCount]);
+        auto instanceIds = UTmakeUnique<HAPI_PartId[]>(partCount);
         ENSURE_SUCCESS(
                 HAPI_GetInstancedPartIds(
                         &session, geo.nodeId, part.id, instanceIds.get(), 0,
@@ -425,8 +423,7 @@ GEO_HAPIPart::loadPartData(
         {
             ENSURE_SUCCESS(
                     HAPI_GetPartInfo(
-                            &session, geo.nodeId, instanceIds.get()[i],
-                            &partInfo),
+                            &session, geo.nodeId, instanceIds[i], &partInfo),
                     session);
 
             CHECK_RETURN(iData->instances[i].loadPartData(
@@ -434,8 +431,7 @@ GEO_HAPIPart::loadPartData(
         }
 
         int instanceCount = part.instanceCount;
-        UT_UniquePtr<HAPI_Transform> hapiXforms(
-                new HAPI_Transform[instanceCount]);
+        auto hapiXforms = UTmakeUnique<HAPI_Transform[]>(instanceCount);
         ENSURE_SUCCESS(
                 HAPI_GetInstancerPartTransforms(
                         &session, geo.nodeId, part.id, HAPI_RSTORDER_DEFAULT,
@@ -447,7 +443,7 @@ GEO_HAPIPart::loadPartData(
         for (int i = 0; i < instanceCount; i++)
         {
             GEOhapiConvertXform(
-                    hapiXforms.get()[i], iData->instanceTransforms[i]);
+                    hapiXforms[i], iData->instanceTransforms[i]);
         }
 
         break;
@@ -455,7 +451,7 @@ GEO_HAPIPart::loadPartData(
 
     case HAPI_PARTTYPE_SPHERE:
     {
-        myData.reset(new SphereData);
+        myData = UTmakeUnique<SphereData>();
         SphereData *sData = UTverify_cast<SphereData *>(myData.get());
         HAPI_SphereInfo sInfo;
 
@@ -484,19 +480,14 @@ GEO_HAPIPart::loadPartData(
     }
 
     if (!myData)
-    {
-        myData.reset(new PartData);
-    }
+        myData = UTmakeUnique<PartData>();
 
     // Find max array size so we only allocate once
     int greatestCount = *std::max_element(
             &part.attributeCounts[0],
             &part.attributeCounts[HAPI_ATTROWNER_MAX]);
 
-    UT_UniquePtr<HAPI_StringHandle> sHandleUnique(
-            new HAPI_StringHandle[greatestCount]);
-
-    HAPI_StringHandle *handles = sHandleUnique.get();
+    auto handles = UTmakeUnique<HAPI_StringHandle[]>(greatestCount);
     HAPI_AttributeInfo attrInfo;
 
     // Iterate through all owners to get all attributes
@@ -508,7 +499,7 @@ GEO_HAPIPart::loadPartData(
             ENSURE_SUCCESS(
                     HAPI_GetAttributeNames(
                             &session, geo.nodeId, part.id,
-                            owner, handles,
+                            owner, handles.get(),
                             part.attributeCounts[i]),
                     session);
 

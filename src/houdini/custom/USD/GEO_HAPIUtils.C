@@ -214,7 +214,7 @@ extractVoxels(const UT_VoxelArrayWriteHandleF &vox,
     const int tileLength = vInfo.tileSize;
 
     const exint tileBufSize = tileLength * tileLength * tileLength;
-    UT_UniquePtr<T> buf(new T[tileBufSize]);
+    auto buf = UTmakeUnique<T[]>(tileBufSize);
 
     // Get the first tile
     HAPI_VolumeTileInfo tile;
@@ -261,7 +261,7 @@ extractVoxels(const UT_VoxelArrayWriteHandleF &vox,
                     exint tileOffset = x + yTileOffset + zTileOffset;
 
                     vox->setValue(x + voxOffsetX, y + voxOffsetY,
-                                  z + voxOffsetZ, buf.get()[tileOffset]);
+                                  z + voxOffsetZ, buf[tileOffset]);
                 }
             }
         }
@@ -316,7 +316,7 @@ fillVectorGrid(GridType &grid,
     const exint tileLength = vInfo.tileSize;
     const exint tileBufSize = tileLength * tileLength * tileLength *
                               vInfo.tupleSize;
-    UT_UniquePtr<T> buf(new T[tileBufSize]);
+    auto buf = UTmakeUnique<T[]>(tileBufSize);
 
     // Access the voxels on the grid
     typename GridType::Accessor accessor = grid.getAccessor();
@@ -389,7 +389,7 @@ fillScalarGrid(GridType &grid,
 
     const exint tileLength = vInfo.tileSize;
     const exint tileBufSize = tileLength * tileLength * tileLength;
-    UT_UniquePtr<T> buf(new T[tileBufSize]);
+    auto buf = UTmakeUnique<T[]>(tileBufSize);
 
     // Access the voxels on the grid
     typename GridType::Accessor accessor = grid.getAccessor();
@@ -434,7 +434,7 @@ fillScalarGrid(GridType &grid,
                     // Get the index into the tile buffer
                     exint tileOffset = (x - tile.minX) + yOffset + zOffset;
 
-                    accessor.setValueOn(xyz, buf.get()[tileOffset]);
+                    accessor.setValueOn(xyz, buf[tileOffset]);
                 }
             }
         }
