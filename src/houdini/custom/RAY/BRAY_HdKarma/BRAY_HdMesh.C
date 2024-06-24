@@ -32,6 +32,7 @@
 #include <UT/UT_JSONWriter.h>
 #include <UT/UT_EnvControl.h>
 #include <UT/UT_ErrorLog.h>
+#include <UT/UT_ScopeExit.h>
 #include <UT/UT_SmallArray.h>
 #include <GT/GT_PrimPolygonMesh.h>
 #include <GT/GT_PrimSubdivisionMesh.h>
@@ -43,6 +44,8 @@ PXR_NAMESPACE_OPEN_SCOPE
 
 namespace
 {
+    static UT_ObjLock	 theDataSharingLock;
+
     static void
     mantraCuspAngle(const GT_AttributeListHandle &alist, fpreal &val)
     {
@@ -304,6 +307,26 @@ BRAY_HdMesh::Sync(HdSceneDelegate *sceneDelegate,
 	HdInterpolationVertex
     };
 
+    SdfPath		 datashareid;
+    const char		*datashareid_key = nullptr;
+    int                  datashareid_lid;
+    if (UT_EnvControl::getInt(ENV_KARMA_PROTOTYPE_DATA_SHARING))
+    {
+        datashareid = sceneDelegate->GetDataSharingId(id);
+        if (!datashareid.IsEmpty())
+            datashareid_key = datashareid.GetText();
+    }
+
+    if (datashareid_key)
+    {
+        // Only let one thread process this mesh if it's shared between
+        // multiple instancers.
+        datashareid_lid = theDataSharingLock.lock(datashareid_key);
+    }
+    UT_SCOPE_EXIT {
+        if (datashareid_key)
+            theDataSharingLock.unlock(datashareid_key, datashareid_lid);
+    };
     auto &&top = HdMeshTopology(GetMeshTopology(sceneDelegate), refineLvl);
 
     if (props_changed)
@@ -552,6 +575,14 @@ BRAY_HdMesh::Sync(HdSceneDelegate *sceneDelegate,
 	BRAY_HdUtil::xformBlur(sceneDelegate, rparm, id, myXform, props);
     }
 
+    if (datashareid_key)
+    {
+        // After we've pulled all the data from the USD prim, unlock shared
+        // meshes.  This allows threaded processing of the shared instance data.
+        theDataSharingLock.unlock(datashareid_key, datashareid_lid);
+        datashareid_key = nullptr;
+    }
+
     if (!myMesh || event)
     {
         UT_IntrusivePtr<GT_PrimPolygonMesh> prim;
@@ -781,9 +812,6 @@ BRAY_HdMesh::Sync(HdSceneDelegate *sceneDelegate,
                     };
 
                     bool docomputenormal = true;
-                    SdfPath datashareid;
-                    if (UT_EnvControl::getInt(ENV_KARMA_PROTOTYPE_DATA_SHARING))
-                        datashareid = sceneDelegate->GetDataSharingId(id);
                     if (!datashareid.IsEmpty())
                     {
                         // Try to reuse computed normals between shared meshes
