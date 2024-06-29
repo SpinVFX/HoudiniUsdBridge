@@ -242,6 +242,7 @@ public:
                           int mat_id,
                           HUSD_HydraPrim::RenderTag tag,
                           bool lefthanded, bool auto_nml);
+            void removePrimGroup(HUSD_Scene &scene);
             void invalidate();
 
             UT_Array<UT_BoundingBoxF>    myBBox;
@@ -642,6 +643,21 @@ husd_ConsolidatedPrims::RenderTagBucket::PrimGroup::selectChange(int prim_id)
     }
 }
 
+void
+husd_ConsolidatedPrims::RenderTagBucket::
+PrimGroup::removePrimGroup(HUSD_Scene &scene)
+{
+    if(myPrimGroup)
+        scene.removeDisplayGeometry(myPrimGroup.get());
+    myPrimGroup = nullptr;
+    mySelectionInfo = nullptr;
+    myEmptySlots.entries(0);
+    myPolyMerger.clearAllMeshes();
+    myBBox.entries(0);
+    myInstanceBBox.entries(0);
+    myIBBoxList.entries(0);
+    myActiveFlag = false;
+}
 
 void
 husd_ConsolidatedPrims::RenderTagBucket::PrimGroup::process(
@@ -692,6 +708,11 @@ husd_ConsolidatedPrims::RenderTagBucket::PrimGroup::process(
                      GT_Names::consolidated_selection, mySelectionInfo.get());
         
         GT_PrimitiveHandle mesh = myPolyMerger.result(details);
+        if(!mesh)
+        {
+            removePrimGroup(scene);
+            return;
+        }
         mesh->setPrimitiveTransform(GT_TransformHandle());
 
         //mesh->dumpAttributeLists("consolidated", false);
@@ -767,17 +788,8 @@ husd_ConsolidatedPrims::RenderTagBucket::PrimGroup::process(
         }
     }
     else if(myActiveFlag)
-    {
-        scene.removeDisplayGeometry(myPrimGroup.get());
-        myPrimGroup = nullptr;
-        mySelectionInfo = nullptr;
-        myEmptySlots.entries(0);
-        myPolyMerger.clearAllMeshes();
-        myBBox.entries(0);
-        myInstanceBBox.entries(0);
-        myIBBoxList.entries(0);
-        myActiveFlag = false;
-    }
+        removePrimGroup(scene);
+    
     myDirtyBits = 0;
 }
 
