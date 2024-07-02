@@ -97,6 +97,8 @@ namespace
     }
 }
 
+#define MAX_XPU_GEO_MOTIONSEGS  8       // This may change in the future
+
 BRAY_HdParam::BRAY_HdParam(BRAY::ScenePtr &scene,
 	BRAY::RendererPtr &renderer,
 	HdRenderThread &thread,
@@ -114,6 +116,7 @@ BRAY_HdParam::BRAY_HdParam(BRAY::ScenePtr &scene,
     , myDisableMotionBlur(false)
     , myDisableDepthOfField(false)
     , myStatsUpdateTime(120)
+    , myMaxDeformSegments(scene.isKarmaXPU() ? MAX_XPU_GEO_MOTIONSEGS : SYS_INT32_MAX)
 {
     setFPS(24);
 }

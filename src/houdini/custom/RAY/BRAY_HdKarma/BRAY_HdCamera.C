@@ -389,7 +389,8 @@ BRAY_HdCameraProps::init(HdSceneDelegate *sd,
                     const BRAY::OptionSet &oprops)
 {
     bool    autoseg = BRAY_HdUtil::autoSegment(rparm, oprops);
-    int     nsegs = BRAY_HdUtil::xformSamples(rparm, oprops, autoseg);
+    int     allowedsegs = rparm.maxDeformSegments();
+    int     nsegs = SYSmin(allowedsegs, BRAY_HdUtil::xformSamples(rparm, oprops, autoseg));
 
     UT_StackBuffer<float>       times(nsegs);
 
@@ -403,26 +404,26 @@ BRAY_HdCameraProps::init(HdSceneDelegate *sd,
     // since this codepath is also used for HdCoordSys, we may need
     // consistency.
     BRAY_HdUtil::dformBlur<STYLE>(sd, myHAperture, id,
-            UsdGeomTokens->horizontalAperture, times, nsegs, autoseg);
+            UsdGeomTokens->horizontalAperture, times, nsegs, allowedsegs, autoseg);
     BRAY_HdUtil::dformBlur<STYLE>(sd, myVAperture, id,
-            UsdGeomTokens->verticalAperture, times, nsegs, autoseg);
+            UsdGeomTokens->verticalAperture, times, nsegs, allowedsegs, autoseg);
     BRAY_HdUtil::dformBlur<STYLE>(sd, myHOffset, id,
-            UsdGeomTokens->horizontalApertureOffset, times, nsegs, autoseg);
+            UsdGeomTokens->horizontalApertureOffset, times, nsegs, allowedsegs, autoseg);
     BRAY_HdUtil::dformBlur<STYLE>(sd, myVOffset, id,
-            UsdGeomTokens->verticalApertureOffset, times, nsegs, autoseg);
+            UsdGeomTokens->verticalApertureOffset, times, nsegs, allowedsegs, autoseg);
     BRAY_HdUtil::dformBlur<STYLE>(sd, myFocal, id,
-            UsdGeomTokens->focalLength, times, nsegs, autoseg);
+            UsdGeomTokens->focalLength, times, nsegs, allowedsegs, autoseg);
     BRAY_HdUtil::dformBlur<STYLE>(sd, myFocusDistance, id,
-            UsdGeomTokens->focusDistance, times, nsegs, autoseg);
+            UsdGeomTokens->focusDistance, times, nsegs, allowedsegs, autoseg);
     BRAY_HdUtil::dformBlur<STYLE>(sd, myFStop, id,
-            UsdGeomTokens->fStop, times, nsegs, autoseg);
+            UsdGeomTokens->fStop, times, nsegs, allowedsegs, autoseg);
     BRAY_HdUtil::dformBlur<STYLE>(sd, myScreenWindow, id,
             BRAY_HdUtil::cameraToken(BRAY_CAMERA_WINDOW),
-            times, nsegs, autoseg);
+            times, nsegs, allowedsegs, autoseg);
     BRAY_HdUtil::dformBlur<STYLE>(sd, myExposure, id,
-            UsdGeomTokens->exposure, times, nsegs, autoseg);
+            UsdGeomTokens->exposure, times, nsegs, allowedsegs, autoseg);
     BRAY_HdUtil::dformBlur<STYLE>(sd, myTint, id,
-            BRAY_HdUtil::cameraToken(BRAY_CAMERA_TINT), times, nsegs, autoseg);
+            BRAY_HdUtil::cameraToken(BRAY_CAMERA_TINT), times, nsegs, allowedsegs, autoseg);
 
 
     // When evaluating HdCoordSys, it seems that all parameters aren't always

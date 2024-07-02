@@ -1115,8 +1115,8 @@ namespace
 		    // (i.e. times[base] < times[i], times[base+1] >= times[i])
 		    while (base < nutimes-2 && utimes[base+1] < times[i])
 			base++;
-		    lerp(result[i], samples+base,
-			    times[i], utimes[base], utimes[base+1]);
+                    lerp(result[i], samples+base,
+                            times[i], utimes[base], utimes[base+1]);
 		}
 		break;
 	}
@@ -2232,58 +2232,6 @@ BRAY_HdUtil::accelName()
     return theAccelName.asHolder();
 }
 
-#if 0
-GT_AttributeListHandle
-BRAY_HdUtil::makeProperties(HdSceneDelegate &sd,
-	const BRAY_HdParam &rparm,
-	const SdfPath &id,
-	const HdInterpolation *interp,
-	int ninterp)
-{
-    int			nattribs = 0;
-    for (int ii = 0; ii < ninterp; ++ii)
-    {
-	const auto &descs = sd.GetPrimvarDescriptors(id, interp[ii]);
-	nattribs += descs.size();
-    }
-    if (!nattribs)
-	return GT_AttributeListHandle();
-
-    UT_Array<GT_DataArrayHandle>	attribs(nattribs);
-    GT_AttributeMapHandle		map = UTmakeIntrusive<GT_AttributeMap>();
-    float				tm;
-    rparm.fillShutterTimes(&tm, 1);
-
-    for (int ii = 0; ii < ninterp; ++ii)
-    {
-	const auto	&descs = sd.GetPrimvarDescriptors(id, interp[ii]);
-	for (exint i = 0, n = descs.size(); i < n; ++i)
-	{
-	    const char	*name = getPrimvarProperty(descs[i].name.GetText());
-	    if (!name)
-		continue;
-	    auto prop = BRAYproperty(name, BRAY_OBJECT_PROPERTY);
-	    if (prop.first != BRAY_OBJECT_PROPERTY)
-		continue;
-	    UT_SmallArray<GT_DataArrayHandle>	data;
-	    if (!dformBlur(&sd, data, id, descs[i].name, &tm, 1))
-		continue;
-
-	    map->add(descs[i].name.GetText(), true);
-	    attribs.append(data[0]);
-	}
-    }
-    GT_AttributeListHandle	alist;
-    if (map->entries())
-    {
-	alist = UTmakeIntrusive<GT_AttributeList>(map, 1));
-	for (int i = 0, n = map->entries(); i < n; ++i)
-	    alist->set(i, attribs[i]);
-    }
-    return alist;
-}
-#endif
-
 namespace
 {
     static bool
@@ -2587,9 +2535,10 @@ BRAY_HdUtil::makeVaryingAttributes(HdSceneDelegate *sd,
     int	 vblur = *props.ival(BRAY_OBJ_GEO_VELBLUR);
 
     // if velocity blur is enabled, we disable deformation blur
+    int allowedsegs = rparm.maxDeformSegments();
     if (mblur && !vblur)
     {
-	nsegs = *props.ival(BRAY_OBJ_GEO_SAMPLES);
+	nsegs = SYSmin(allowedsegs, *props.ival(BRAY_OBJ_GEO_SAMPLES));
         autoseg = *props.bval(BRAY_OBJ_SAMPLE_FROM_STAGE);
     }
 
@@ -2670,8 +2619,8 @@ BRAY_HdUtil::makeVaryingAttributes(HdSceneDelegate *sd,
                     continue;
                 }
 
-                if (!dformBlurArray(sd, data, id,
-                            descs[i].name, tm.array(), nsegs, autoseg))
+                if (!dformBlurArray(sd, data, id, descs[i].name, tm.array(),
+                            nsegs, allowedsegs, autoseg))
                 {
                     UT_ErrorLog::format(8, "{}/{} invalid array",
                             id, descs[i].name);
@@ -2681,7 +2630,7 @@ BRAY_HdUtil::makeVaryingAttributes(HdSceneDelegate *sd,
             else
             {
                 if (!dformBlur(sd, data, id, descs[i].name, tm.array(),
-                            nsegs, autoseg))
+                            nsegs, allowedsegs, autoseg))
                 {
                     UT_ErrorLog::format(8, "{}/{} invalid primvar",
                             id, descs[i].name);
@@ -2732,6 +2681,9 @@ BRAY_HdUtil::makeVaryingAttributes(HdSceneDelegate *sd,
 	const auto	&cdescs = sd->GetExtComputationPrimvarDescriptors(id, interp[ii]);
         braySampledValueStore values = braySampleComputedPrimvars(
                 cdescs, sd, nsegs);
+        // When we compute segments, we should have already clamped nsegs to
+        // the allowed segments for the given engine.
+        UT_ASSERT(nsegs <= allowedsegs);
 
         for (auto &&v : values)
 	{
@@ -3012,9 +2964,10 @@ BRAY_HdUtil::updateAttributes(HdSceneDelegate* sd,
     // get all the primvars that are dirty.
     // NOTE: output will have the 'same' number of segments if
     // a dirty attribute is found
+    int         allowedsegs = rparm.maxDeformSegments();
     int         nsegs = 1;
     if (mblur && !vblur)
-        nsegs = src->getSegments();
+        nsegs = SYSmin(allowedsegs, src->getSegments());
 
     UT_StackBuffer<float>                       tm(nsegs);
     UT_StackBuffer<braySampledValueStore>       vstore(ninterp);
@@ -3055,6 +3008,10 @@ BRAY_HdUtil::updateAttributes(HdSceneDelegate* sd,
                 auto    &&cit = vstore[ii].find(token);
                 if (cit != vstore[ii].end())
                 {
+                    // When we compute segments, we should have already clamped nsegs to
+                    // the allowed segments for the given engine.
+                    UT_ASSERT(nsegs <= allowedsegs);
+
                     // Auto-segment is off since we get the segments from the
                     // source array.
                     dformBlurComputed(data, id, token, cit->second,
@@ -3066,7 +3023,8 @@ BRAY_HdUtil::updateAttributes(HdSceneDelegate* sd,
             if (data.isEmpty())
             {
                 // Sample the primvar
-                dformBlur(sd, data, id, token, tm.array(), nsegs, autoseg);
+                dformBlur(sd, data, id, token, tm.array(),
+                        nsegs, allowedsegs, autoseg);
             }
 
             // Apparently, Hydra will tell us the primvar is dirty even if
@@ -3459,6 +3417,7 @@ BRAY_HdUtil::dformBlur(HdSceneDelegate *sd,
 	const TfToken &name,
 	const float *times,
         int nsegs,
+        int allowedsegs,
         bool autoseg)
 {
     values.clear();
@@ -3468,13 +3427,31 @@ BRAY_HdUtil::dformBlur(HdSceneDelegate *sd,
     if (!usdsegs)
 	return false;
     UT_ASSERT(usdsegs <= samples.size());
+    UT_ASSERT(nsegs <= allowedsegs);
     UT_StackBuffer<GT_DataArrayHandle>	gvalues(usdsegs);
+    UT_UniquePtr<float []>              resample_times;
     for (int i = 0; i < usdsegs; ++i)
     {
 	gvalues[i] = convertAttribute(id, samples.values()[i],
                                       samples.indices()[i], name);
 	if (!gvalues[i])
 	    return false;
+    }
+    if (usdsegs > allowedsegs && autoseg)
+    {
+        // This should only happen if we're pulling samples from the stage.
+        // The caller should have limited nsegs before calling.
+        UT_ErrorLog::format(5, "Clamping {} primvar '{}' segments from {} to {}",
+                id, name, usdsegs, allowedsegs);
+        UT_ASSERT(allowedsegs > 1);
+        autoseg = false;
+        float   t0 = times[0];
+        float   t1 = times[nsegs-1];
+        resample_times = UTmakeUnique<float[]>(allowedsegs);
+        for (int i = 0; i < allowedsegs; ++i)
+            resample_times[i] = SYSlerp(t0, t1, float(i)/float(allowedsegs-1));
+        nsegs = allowedsegs;    // Use the maximum allowed segments
+        times = resample_times.get();
     }
     if (autoseg)
     {
@@ -3561,6 +3538,7 @@ BRAY_HdUtil::dformBlurArray(HdSceneDelegate *sd,
 	const TfToken &lengths_name,
 	const float *times,
         int nsegs,
+        int allowedsegs,
         bool autoseg)
 {
     values.clear();
@@ -3572,11 +3550,13 @@ BRAY_HdUtil::dformBlurArray(HdSceneDelegate *sd,
     name.strcpy(lengths_name.GetString());
     name.backup(theLengthsSuffix.length());
 
-    dformBlur<STYLE>(sd, data, id, TfToken(name.buffer()), times, nsegs, autoseg);
+    dformBlur<STYLE>(sd, data, id, TfToken(name.buffer()), times,
+            nsegs, allowedsegs, autoseg);
     if (data.size() == 0)
         return false;
 
-    dformBlur<STYLE>(sd, lens, id, lengths_name, times, nsegs, autoseg);
+    dformBlur<STYLE>(sd, lens, id, lengths_name, times,
+            nsegs, allowedsegs, autoseg);
     if (lens.size() == 0)
         return false;
 
@@ -3704,6 +3684,7 @@ BRAY_HdUtil::dformBlur(HdSceneDelegate *sd,
 	const TfToken &name,
 	const float *times,
         int nsegs,
+        int allowedsegs,
         bool autoseg)
 {
     values.clear();
@@ -4223,13 +4204,13 @@ BRAY_HdUtil::dump(const SdfPath &id,
 #define INSTANTIATE_EVAL_STYLE(STYLE) \
     template bool BRAY_HdUtil::dformBlur<STYLE>(HdSceneDelegate *, \
 	UT_Array<GT_DataArrayHandle> &, const SdfPath &, const TfToken &, \
-	const float *, int, bool ); \
+	const float *, int, int, bool ); \
     template bool BRAY_HdUtil::dformBlurArray<STYLE>(HdSceneDelegate *, \
 	UT_Array<GT_DataArrayHandle> &, const SdfPath &, const TfToken &, \
-	const float *, int, bool ); \
+	const float *, int, int, bool ); \
     template bool BRAY_HdUtil::dformBlur<STYLE>(HdSceneDelegate *, \
 	UT_Array<VtValue> &, const SdfPath &, const TfToken &, \
-	const float *, int, bool); \
+	const float *, int, int, bool); \
     template VtValue BRAY_HdUtil::evalVt<STYLE>(HdSceneDelegate *, \
 	const SdfPath &, const TfToken &); \
     /* end of macro */

@@ -388,7 +388,7 @@ namespace
             if (!special.contains(t.token()))
             {
                 if (BRAY_HdUtil::dformLight(sd, values, id, t.token(),
-                            &time, 1, false))
+                            &time, 1, 1, false))
                 {
                     BRAY_HdUtil::appendVexArg(args, t.alias(), values[0]);
                 }

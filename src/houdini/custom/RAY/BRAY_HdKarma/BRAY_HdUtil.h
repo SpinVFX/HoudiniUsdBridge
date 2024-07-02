@@ -464,34 +464,46 @@ public:
 				UT_Array<GT_DataArrayHandle> &values,
 				const SdfPath &id,
 				const TfToken &name,
-				const float *times, int nsegs, bool autoseg);
+				const float *times,
+                                int nsegs,
+                                int allowedsegs,
+                                bool autoseg);
 
     static inline bool	dformCamera(HdSceneDelegate *sd,
 				UT_Array<GT_DataArrayHandle> &values,
 				const SdfPath &id,
 				const TfToken &name,
-				const float *times, int nsegs, bool autoseg)
+				const float *times,
+                                int nsegs,
+                                int allowedsegs,
+                                bool autoseg)
     {
 	return dformBlur<EVAL_CAMERA_PARM>(sd, values, id, name,
-                times, nsegs, autoseg);
+                times, nsegs, allowedsegs, autoseg);
     }
     static inline bool	dformLight(HdSceneDelegate *sd,
 				UT_Array<GT_DataArrayHandle> &values,
 				const SdfPath &id,
 				const TfToken &name,
-				const float *times, int nsegs, bool autoseg)
+				const float *times,
+                                int nsegs,
+                                int allowedsegs,
+                                bool autoseg)
     {
 	return dformBlur<EVAL_LIGHT_PARM>(sd, values, id, name,
-                times, nsegs, autoseg);
+                times, nsegs, allowedsegs, autoseg);
     }
     static inline bool	dformLight(HdSceneDelegate *sd,
 				UT_Array<VtValue> &values,
 				const SdfPath &id,
 				const TfToken &name,
-				const float *times, int nsegs, bool autoseg)
+				const float *times,
+                                int nsegs,
+                                int allowedsegs,
+                                bool autoseg)
     {
 	return dformBlur<EVAL_LIGHT_PARM>(sd, values, id, name,
-                times, nsegs, autoseg);
+                times, nsegs, allowedsegs, autoseg);
     }
 
     /// Compute an array of VtValue scalar values for motion blur.
@@ -505,15 +517,21 @@ public:
 				UT_Array<VtValue> &values,
 				const SdfPath &id,
 				const TfToken &name,
-				const float *times, int nsegs, bool autoseg);
+				const float *times,
+                                int nsegs,
+                                int allowedsegs,
+                                bool autoseg);
     static inline bool	dformCamera(HdSceneDelegate *sd,
 				UT_Array<VtValue> &values,
 				const SdfPath &id,
 				const TfToken &name,
-				const float *times, int nsegs, bool autoseg)
+				const float *times,
+                                int nsegs,
+                                int allowedsegs,
+                                bool autoseg)
     {
 	return dformBlur<EVAL_CAMERA_PARM>(sd, values, id, name,
-                times, nsegs, autoseg);
+                times, nsegs, allowedsegs, autoseg);
     }
 
     /// Convert the Pxr subdivision tags into an array of GT subdivision tags
@@ -587,7 +605,10 @@ private:
 				UT_Array<GT_DataArrayHandle> &values,
 				const SdfPath &id,
 				const TfToken &lengths,
-				const float *times, int nsegs, bool autoseg);
+				const float *times,
+                                int nsegs,
+                                int allowedsegs,
+                                bool autoseg);
 
     /// Compute an array of primvar values for motion blur, from a computed
     /// primvar.

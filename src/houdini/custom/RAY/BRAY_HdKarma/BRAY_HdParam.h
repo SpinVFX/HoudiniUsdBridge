@@ -105,6 +105,9 @@ public:
     void	dump() const;
     void	dump(UT_JSONWriter &w) const;
 
+    /// Check the maximum deformation motion blur segments supported
+    int         maxDeformSegments() const { return myMaxDeformSegments; }
+
     /// Check if there's any shutter
     bool	validShutter() const
     {
@@ -235,6 +238,7 @@ private:
     float                        myShutter[2];
     float                        myFPS;
     float                        myIFPS;
+    int                          myMaxDeformSegments;
     ConformPolicy                myConformPolicy;
     bool                         myDisableMotionBlur;
     bool                         myDisableDepthOfField;
