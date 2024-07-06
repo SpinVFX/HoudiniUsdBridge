@@ -434,7 +434,10 @@ namespace
 	changed = false;
 
 	if (!UTisstring(ofile))
-	    return theDefaultImage.asHolder();
+        {
+            // User has explicitly set the product name to an empty file
+            return UT_StringHolder::theEmptyString;
+        }
 
 	UT_StringHolder expanded = HUSD_FileExpanded::expand(ofile,
 					ctx.startFrame(),
@@ -1261,6 +1264,7 @@ XUSD_RenderProduct::expandProduct(const XUSD_RenderSettingsContext &ctx,
 	bool		 expanded;
 	myFilename = expandFile(ctx, override, frame, pname, expanded);
 	if (ctx.frameCount() > 1
+                && myFilename
 		&& !expanded
 		&& !isFramebuffer(myFilename)
                 && !isHuskNullRaster(myFilename))
@@ -1592,7 +1596,7 @@ XUSD_RenderSettings::resolveProducts(const UsdStageRefPtr &usd,
             if (src_prod < 0 && prod.vars().size())
                 src_prod = i;
         }
-        if (!has_raster)
+        if (!has_raster && src_prod >= 0)
         {
             // Create dummy render product
             UT_ErrorLog::format(1, "Adding dummy raster product");

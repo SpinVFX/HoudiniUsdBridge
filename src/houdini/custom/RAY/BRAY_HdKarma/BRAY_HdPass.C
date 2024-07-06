@@ -170,8 +170,8 @@ BRAY_HdPass::BRAY_HdPass(HdRenderIndex *index,
     , myLastVersion(-1)
     , myResolution(-1, -1)
     , myDataWindow(0, 0, 1, 1)
-    , myValidAOVs(true)
     , myDisableDepthOfField(false)
+    , myPrepareFailed(false)
 {
 }
 
@@ -184,11 +184,9 @@ bool
 BRAY_HdPass::IsConverged() const
 {
     // If there's an error, say we're converged so the render loop quits
-    if (myRenderer.isError())
+    if (myRenderer.isError() || myPrepareFailed)
         return true;
 
-    if (!myAOVBindings.size())
-	return !myValidAOVs;
     for (auto &&b : myAOVBindings)
     {
 	if (b.renderBuffer && !b.renderBuffer->IsConverged())
@@ -372,7 +370,6 @@ BRAY_HdPass::_Execute(const HdRenderPassStateSharedPtr &renderPassState,
 	// they are cleared initially on this thread.
 	stopRendering();
 	needStart = true;
-	myValidAOVs = true;
 	myFullAOVBindings = attachments;
 	myAOVBindings = attachments;
 
@@ -482,6 +479,7 @@ BRAY_HdPass::_Execute(const HdRenderPassStateSharedPtr &renderPassState,
 	myLastVersion = mySceneVersion.load();
         if (myRenderer.prepareRender())
         {
+            myPrepareFailed = false;
             myRenderParam.clearRenderStats();
             if (myScene.optionB(BRAY_OPT_HD_FOREGROUND))
                 myRenderer.render();
@@ -490,10 +488,15 @@ BRAY_HdPass::_Execute(const HdRenderPassStateSharedPtr &renderPassState,
         }
         else
         {
-            UT_ASSERT(0
-                    && "How did prepare fail?"
-                    && "Was the aperture 0?");
-            UT_ASSERT(myRenderer.isError());
+            myPrepareFailed = true;
+            if (!myColorBuffer)
+            {
+                // If we created our own AOV, then this can happen
+                UT_ASSERT(0
+                        && "How did prepare fail?"
+                        && "Was the aperture 0?");
+                UT_ASSERT(myRenderer.isError());
+            }
         }
     }
     else if (myRenderer.isPaused())

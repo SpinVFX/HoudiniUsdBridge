@@ -108,8 +108,8 @@ private:
     int					 myLastVersion;
     BRAY_RayVisibility			 myCameraMask;
     BRAY_RayVisibility			 myShadowMask;
-    bool				 myValidAOVs;
     bool				 myDisableDepthOfField;
+    bool                                 myPrepareFailed;
 };
 
 PXR_NAMESPACE_CLOSE_SCOPE
