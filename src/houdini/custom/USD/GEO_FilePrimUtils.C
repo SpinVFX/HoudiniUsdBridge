@@ -81,6 +81,7 @@ using namespace UT::Literal;
 PXR_NAMESPACE_OPEN_SCOPE
 
 static constexpr UT_StringLit theBoundsName("bounds");
+static constexpr UT_StringLit theSkelAnimName("skelanimation");
 static constexpr UT_StringLit theVisibilityName("visibility");
 static constexpr UT_StringLit theVolumeSavePathName("usdvolumesavepath");
 
@@ -2620,7 +2621,10 @@ GEOinitXformOver(GEO_FilePrim &fileprim, const GT_PrimitiveHandle &gtprim,
 
 /// Define a SkelAnimation prim from the agent's pose.
 static void
-initSkelAnimationPrim(GEO_FilePrim &fileprim, const GT_PrimSkelAnimation &anim)
+initSkelAnimationPrim(
+        GEO_FilePrim &fileprim,
+        const GT_PrimSkelAnimation &anim,
+        const GEO_ImportOptions &options)
 {
     // Get the joint paths / joint order from the skeleton prim to avoid
     // recomputing them.
@@ -2632,6 +2636,9 @@ initSkelAnimationPrim(GEO_FilePrim &fileprim, const GT_PrimSkelAnimation &anim)
         new GEO_FilePropConstantSource<VtTokenArray>(skel->getJointPaths()));
     prop->setValueIsDefault(true);
     prop->setValueIsUniform(true);
+
+    const bool static_anim
+            = theSkelAnimName.asRef().multiMatch(options.myStaticAttribs);
 
     // Build transform arrays.
     const GU_Agent &agent = anim.getAgent();
@@ -2646,15 +2653,20 @@ initSkelAnimationPrim(GEO_FilePrim &fileprim, const GT_PrimSkelAnimation &anim)
         VtVec3hArray scales;
         GEOdecomposeTransforms(xforms, translates, rotates, scales);
 
-        fileprim.addProperty(
+        prop = fileprim.addProperty(
             UsdSkelTokens->translations, SdfValueTypeNames->Float3Array,
             new GEO_FilePropConstantSource<VtVec3fArray>(translates));
-        fileprim.addProperty(
+        prop->setValueIsDefault(static_anim);
+
+        prop = fileprim.addProperty(
             UsdSkelTokens->rotations, SdfValueTypeNames->QuatfArray,
             new GEO_FilePropConstantSource<VtQuatfArray>(rotates));
-        fileprim.addProperty(
+        prop->setValueIsDefault(static_anim);
+
+        prop = fileprim.addProperty(
             UsdSkelTokens->scales, SdfValueTypeNames->Half3Array,
             new GEO_FilePropConstantSource<VtVec3hArray>(scales));
+        prop->setValueIsDefault(static_anim);
     }
 
     // Translate the agent's channel values into blendShapes /
@@ -2669,16 +2681,17 @@ initSkelAnimationPrim(GEO_FilePrim &fileprim, const GT_PrimSkelAnimation &anim)
         for (exint i = 0, n = rig.channelCount(); i < n; ++i)
             channel_names.push_back(TfToken(rig.channelName(i)));
 
-        GEO_FileProp *prop = fileprim.addProperty(
+        prop = fileprim.addProperty(
             UsdSkelTokens->blendShapes, SdfValueTypeNames->TokenArray,
             new GEO_FilePropConstantSource<VtTokenArray>(channel_names));
         prop->setValueIsDefault(true);
         prop->setValueIsUniform(true);
 
         VtFloatArray weights(channel_values->begin(), channel_values->end());
-        fileprim.addProperty(
+        prop = fileprim.addProperty(
             UsdSkelTokens->blendShapeWeights, SdfValueTypeNames->FloatArray,
             new GEO_FilePropConstantSource<VtFloatArray>(weights));
+        prop->setValueIsDefault(static_anim);
     }
 }
 
@@ -4669,7 +4682,7 @@ GEOinitGTPrim(GEO_FilePrim &fileprim,
     {
         auto anim = UTverify_cast<const GT_PrimSkelAnimation *>(gtprim.get());
         fileprim.setTypeName(GEO_FilePrimTypeTokens->SkelAnimation);
-        initSkelAnimationPrim(fileprim, *anim);
+        initSkelAnimationPrim(fileprim, *anim, options);
     }
     else if (gtprim->getPrimitiveType() ==
              GT_PrimPointInstancer::getStaticPrimitiveType())
