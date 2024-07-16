@@ -846,12 +846,12 @@ BRAY_HdLight::Sync(HdSceneDelegate *sd,
 		lprops = myLight.lightProperties();
 		lprops.set(BRAY_LIGHT_SHADOW_TRACESET, tok.GetText());
 	    }
+            else
+            {
+                lprops.set(BRAY_LIGHT_SHADOW_TRACESET,
+                    UT_StringHolder::theEmptyString);
+            }
 	}
-        else
-        {
-            lprops.set(BRAY_LIGHT_SHADOW_TRACESET,
-                UT_StringHolder::theEmptyString);
-        }
 
 	need_lock = true;
     }
