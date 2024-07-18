@@ -15,11 +15,13 @@
 */
 
 #include "HUSD_Skeleton.h"
+
 #include "HUSD_ErrorScope.h"
 #include "HUSD_FindPrims.h"
 #include "HUSD_Info.h"
-#include "HUSD_PathSet.h"
+#include "HUSD_LockedStage.h"
 #include "HUSD_Path.h"
+#include "HUSD_PathSet.h"
 #include "HUSD_TimeCode.h"
 #include "XUSD_Data.h"
 #include "XUSD_Utils.h"
@@ -37,11 +39,12 @@
 #include <GU/GU_MotionClipUtil.h>
 #include <GU/GU_PackedGeometry.h>
 #include <GU/GU_PrimPacked.h>
-#include <gusd/USD_Utils.h>
 #include <gusd/GU_USD.h>
+#include <gusd/USD_Utils.h>
 #include <gusd/UT_Gf.h>
 #include <gusd/agentUtils.h>
 #include <gusd/purpose.h>
+#include <gusd/stageCache.h>
 #include <pxr/usd/usd/prim.h>
 #include <pxr/usd/usdSkel/bindingAPI.h>
 #include <pxr/usd/usdSkel/blendShapeQuery.h>
@@ -58,6 +61,9 @@ PXR_NAMESPACE_USING_DIRECTIVE
 
 struct HUSD_SkeletonCache::Impl
 {
+    Impl(const UsdStageRefPtr &stage) : myStage(stage) {}
+
+    UsdStageRefPtr myStage;
     UsdSkelCache mySkelCache;
     std::vector<UsdSkelBinding> myBindings;
 };
@@ -72,10 +78,31 @@ HUSD_SkeletonCache::reset()
     myImpl.reset();
 }
 
-void
-HUSD_SkeletonCache::init()
+bool
+HUSD_SkeletonCache::init(
+            HUSD_AutoReadLock &readlock,
+            const HUSD_LockedStagePtr &locked_stage)
 {
-    myImpl = UTmakeUnique<Impl>();
+    UsdStageRefPtr stage;
+
+    // If the data handle is from a lop we require a locked stage, since
+    // the cache's stage persists across cooks.
+    if (locked_stage)
+    {
+        GusdStageCacheReader cache_reader;
+        stage = cache_reader.Find(locked_stage->getStageCacheIdentifier());
+    }
+    else if (readlock.isStageValid())
+        stage = readlock.data()->stage();
+
+    if (!stage)
+    {
+        HUSD_ErrorScope::addError(HUSD_ERR_STRING, "Invalid stage.");
+        return false;
+    }
+
+    myImpl = UTmakeUnique<Impl>(stage);
+    return true;
 }
 
 static GT_RefineParms
@@ -93,21 +120,15 @@ husdShapeRefineParms()
 }
 
 static bool
-husdFindSkelBindings(HUSD_AutoReadLock &readlock,
-                     const UT_StringRef &skelrootpath,
-                     UsdSkelCache &skelcache,
-                     std::vector<UsdSkelBinding> &bindings)
+husdFindSkelBindings(
+        const UsdStageRefPtr &stage,
+        HUSD_AutoReadLock &readlock,
+        const UT_StringRef &skelrootpath,
+        UsdSkelCache &skelcache,
+        std::vector<UsdSkelBinding> &bindings)
 {
-    XUSD_ConstDataPtr data(readlock.data());
-
-    if (!data || !data->isStageValid())
-    {
-        HUSD_ErrorScope::addError(HUSD_ERR_STRING, "Invalid stage.");
-        return false;
-    }
-
     SdfPath sdfpath = HUSDgetSdfPath(skelrootpath);
-    UsdPrim prim(data->stage()->GetPrimAtPath(sdfpath));
+    UsdPrim prim(stage->GetPrimAtPath(sdfpath));
     if (!prim)
     {
         HUSD_ErrorScope::addError(HUSD_ERR_CANT_FIND_PRIM,
@@ -149,7 +170,7 @@ husdFindSkelBindings(HUSD_AutoReadLock &readlock,
 
         for (auto &&skelpath : findprims.getExpandedPathSet())
         {
-            UsdPrim prim(data->stage()->GetPrimAtPath(skelpath.sdfPath()));
+            UsdPrim prim(stage->GetPrimAtPath(skelpath.sdfPath()));
             UT_ASSERT(prim);
 
             UsdSkelSkeleton skel(prim);
@@ -168,6 +189,23 @@ husdFindSkelBindings(HUSD_AutoReadLock &readlock,
     }
 
     return true;
+}
+
+static bool
+husdFindSkelBindings(HUSD_AutoReadLock &readlock,
+                     const UT_StringRef &skelrootpath,
+                     UsdSkelCache &skelcache,
+                     std::vector<UsdSkelBinding> &bindings)
+{
+    if (!readlock.isStageValid())
+    {
+        HUSD_ErrorScope::addError(HUSD_ERR_STRING, "Invalid stage.");
+        return false;
+    }
+
+    return husdFindSkelBindings(
+            readlock.data()->stage(), readlock, skelrootpath, skelcache,
+            bindings);
 }
 
 UT_StringHolder
@@ -376,15 +414,19 @@ HUSDimportSkeleton(
         GU_Detail &gdp,
         HUSD_SkeletonCache &opaque_cache,
         HUSD_AutoReadLock &readlock,
+        const HUSD_LockedStagePtr &locked_stage,
         const UT_StringRef &skelrootpath,
         HUSD_SkeletonPoseType pose_type)
 {
-    opaque_cache.init();
+    if (!opaque_cache.init(readlock, locked_stage))
+        return false;
+
     auto &&cache = opaque_cache.impl();
 
     /// Cache the skeleton bindings for use in HUSDimportSkeletonPose().
     if (!husdFindSkelBindings(
-                readlock, skelrootpath, cache.mySkelCache, cache.myBindings))
+                cache.myStage, readlock, skelrootpath, cache.mySkelCache,
+                cache.myBindings))
     {
         return false;
     }
@@ -534,7 +576,6 @@ bool
 HUSDimportSkeletonPose(
         GU_Detail &gdp,
         const HUSD_SkeletonCache &opaque_cache,
-        HUSD_AutoReadLock &readlock,
         HUSD_SkeletonPoseType pose_type,
         fpreal timecode_val)
 {

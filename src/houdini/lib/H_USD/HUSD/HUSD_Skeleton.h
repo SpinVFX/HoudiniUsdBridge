@@ -19,9 +19,12 @@
 
 #include "HUSD_API.h"
 
+#include "HUSD_DataHandle.h"
+
 #include <GU/GU_AgentClip.h>
 #include <GU/GU_AgentRig.h>
 #include <SYS/SYS_Types.h>
+#include <UT/UT_NonCopyable.h>
 #include <UT/UT_UniquePtr.h>
 
 class GU_AgentClip;
@@ -60,13 +63,17 @@ public:
     HUSD_SkeletonCache();
     ~HUSD_SkeletonCache();
 
+    UT_NON_COPYABLE(HUSD_SkeletonCache);
+
     bool isValid() const { return bool(myImpl); }
 
     /// Clear the cached data.
     void reset();
 
-    /// Allocate empty cached data, replacing any existing data.
-    void init();
+    /// Allocate empty cached data for the stage, replacing any existing data.
+    bool init(
+            HUSD_AutoReadLock &readlock,
+            const HUSD_LockedStagePtr &locked_stage);
 
     /// @{
     /// Access the cached data.
@@ -85,10 +92,12 @@ private:
 /// type is only used in this method to initialize attributes that aren't
 /// time-varying.
 /// The HUSD_SkeletonCache is initialized for use with HUSDimportSkeletonPose().
+/// The locked stage is required if the data handle is from a LOP node.
 HUSD_API bool HUSDimportSkeleton(
         GU_Detail &gdp,
         HUSD_SkeletonCache &cache,
         HUSD_AutoReadLock &readlock,
+        const HUSD_LockedStagePtr &locked_stage,
         const UT_StringRef &skelrootpath,
         HUSD_SkeletonPoseType pose_type);
 
@@ -97,7 +106,6 @@ HUSD_API bool HUSDimportSkeleton(
 HUSD_API bool HUSDimportSkeletonPose(
         GU_Detail &gdp,
         const HUSD_SkeletonCache &cache,
-        HUSD_AutoReadLock &readlock,
         HUSD_SkeletonPoseType pose_type,
         fpreal timecode);
 
