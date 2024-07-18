@@ -33,6 +33,7 @@
 #include <gusd/UT_Gf.h>
 #include <pxr/pxr.h>
 #include <pxr/usd/sdf/layer.h>
+#include <pxr/usd/sdf/listOp.h>
 #include <pxr/usd/sdf/attributeSpec.h>
 #include <pxr/usd/sdf/primSpec.h>
 #include <pxr/usd/sdf/reference.h>
@@ -42,6 +43,7 @@
 #include <pxr/usd/usdGeom/imageable.h>
 #include <pxr/usd/usdGeom/modelAPI.h>
 #include <pxr/usd/usdGeom/tokens.h>
+#include <pxr/usd/usd/tokens.h>
 #include <pxr/usd/usd/stage.h>
 
 PXR_NAMESPACE_USING_DIRECTIVE
@@ -159,6 +161,7 @@ HUSD_MirrorRootLayer::createViewportCamera(
 
     if (primspec)
     {
+        SdfChangeBlock changeblock;
         VtTokenArray xformops( { TfToken("xformOp:transform") } );
         SdfPath xformpath = SdfPath::ReflexiveRelativePath().
             AppendProperty(xformops[0]);
@@ -192,10 +195,21 @@ HUSD_MirrorRootLayer::createViewportCamera(
                 // We don't want to copy attributes from light primitives.
                 if (refcameraprim && refcameraprim.IsA<UsdGeomCamera>())
                 {
+                    // Clear any properties from the free camera that do not
+                    // exist on the reference camera.
+                    for (auto &&prop : primspec->GetProperties())
+                        if (!refcameraprim.HasProperty(prop->GetNameToken()))
+                            primspec->RemoveProperty(prop);
+
+                    TfTokenVector apis = refcameraprim.GetAppliedSchemas();
+
                     // We have an actual USD camera primitive to copy from.
                     // Grab all its property values (including the exact prim
-                    // type) and copy them to the free camera primitive.
+                    // type and any API schemas) and copy them to the free
+                    // camera primitive.
                     primspec->SetTypeName(refcameraprim.GetTypeName());
+                    primspec->SetField(UsdTokens->apiSchemas,
+                        VtValue(SdfTokenListOp::CreateExplicit(apis)));
                     for (auto &&attr : refcameraprim.GetAttributes())
                     {
                         if (theSkipAttributes.find(attr.GetName()) !=
