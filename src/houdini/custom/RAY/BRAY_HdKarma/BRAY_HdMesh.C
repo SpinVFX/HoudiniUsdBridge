@@ -776,26 +776,33 @@ BRAY_HdMesh::Sync(HdSceneDelegate *sceneDelegate,
                                 const GT_AttributeListHandle attrlist =
                                     vertexnormals ? newmesh->getVertex() :
                                     newmesh->getShared();
-                                const GT_DataArrayHandle oldnmls =
-                                    attrlist->get(GA_Names::N);
-
-                                UT_ASSERT(oldnmls &&
-                                    oldnmls->getTupleSize() == 3);
-                                auto nmls = UTmakeIntrusive<GT_Real32Array>(
-                                        oldnmls->entries(), 3, GT_TYPE_NORMAL);
-
-                                // flip
-                                for (exint i = 0; i < oldnmls->entries(); ++i)
+                                int nseg = attrlist->getSegments();
+                                UT_StackBuffer<GT_DataArrayHandle> all(nseg);
+                                for (int seg = 0; seg < nseg; ++seg)
                                 {
-                                    UT_Vector3 n;
-                                    oldnmls->import(i, n.data());
-                                    n *= -1.0f;
-                                    nmls->setTuple(n.data(), i);
+                                    const GT_DataArrayHandle oldnmls =
+                                        attrlist->get(GA_Names::N, seg);
+
+                                    UT_ASSERT(oldnmls &&
+                                        oldnmls->getTupleSize() == 3);
+                                    auto nmls = UTmakeIntrusive<GT_Real32Array>(
+                                        oldnmls->entries(), 3, GT_TYPE_NORMAL);
+                                    all[seg] = nmls;
+
+                                    // flip
+                                    for (exint i = 0; i < oldnmls->entries();
+                                        ++i)
+                                    {
+                                        UT_Vector3 n;
+                                        oldnmls->import(i, n.data());
+                                        n *= -1.0f;
+                                        nmls->setTuple(n.data(), i);
+                                    }
                                 }
 
                                 GT_AttributeListHandle newattrlist =
-                                    attrlist->addAttribute(GA_Names::N, nmls,
-                                    true);
+                                    attrlist->addAttribute(GA_Names::N, all,
+                                    nseg, true);
                                 newmesh = UTmakeIntrusive<GT_PrimPolygonMesh>(
                                         counts,
                                         vlist,

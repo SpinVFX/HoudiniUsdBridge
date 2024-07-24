@@ -76,16 +76,18 @@ public:
 	     HUSD_Scene();
     virtual ~HUSD_Scene();
 
-    UT_Map<HUSD_Path, HUSD_HydraGeoPrimPtr> &geometry()
-                                            { return myDisplayGeometry; }
-    UT_Map<HUSD_Path, HUSD_HydraCameraPtr> &cameras()
-                                            { return myCameras; }
-    UT_Map<HUSD_Path, HUSD_HydraLightPtr> &lights()
-                                            { return myLights; }
-    UT_Map<HUSD_Path, HUSD_HydraMaterialPtr> &materials()
-                                            { return myMaterials; }
-    UT_Map<HUSD_Path, HUSD_HydraFieldPtr> &fields()
-                                            { return myFields; }
+    const UT_Map<HUSD_Path, HUSD_HydraGeoPrimPtr> &displayGeometry() const
+                            { return myDisplayGeometry; }
+    const UT_Map<HUSD_Path, HUSD_HydraGeoPrimPtr> &geometry() const
+                            { return myGeometry; }
+    const UT_Map<HUSD_Path, HUSD_HydraCameraPtr> &cameras() const
+                            { return myCameras; }
+    const UT_Map<HUSD_Path, HUSD_HydraLightPtr> &lights() const
+                            { return myLights; }
+    const UT_Map<HUSD_Path, HUSD_HydraMaterialPtr> &materials() const
+                            { return myMaterials; }
+    const UT_Map<HUSD_Path, HUSD_HydraFieldPtr> &fields() const
+                            { return myFields; }
 
     // all of these return true if the list was modified, false if the serial
     // matched;
