@@ -71,6 +71,7 @@
 #include <UT/UT_WorkArgs.h>
 #include <UT/UT_WorkBuffer.h>
 #include <SYS/SYS_ParseNumber.h>
+#include <tools/henv.h>
 #include <iostream>
 
 using namespace UT::Literal;
@@ -1596,7 +1597,8 @@ void
 HUSD_Scene::pendingRemovalGeom(const HUSD_Path &path,
                                HUSD_HydraGeoPrimPtr prim)
 {
-    UT_ASSERT(myPendingRemovalGeom.find(path) == myPendingRemovalGeom.end());
+    UT_ASSERT(myPendingRemovalGeom.find(path) ==
+              myPendingRemovalGeom.end());
     myPendingRemovalGeom[path] = prim;
     prim->setPendingDelete(true);
 }
@@ -1634,6 +1636,23 @@ HUSD_Scene::fetchPendingRemovalGeom(const HUSD_Path &path,
 void
 HUSD_Scene::clearPendingRemovalPrims()
 {
+    static int theDebugSceneLevel = HoudiniGetenv("HOUDINI_DEBUG_HUSD_SCENE")
+        ? atoi(HoudiniGetenv("HOUDINI_DEBUG_HUSD_SCENE")) : 0;
+
+    // Early exit if we know this function isn't going to do anything.
+    if (myPendingRemovalGeom.empty() &&
+        myPendingRemovalCamera.empty() &&
+        myPendingRemovalLight.empty() &&
+        myPendingRemovalInstancer.empty() &&
+        myDuplicateGeo.isEmpty() &&
+        myDuplicateCam.isEmpty() &&
+        myDuplicateLight.isEmpty())
+    {
+        if (theDebugSceneLevel > 3)
+            std::cout << "Nothing to do for prim map cleanup." << std::endl;
+        return;
+    }
+
     for(auto gprim : myPendingRemovalGeom)
     	removeGeometry(gprim.second.get());
     myPendingRemovalGeom.clear();
@@ -1649,16 +1668,40 @@ HUSD_Scene::clearPendingRemovalPrims()
     for(auto inst : myPendingRemovalInstancer)
         delete inst.second;
     myPendingRemovalInstancer.clear();
-    
+
+    for(auto gprim : myDuplicateGeo)
+        removeHydraPrim(gprim.get());
     myDuplicateGeo.clear();
+    for(auto cam : myDuplicateCam)
+        removeHydraPrim(cam.get());
     myDuplicateCam.clear();
+    for(auto light : myDuplicateLight)
+        removeHydraPrim(light.get());
     myDuplicateLight.clear();
+
+    if (theDebugSceneLevel > 0)
+    {
+        UT_ASSERT(myIdToPrimMap.size() ==
+            myGeometry.size() + myLights.size() + myCameras.size());
+        if (theDebugSceneLevel > 1)
+            std::cout << "Testing rprims in scene..." << std::endl;
+        for (auto &&it : myIdToPrimMap)
+        {
+            dynamic_cast<XUSD_HydraGeoPrim *>(it.second);
+            if (theDebugSceneLevel > 2)
+                std::cout << "    " << it.second->path().pathStr() << std::endl;
+        }
+        if (theDebugSceneLevel > 1)
+            std::cout << "Finished testing rprims." << std::endl;
+    }
 }
-    
+
 void
 HUSD_Scene::pendingRemovalCamera(const HUSD_Path &path,
                                  HUSD_HydraCameraPtr prim)
 {
+    UT_ASSERT(myPendingRemovalCamera.find(path) ==
+              myPendingRemovalCamera.end());
     myPendingRemovalCamera[path] = prim;
     prim->setPendingDelete(true);
 }
@@ -1681,6 +1724,8 @@ void
 HUSD_Scene::pendingRemovalLight(const HUSD_Path &path,
                                 HUSD_HydraLightPtr prim)
 {
+    UT_ASSERT(myPendingRemovalLight.find(path) ==
+              myPendingRemovalLight.end());
     myPendingRemovalLight[path] = prim;
     prim->setPendingDelete(true);
 }
@@ -1716,9 +1761,10 @@ void
 HUSD_Scene::pendingRemovalInstancer(const HUSD_Path &path,
                                     XUSD_HydraInstancer *inst)
 {
+    UT_ASSERT(myPendingRemovalInstancer.find(path) ==
+              myPendingRemovalInstancer.end());
     myPendingRemovalInstancer[path] = inst;
 }
-
 
 bool
 HUSD_Scene::isCamera(const UT_StringRef &path) const
