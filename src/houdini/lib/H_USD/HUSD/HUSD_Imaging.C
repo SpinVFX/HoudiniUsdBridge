@@ -1779,7 +1779,7 @@ HUSD_Imaging::updateDeferredPrims()
     shown[HUSD_HydraPrim::TagGuide]   = myPrivate->myRenderParams.myShowGuides;
     shown[HUSD_HydraPrim::TagInvisible] = false;
 
-    for( auto it : myScene->geometry())
+    for( auto it : myScene->displayGeometry())
     {
 	if(it.second->deferredBits()!= 0)
 	{
