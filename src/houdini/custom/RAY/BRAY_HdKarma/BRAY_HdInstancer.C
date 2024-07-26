@@ -221,7 +221,9 @@ namespace
     // Split an attribute list into shader attributes and properties.  Property
     // names will be encoded and prefixed with "karma:object:"
     void
-    splitAttributes(const GT_AttributeListHandle &source,
+    splitAttributes(const SdfPath &id, const SdfPath &proto_id,
+            const GT_AttributeListHandle &source,
+            size_t nxforms,
             GT_AttributeListHandle &attribs,
             GT_AttributeListHandle &properties)
     {
@@ -235,7 +237,12 @@ namespace
         {
             const UT_StringHolder       &sname = source->getName(i);
             UT_StringHolder              dname = UT_VarEncode::decodeVar(sname);
-            if (dname.startsWith(thePrefix))
+            if (source->get(i)->entries() != nxforms)
+            {
+                UT_ErrorLog::warning("{}/{} primvar {} size is {} (not {})",
+                        id, proto_id, dname, source->get(i)->entries(), nxforms);
+            }
+            else if (dname.startsWith(thePrefix))
             {
                 snames.append(sname);
                 if (!pmap)
@@ -265,7 +272,9 @@ namespace
     }
 
     void
-    getLightAttributes(const GT_AttributeListHandle &source,
+    getLightAttributes(const SdfPath &id, const SdfPath &proto_id,
+            const GT_AttributeListHandle &source,
+            size_t nxforms,
 	    GT_AttributeListHandle &attribs)
     {
 	if (!source)
@@ -276,9 +285,14 @@ namespace
 	UT_SmallArray<int>             pidx;
 	for (int i = 0, n = source->entries(); i < n; ++i)
 	{
-	    const UT_StringHolder     &sname = source->getName(i);
-	    UT_StringHolder            dname = UT_VarEncode::decodeVar(sname);
-	    if (dname.startsWith(thePrefix))
+	    const UT_StringHolder	&sname = source->getName(i);
+	    UT_StringHolder		 dname = UT_VarEncode::decodeVar(sname);
+            if (source->get(i)->entries() != nxforms)
+            {
+                UT_ErrorLog::warning("{}/{} primvar {} size is {} (not {})",
+                        id, proto_id, dname, source->get(i)->entries(), nxforms);
+            }
+            else if (dname.startsWith(thePrefix))
 	    {
 		snames.append(sname);
 		if (!pmap)
@@ -875,7 +889,7 @@ BRAY_HdInstancer::syncPrimvars(HdSceneDelegate* delegate,
                         rparm,
                         GetId(),
                         HdInstancerTokens->instancer,
-                        -1,
+                        1,
                         propstmp,
                         HdInterpolationConstant,
                         &transformTokens(),
@@ -1002,8 +1016,9 @@ BRAY_HdInstancer::NestedInstances(BRAY_HdParam &rparm,
 	inst->setInstanceTransforms(scene, xforms);
 
 	GT_AttributeListHandle attribs;
-	getLightAttributes(attributesForPrototype(prototypeId), attribs);
-	inst->setInstanceProperties(scene, attribs); 
+	getLightAttributes(GetId(), prototypeId,
+                attributesForPrototype(prototypeId), xforms.size(), attribs);
+	inst->setInstanceProperties(scene, attribs);
 
 	if (protoLight)
 	    inst->addPrototype(scene, *protoLight);
@@ -1039,7 +1054,9 @@ BRAY_HdInstancer::NestedInstances(BRAY_HdParam &rparm,
 	// Update information
 	inst->setInstanceTransforms(scene, xforms);
 	GT_AttributeListHandle      attribs, properties;
-	splitAttributes(attributesForPrototype(prototypeId), attribs, properties);
+	splitAttributes(GetId(), prototypeId,
+                attributesForPrototype(prototypeId), xforms.size(),
+                attribs, properties);
 	inst->setInstanceAttributes(scene, attribs);
 
 	// Update per-xform light linking
