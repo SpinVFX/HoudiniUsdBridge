@@ -728,26 +728,34 @@ BRAY_HdLight::Sync(HdSceneDelegate *sd,
                 lprops.set(BRAY_LIGHT_DISTANT_ANGLE, fval);
         }
 
-	// The order of evaluation is *very* important.  For spherical lights,
-	// we need to evaluate @c radius *after* the width/height, but for tube
-	// lights, we need to evaluate length *after* radius.
         fpreal32        width, height, fval;
-	if (!BRAY_HdUtil::evalLightToken(width, sd, id, HdLightTokens->width))
+	if (!BRAY_HdUtil::evalLightToken(width, sd, id, HdLightTokens->width) &&
+	    (ltype == BRAY_LIGHT_RECT))
+	{
 	    width = 1;
-	if (!BRAY_HdUtil::evalLightToken(height, sd, id, HdLightTokens->height))
+	}
+	if (!BRAY_HdUtil::evalLightToken(height, sd, id, HdLightTokens->height) &&
+	    (ltype == BRAY_LIGHT_RECT))
+	{
 	    height = 1;
+	}
 	if (BRAY_HdUtil::evalLightToken(fval, sd, id, HdLightTokens->radius))
 	{
-	    // Set both width and height to radius
-	    width = height = fval;
+	    if ((ltype == BRAY_LIGHT_DISK) || (ltype == BRAY_LIGHT_SPHERE))
+	        width = fval;
+	    else if (ltype == BRAY_LIGHT_CYLINDER)
+	        height = fval;
 	}
-	if (BRAY_HdUtil::evalLightToken(fval, sd, id, HdLightTokens->length))
+	if (BRAY_HdUtil::evalLightToken(fval, sd, id, HdLightTokens->length) &&
+	    ((ltype == BRAY_LIGHT_LINE) || (ltype == BRAY_LIGHT_CYLINDER)))
 	{
 	    width = fval;
 	}
 	{
 	    float	res[2];
+            // width  of rect, radius of disk & sphere or length of cylinder
 	    res[0] = width;
+            // height of rect or radius of cylinder (BRAY_Light::mySize usage)
 	    res[1] = height;
 	    lprops.set(BRAY_LIGHT_AREA_SIZE, res, 2);
 	}
