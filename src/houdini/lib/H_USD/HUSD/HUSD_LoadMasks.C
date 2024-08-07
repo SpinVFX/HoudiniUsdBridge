@@ -56,11 +56,27 @@ HUSD_LoadMasks::~HUSD_LoadMasks()
 bool
 HUSD_LoadMasks::operator==(const HUSD_LoadMasks&other) const
 {
-    if ((!myPopulateAll || !other.myPopulateAll) &&
+    // If one loadmask says "populate all" and the other doesn't, the masks
+    // can't be equal because no "myPopulatePaths" value can be equivalent to
+    // "populate all".
+    if (myPopulateAll != other.myPopulateAll)
+        return false;
+
+    // If neither are going to populate all paths, check if the set of paths
+    // to populate are the same. Otherwise both are populating all, which is
+    // a match.
+    if (!myPopulateAll && !other.myPopulateAll &&
 	myPopulatePaths != other.myPopulatePaths)
 	return false;
 
-    if ((!myLoadAll || !other.myLoadAll) &&
+    // If one loadmask says "load all" and the other doesn't, the masks can't
+    // be equal because no "myLoadPaths" value can be equivalent to "load all".
+    if (myLoadAll != other.myLoadAll)
+        return false;
+
+    // If neither are going to load all paths, check if the set of paths to
+    // load are the same. Otherwise both are loading all, which is a match.
+    if (!myLoadAll && !other.myLoadAll &&
 	myLoadPaths != other.myLoadPaths)
 	return false;
 
