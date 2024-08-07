@@ -316,11 +316,12 @@ namespace
         }
     }
 
+    /// Rotation matrix taking `w` in degrees
     GfMatrix4d
-    rotationMatrix(GfVec3f w)
+    rotationMatrixDeg(GfVec3f w)
     {
         static constexpr double EPS = 1e-12;
-        double   theta = w.Normalize();
+        double   theta = SYSdegToRad(w.Normalize());
         if (theta <= EPS)
             return GfMatrix4d(1);
         double  st, ct;
@@ -379,7 +380,7 @@ namespace
                     GfVec3d     p = xformList[seg][i].ExtractTranslation();
                     xform *= xlate.SetTranslateOnly(vel);
                     xform *= xlate.SetTranslateOnly(-p);
-                    xform *= rotationMatrix((*angularVelocities)[idx] * tm);
+                    xform *= rotationMatrixDeg((*angularVelocities)[idx] * tm);
                     xform *= xlate.SetTranslateOnly(p);
                 }
                 else
