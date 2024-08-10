@@ -26,9 +26,11 @@
 #define __HUSD_MirrorRootLayer_h__
 
 #include "HUSD_API.h"
+#include <UT/UT_FloatArray.h>
 #include <UT/UT_Matrix4.h>
 #include <UT/UT_StringHolder.h>
 #include <UT/UT_UniquePtr.h>
+#include <UT/UT_ValArray.h>
 #include <pxr/pxr.h>
 
 class UT_JSONWriter;
@@ -77,6 +79,14 @@ public:
         bool                     myDoCamEffects = true;
         bool                     mySetCropParms = false;
         bool                     myPreserveDepthOfField = false;
+
+        // We only need to add time sampled transforms if we
+        // are looking through a camera with a render region.
+        // Eventually it would be good for this to go away if the
+        // render region gets implemented as a data window instead
+        // of using the free camera.
+        UT_Array<UT_DMatrix4>    myXformSamples;
+        UT_FloatArray            myXformSampleTimes;
 
         void            dump() const;
         void            dump(UT_JSONWriter &w) const;

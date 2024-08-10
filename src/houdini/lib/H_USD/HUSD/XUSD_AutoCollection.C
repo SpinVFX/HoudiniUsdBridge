@@ -2715,6 +2715,8 @@ public:
             exint interval = getValueFromArg("interval", 2);
             bool keepoutsiderange = false;
 
+            // Make sure the interval value is valid.
+            interval = (interval > 0) ? interval : 1;
             auto keepoutsiderangeit = namedargs.find("keepoutsiderange");
             if (keepoutsiderangeit != namedargs.end())
                 keepoutsiderange = parseBool(keepoutsiderangeit->second);

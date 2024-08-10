@@ -31,6 +31,7 @@
 #include <UT/UT_ArrayStringSet.h>
 #include <UT/UT_StringMap.h>
 #include <UT/UT_UniquePtr.h>
+#include <UT/UT_VectorTypes.h>
 
 class husd_InfoPrivate;
 class HUSD_TimeCode;
@@ -315,7 +316,10 @@ public:
                                 HUSD_TimeSampling *time_sampling=nullptr) const;
     bool		 getXformOrder(const UT_StringRef &primpath,
 				UT_StringArray &xform_order) const;
-    bool		 isXformReset(const UT_StringRef &primpath ) const;
+    bool		 isXformReset(const UT_StringRef &primpath) const;
+    bool		 getXformTimeSamples(const UT_StringRef &primpath,
+                                const UT_Vector2F &interval,
+                                UT_Array<HUSD_TimeCode> &timecodes) const;
 
     UT_StringHolder	 findXformName(const UT_StringRef &primpath,
 				const UT_StringRef &xform_name_suffix) const;
