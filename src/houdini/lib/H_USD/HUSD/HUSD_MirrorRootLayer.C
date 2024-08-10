@@ -93,6 +93,19 @@ HUSD_MirrorRootLayer::CameraParms::dump(UT_JSONWriter &w) const
     w.jsonBeginMap();
     w.jsonKeyToken("xform");
     w.jsonUniformArray(16, myXform.data());
+    if (!myXformSamples.isEmpty())
+    {
+        w.jsonBeginArray();
+        for (int i = 0; i < myXformSamples.size(); i++)
+        {
+            w.jsonBeginMap();
+            w.jsonKeyValue("time", myXformSampleTimes[i]);
+            w.jsonKeyToken("xform");
+            w.jsonUniformArray(16, myXformSamples[i].data());
+            w.jsonEndMap();
+        }
+        w.jsonEndArray();
+    }
     w.jsonKeyValue("myFocalLength", myFocalLength);
     w.jsonKeyValue("myHAperture", myHAperture);
     w.jsonKeyValue("myHApertureOffset", myHApertureOffset);
@@ -351,8 +364,24 @@ HUSD_MirrorRootLayer::createViewportCamera(
                 SdfVariabilityVarying);
         if (attrspec)
         {
+            // Set the xform default value.
             attrspec->SetDefaultValue(
                 VtValue(GusdUT_Gf::Cast(camparms.myXform)));
+
+            // If we have time samples, set them on the free camera as time
+            // samples. Otherwise clear the time samples map.
+            if (!camparms.myXformSamples.isEmpty())
+            {
+                SdfTimeSampleMap timesamples;
+                for (int i = 0; i < camparms.myXformSamples.size(); i++)
+                    timesamples.emplace(camparms.myXformSampleTimes[i],
+                        GusdUT_Gf::Cast(camparms.myXformSamples[i]));
+                attrspec->SetField(SdfFieldKeys->TimeSamples, timesamples);
+            }
+            else
+                attrspec->ClearField(SdfFieldKeys->TimeSamples);
+
+            // Set the xformOpOrder to use the xform matrix set above.
             if (!(attrspec = primspec->GetAttributeAtPath(xformorderpath)))
                 attrspec = SdfAttributeSpec::New(primspec,
                     UsdGeomTokens->xformOpOrder,

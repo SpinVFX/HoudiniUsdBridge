@@ -54,6 +54,7 @@
 #include <UT/UT_Options.h>
 #include <UT/UT_StdUtil.h>
 #include <UT/UT_ThreadSpecificValue.h>
+#include <UT/UT_Vector2.h>
 #include <SYS/SYS_Hash.h>
 #include <pxr/usd/usdRender/settings.h>
 #include <pxr/usd/usdGeom/bboxCache.h>
@@ -2206,6 +2207,37 @@ HUSD_Info::isXformReset(const UT_StringRef &primpath ) const
 	return false;
 
     return xformable.GetResetXformStack();
+}
+
+bool
+HUSD_Info::getXformTimeSamples(const UT_StringRef &primpath,
+        const UT_Vector2F &interval,
+        UT_Array<HUSD_TimeCode> &timecodes) const
+{
+    auto prim(husdGetPrimAtPath(myAnyLock, primpath));
+    if (!UsdGeomXformable(prim))
+        return false;
+
+    std::set<double> times;
+    while (prim && !prim.GetPath().IsAbsoluteRootPath())
+    {
+        UsdGeomXformable xformable(prim);
+        if (xformable)
+        {
+            std::vector<double> primtimes;
+            GfInterval gfinterval(interval.x(), interval.y());
+            if (xformable.GetTimeSamplesInInterval(gfinterval, &primtimes))
+            {
+                for (auto t : primtimes)
+                    times.emplace(t);
+            }
+        }
+        prim = prim.GetParent();
+    }
+    for (auto t : times)
+        timecodes.append(HUSD_TimeCode(t));
+
+    return true;
 }
 
 UT_BoundingBoxD
