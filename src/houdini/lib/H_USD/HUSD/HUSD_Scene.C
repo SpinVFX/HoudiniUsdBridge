@@ -499,15 +499,20 @@ husd_ConsolidatedPrims::processBuckets(bool finalize)
     if(dirty_buckets.entries() > 0)
     {
 #if 1
-        HUSD_Scene *scene = &myScene;
-        UTparallelFor(UT_BlockedRange<exint>(0, dirty_buckets.entries()),
-              [scene,dirty_buckets,finalize](const UT_BlockedRange<exint> &r)
-        {
-            for(exint i=r.begin(); i!=r.end(); i++)
-                dirty_buckets(i)->process(*scene, finalize);
-        }, 0, 1);
+        // We own myLock, so we need to isolate this thread so we don't steal
+        // tasks that might be doing Sync calls, which will also try to
+        // acquire myLock.
+        UTisolate([&] {
+            HUSD_Scene *scene = &myScene;
+            UTparallelFor(UT_BlockedRange<exint>(0, dirty_buckets.entries()),
+                  [scene,dirty_buckets,finalize](const UT_BlockedRange<exint> &r)
+            {
+                for (exint i = r.begin(); i != r.end(); i++)
+                    dirty_buckets(i)->process(*scene, finalize);
+            }, 0, 1);
+        });
 #else
-        for(exint i=0; i<dirty_buckets.entries(); i++)
+        for (exint i = 0; i < dirty_buckets.entries(); i++)
             dirty_buckets(i)->process(myScene, finalize);
 #endif
     }
@@ -591,32 +596,66 @@ husd_ConsolidatedPrims::RenderTagBucket::process(HUSD_Scene &scene,
     //UTdebugPrint("#dirty", dirty_groups.entries());
     if(dirty_groups.entries() > 0)
     {
+        // We are part of a task spawned in processBuckets, which owns the
+        // myLock mutex. We need to isolate this thread so that we don't
+        // steal a sync task when we start our parallel loop below. Otherwise
+        // we may steal a Sync task, which will try to lock myLock, which
+        // is owned by the processBuckets thread, and so we will deadlock.
+        UTisolate([&] {
 #if 1
-        HUSD_Scene *pscene = &scene;
-        int matid = myMatID;
-        HUSD_HydraPrim::RenderTag tag = myRenderTag;
-        bool left_handed = myLeftHanded;
-        bool auto_nml = myAutoNormal;
-        //UTdebugPrint("   parallel", dirty_groups.entries());
-        UTparallelForEachNumber(dirty_groups.entries(),
-                                [pscene,dirty_groups,matid,tag,left_handed,auto_nml]
-                                (const UT_BlockedRange<exint> &r)
-        {
-            //UTdebugPrint("Range", r.begin(), r.end()-1);
-            for(exint i=r.begin(); i!=r.end(); i++)
+            HUSD_Scene *pscene = &scene;
+            int matid = myMatID;
+            HUSD_HydraPrim::RenderTag tag = myRenderTag;
+            bool left_handed = myLeftHanded;
+            bool auto_nml = myAutoNormal;
+
+            //UTdebugPrint("   parallel", dirty_groups.entries());
+            UTparallelForEachNumber(dirty_groups.entries(),
+                [pscene,dirty_groups,matid,tag,left_handed,auto_nml]
+                (const UT_BlockedRange<exint> &r)
             {
-                dirty_groups(i)->process(*pscene,matid,tag,left_handed,auto_nml);
-                dirty_groups(i)->myComplete = true;
-            }
-        });
+                // We are now potentially on another thread. Again, we need
+                // to isolate this thread so that UTparallelFor loops inside
+                // husd_ConsolidatedPrims::RenderTagBucket::PrimGroup::process
+                // don't steal tasks that might be doing Sync calls which will
+                // try to acquire myLock.
+                UTisolate([&] {
+                    // Create a task arena of size 1 so that all work in all
+                    // UTparallelFor loops from here down will all run on this
+                    // thread, which we have already isolated above to avoid
+                    // stealing unsafe tasks. This should now make us safe
+                    // from deadlocks no matter how many nested parallel loops
+                    // are executed by this code.
+                    //
+                    // Although this may in theory limit performance of the
+                    // process functions, the hope is that the number of dirty
+                    // buckets and groups is enough to spread the work across
+                    // enough threads to keep the CPU busy even though the
+                    // process calls are now single threaded.
+                    UT_TaskArena arena(1);
+                    arena.execute([&] {
+                        // UTdebugPrint("Range", r.begin(), r.end()-1);
+                        for (exint i = r.begin(); i != r.end(); i++)
+                        {
+                            dirty_groups(i)->process(
+                                *pscene, matid, tag, left_handed, auto_nml);
+                            dirty_groups(i)->myComplete = true;
+                        }
+                    });
+                });
+            });
 #else
-        for(exint i=0; i<dirty_groups.entries(); i++)
-        {
-            dirty_groups(i)->process(scene, myMatID, myRenderTag, myLeftHanded,
-                                     myAutoNormal);
-            dirty_groups(i)->myComplete = true;
-        }
+            UT_TaskArena arena(1);
+            arena.execute([&] {
+                for (exint i = 0; i < dirty_groups.entries(); i++)
+                {
+                    dirty_groups(i)->process(scene, myMatID, myRenderTag,
+                        myLeftHanded, myAutoNormal);
+                    dirty_groups(i)->myComplete = true;
+                }
+            });
 #endif
+        });
     }
 }
  
