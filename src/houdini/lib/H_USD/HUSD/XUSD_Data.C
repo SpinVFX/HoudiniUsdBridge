@@ -2307,8 +2307,11 @@ XUSD_Data::afterLock(bool for_write,
                     }
                 }
 
+                // We don't need to call SetLoadRules here, because we will
+                // have already done that when creating the stage. Here we
+                // have calculated the required deltas, and so can do a much
+                // more targeted edit.
 		myStage->LoadAndUnload(loadpaths, unloadpaths);
-                myStage->SetLoadRules(myMirrorLoadRules);
 		myMirrorLoadRulesChanged = false;
 	    }
 	}
