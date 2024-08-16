@@ -1553,6 +1553,21 @@ XUSD_HydraGeoMesh::Sync(HdSceneDelegate *scene_delegate,
             else
                 consolidate_mesh = true;
         }
+
+        if(consolidate_mesh)
+        {
+            VtArray<TfToken> categories = scene_delegate->GetCategories(id);
+            auto &scene = myHydraPrim.scene();
+            for (TfToken const& category: categories)
+            {
+                UT_StringHolder link(category.GetText());
+                if(scene.isCategory(link, HUSD_Scene::CATEGORY_LIGHT) || 
+                   scene.isCategory(link, HUSD_Scene::CATEGORY_SHADOW))
+                {
+                    consolidate_mesh = false;
+                }
+            }
+        }
         // else if(myMaterials.entries() > 1)
         //     UTdebugPrint("Too many materials");
         // else if(myVaryingPrim)
