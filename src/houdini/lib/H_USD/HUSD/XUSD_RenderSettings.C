@@ -1148,9 +1148,29 @@ XUSD_RenderProduct::productName(int frame) const
     if (it->second.IsHolding<TfToken>())
 	return it->second.Get<TfToken>();
 
-    UT_ASSERT(it->second.IsHolding<VtArray<TfToken>>() && "unexpected type!");
-    VtArray<TfToken> names = it->second.Get<VtArray<TfToken>>();
-    return names[frame];
+    if (it->second.IsHolding<std::string>())
+        return TfToken(it->second.Get<std::string>());
+
+    if (it->second.IsHolding<VtArray<TfToken>>())
+    {
+        const VtArray<TfToken> &names = it->second.Get<VtArray<TfToken>>();
+        if (names.size())
+        {
+            frame = SYSclamp(frame, 0, int(names.size())-1);
+            return names[frame];
+        }
+    }
+    if (it->second.IsHolding<VtArray<std::string>>())
+    {
+        const VtArray<std::string> &names = it->second.Get<VtArray<std::string>>();
+        if (names.size())
+        {
+            frame = SYSclamp(frame, 0, int(names.size())-1);
+            return TfToken(names[frame]);
+        }
+    }
+    UT_ErrorLog::error("RenderProduct productName is not holding a TfToken");
+    return TfToken();
 }
 
 #define SPECIFIC_PRODUCT(MEMBER, MESSAGE) \
