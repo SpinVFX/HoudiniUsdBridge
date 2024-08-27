@@ -138,6 +138,7 @@ protected:
 			     GT_Primitive	      *gt_prim,
 			     GT_AttributeListHandle   (&attrib_list)[4],
                              GT_Type                   gt_type,
+                             UT_Vector3i               attrib_freqs,
 			     int		      *point_freq_size=nullptr,
 			     bool		       set_point_freq = false,
 			     bool		      *exists = nullptr,
