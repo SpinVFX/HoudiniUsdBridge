@@ -44,9 +44,6 @@ PXR_NAMESPACE_OPEN_SCOPE
 
 namespace
 {
-static UT_Lock	    theLock;
-static UT_Lock	    theGdpReadLock;
-
 struct DsoLoader
 {
     using vdb_func = GT_Primitive *(*)(const char *, const char *, int);
@@ -284,7 +281,7 @@ BRAY_HdField::Sync(HdSceneDelegate *sceneDelegate,
 
     // tag all volume RPrims that have this field as dirty so that
     // they can appropriately update their internal data.
-    dirtyVolumes(sceneDelegate);
+    dirtyVolumes(sceneDelegate, renderParam);
 
     // cleanup after yourself.
     *dirtyBits = Clean;
@@ -294,16 +291,20 @@ void
 BRAY_HdField::Finalize(HdRenderParam *renderParam)
 {
     detailCache().release(myFilePath);
+
+    // Do NOT clear theFieldToVolumes entry: clearing it defeats the purpose of
+    // it being a persistent map, which is to remember which volumes to dirty
+    // in the event of the field being finalized and anewed (which can happen,
+    // for instance, with Volume LOP with animated parameters where the field
+    // gets replaced without recreating the volume).
 }
 
 bool
-BRAY_HdField::registerVolume(const UT_StringHolder& volume)
+BRAY_HdField::registerVolume(const UT_StringHolder& volume,
+    HdRenderParam *renderparam)
 {
-    // Can be called from multiple threads at the same time
-    UT_Lock::Scope  lock(theLock);
-    int prevsize = myVolumes.size();
-    myVolumes.insert(volume);
-    return myVolumes.size() != prevsize;
+    return UTverify_cast<BRAY_HdParam*>(renderparam)->registerFieldToVolume(
+        BRAY_HdUtil::toStr(GetId()), volume);
 }
 
 // private methods
@@ -356,15 +357,19 @@ BRAY_HdField::updateGTPrimitive()
 }
 
 void
-BRAY_HdField::dirtyVolumes(HdSceneDelegate* sceneDelegate)
+BRAY_HdField::dirtyVolumes(HdSceneDelegate* sceneDelegate,
+    HdRenderParam *renderparam)
 {
     // go through the list of stored volumes and mark them dirty
-    // NOTE: we mark the RPrim as having 'DirtyTopology' so that it can
-    // pull all the details of all its fields.
     auto&& changeTracker = sceneDelegate->GetRenderIndex().GetChangeTracker();
-    for(auto& vol : myVolumes)
+    UT_StringSet volumes =
+        UTverify_cast<BRAY_HdParam*>(renderparam)->getVolumes(
+        BRAY_HdUtil::toStr(GetId()));
+    for(auto& vol : volumes)
+    {
 	changeTracker.MarkRprimDirty(BRAY_HdUtil::toSdf(vol),
 	    HdChangeTracker::DirtyVolumeField);
+    }
 }
 
 PXR_NAMESPACE_CLOSE_SCOPE

@@ -772,11 +772,12 @@ XUSD_HydraGeoBase::updateAttrib(
     GT_Primitive        *gt_prim,
     GT_AttributeListHandle (&attrib_list)[4],
     GT_Type              gt_type,
+    UT_Vector3i          attrib_freq,
     int                 *point_freq_num,
-    bool                set_point_freq,
+    bool                 set_point_freq,
     bool                *exists,
-    GT_DataArrayHandle  vert_index,
-    bool                perform_gpu_skinning,
+    GT_DataArrayHandle   vert_index,
+    bool                 perform_gpu_skinning,
     bool                *computed_retval)
 {
     if(exists)
@@ -911,7 +912,28 @@ XUSD_HydraGeoBase::updateAttrib(
                 }
             }
         }
-
+        else if(attrib_owner == GT_OWNER_VERTEX)
+        {
+            // UT_ASSERT_MSG(attr->entries() >= attrib_freq.x(),
+            //               "Not enough data for vertices");
+            if(attr->entries() < attrib_freq.x())
+                return false;
+        }
+        else if(attrib_owner == GT_OWNER_POINT && !set_point_freq)
+        {
+            // UT_ASSERT_MSG(attr->entries() >= attrib_freq.y(),
+            //               "Not enough data for points");
+            if(attr->entries() < attrib_freq.y())
+                return false;
+        }
+        else if(attrib_owner == GT_OWNER_UNIFORM)
+        {
+            // UT_ASSERT_MSG(attr->entries() >= attrib_freq.z(),
+            //               "Not enough data for uniforms");
+            if(attr->entries() < attrib_freq.z())
+                return false;
+        }
+        
         if(!computed && !no_op)
             attr = attr->harden();
 	
@@ -1624,8 +1646,10 @@ XUSD_HydraGeoMesh::Sync(HdSceneDelegate *scene_delegate,
     bool pnt_exists = false;
     bool computed_P = false;
     
+    UT_Vector3i freq(myVertex->entries(), point_freq, myCounts.entries());
+    
     if(updateAttrib(HdTokens->points, "P"_sh, scene_delegate, id, dirty_bits,
-                    gt_prim, attrib_list, GT_TYPE_POINT, &point_freq, true,
+                    gt_prim, attrib_list, GT_TYPE_POINT, freq, &point_freq, true,
                     &pnt_exists, myVertex, perform_gpu_skinning, &computed_P))
         myCachedNormals.reset();
 
@@ -1649,26 +1673,29 @@ XUSD_HydraGeoMesh::Sync(HdSceneDelegate *scene_delegate,
 	return;
     }
 
+    freq.y() = point_freq;
+
     // additional, optional attributes
     updateAttrib(HdTokens->displayColor, "Cd"_sh,
 		 scene_delegate, id, dirty_bits, gt_prim, attrib_list,
-		 GT_TYPE_COLOR, &point_freq, false, nullptr, myVertex);
+		 GT_TYPE_COLOR, freq, &point_freq, false, nullptr, myVertex);
     bool normal_exists = false;
     updateAttrib(HdTokens->normals, "N"_sh,
 		 scene_delegate, id, dirty_bits, gt_prim, attrib_list,
-		 GT_TYPE_NORMAL, &point_freq, false, &normal_exists, myVertex);
+		 GT_TYPE_NORMAL, freq, &point_freq, false, &normal_exists,
+                 myVertex);
     updateAttrib(HdTokens->displayOpacity, "Alpha"_sh,
 		 scene_delegate, id, dirty_bits, gt_prim, attrib_list,
-                 GT_TYPE_NONE, &point_freq, false, nullptr, myVertex);
+                 GT_TYPE_NONE, freq, &point_freq, false, nullptr, myVertex);
     static TfToken tangentu("tangentu");
     static TfToken tangentv("tangentv");
     bool tanu_exists =false, tanv_exists = false;
     updateAttrib(tangentu, GT_Names::tangentu,
 		 scene_delegate, id, dirty_bits, gt_prim, attrib_list,
-                 GT_TYPE_NONE, &point_freq, false, &tanu_exists, myVertex);
+                 GT_TYPE_NONE, freq, &point_freq, false, &tanu_exists, myVertex);
     updateAttrib(tangentv, GT_Names::tangentv,
 		 scene_delegate, id, dirty_bits, gt_prim, attrib_list,
-                 GT_TYPE_NONE, &point_freq, false, &tanv_exists, myVertex);
+                 GT_TYPE_NONE, freq, &point_freq, false, &tanv_exists, myVertex);
 
     GfRange3d extents = myExtents;
 
@@ -1724,7 +1751,7 @@ XUSD_HydraGeoMesh::Sync(HdSceneDelegate *scene_delegate,
 	    TfToken htoken(attrib);
 	    updateAttrib(htoken, attrib, scene_delegate, id,
 			 dirty_bits, gt_prim, attrib_list, GT_TYPE_NONE,
-                         &point_freq, false, nullptr, myVertex);
+                         freq, &point_freq, false, nullptr, myVertex);
 	}
     }
     
@@ -1743,7 +1770,7 @@ XUSD_HydraGeoMesh::Sync(HdSceneDelegate *scene_delegate,
 	    TfToken htoken(attrib);
 	    updateAttrib(htoken, attrib, scene_delegate, id,
 			 dirty_bits, gt_prim, attrib_list, GT_TYPE_NONE,
-                         &point_freq, false, nullptr, myVertex);
+                         freq, &point_freq, false, nullptr, myVertex);
 	}
         else 
         {
@@ -1755,7 +1782,7 @@ XUSD_HydraGeoMesh::Sync(HdSceneDelegate *scene_delegate,
                 st_attempted = true;
                 updateAttrib(htoken, gt_attrib, scene_delegate, id,
                              dirty_bits, gt_prim, attrib_list, GT_TYPE_NONE,
-                             &point_freq, false, nullptr, myVertex);
+                             freq, &point_freq, false, nullptr, myVertex);
             }
             else if(attrib == "st" && !uv_attempted)
             {
@@ -1763,7 +1790,7 @@ XUSD_HydraGeoMesh::Sync(HdSceneDelegate *scene_delegate,
                 gt_attrib = "uv";
                 updateAttrib(htoken, gt_attrib, scene_delegate, id,
                              dirty_bits, gt_prim, attrib_list, GT_TYPE_NONE,
-                             &point_freq, false, nullptr, myVertex);
+                             freq, &point_freq, false, nullptr, myVertex);
                 uv_attempted = true;
             }
          }
@@ -2510,10 +2537,13 @@ XUSD_HydraGeoCurves::Sync(HdSceneDelegate *scene_delegate,
     auto top = new GT_DAConstantValue<int64>(1, top_id, 1);
     attrib_list[GT_OWNER_DETAIL] =
 	GT_AttributeList::createAttributeList(GT_Names::topology,top);
-    
+
+    UT_Vector3i freq(0,0,0);
     bool pnt_exists = false;
+    int pnt_freq = 0;
     updateAttrib(HdTokens->points, "P"_sh, scene_delegate, id, dirty_bits,
-		 gt_prim, attrib_list, GT_TYPE_POINT,nullptr,false,&pnt_exists);
+		 gt_prim, attrib_list, GT_TYPE_POINT, freq, &pnt_freq, true,
+                 &pnt_exists);
     if(!pnt_exists)
     {
 	myInstance.reset();
@@ -2522,12 +2552,16 @@ XUSD_HydraGeoCurves::Sync(HdSceneDelegate *scene_delegate,
 	return;
     }
 
+    freq.x() = pnt_freq;
+    freq.y() = pnt_freq;
+    freq.z() = myCounts->entries();
+    
     updateAttrib(HdTokens->displayColor, "Cd"_sh,
 		 scene_delegate, id, dirty_bits, gt_prim, attrib_list,
-                 GT_TYPE_COLOR);
+                 GT_TYPE_COLOR, freq);
     updateAttrib(HdTokens->displayOpacity, "Alpha"_sh,
 		 scene_delegate, id, dirty_bits, gt_prim, attrib_list,
-                 GT_TYPE_NONE);
+                 GT_TYPE_NONE, freq);
     
     int curve_style = 1;
     auto gl_wire = myAttribMap.find(HusdHdPrimvarTokens->glWire.GetText());
@@ -2550,7 +2584,7 @@ XUSD_HydraGeoCurves::Sync(HdSceneDelegate *scene_delegate,
     {
         updateAttrib(HusdHdPrimvarTokens->widths, "width"_sh,
                      scene_delegate, id, dirty_bits, gt_prim, attrib_list,
-                     GT_TYPE_NONE);
+                     GT_TYPE_NONE, freq);
         if(curve_style == 2)
         {
             GT_DataArrayHandle dh = new GT_DAConstantValue<int32>(1, 1, 1);
@@ -2579,7 +2613,7 @@ XUSD_HydraGeoCurves::Sync(HdSceneDelegate *scene_delegate,
         
     updateAttrib(HdTokens->normals, "N"_sh,
 		 scene_delegate, id, dirty_bits, gt_prim, attrib_list,
-		 GT_TYPE_NORMAL);
+		 GT_TYPE_NORMAL, freq);
 
     GT_PrimitiveHandle ph;
     GT_AttributeListHandle verts;
@@ -2882,25 +2916,29 @@ XUSD_HydraGeoPoints::Sync(HdSceneDelegate *scene_delegate,
 	removeFromDisplay(scene_delegate, id, GetInstancerId());
 	return;
     }
-
+    int pnt_freq = 0;
+    UT_Vector3i freq(0,0,0);
     updateAttrib(HdTokens->points, "P"_sh,
 		 scene_delegate, id, dirty_bits, gt_prim, attrib_list,
-                 GT_TYPE_POINT);
+                 GT_TYPE_POINT, freq, &pnt_freq, true);
+    freq.x() = pnt_freq;
+    freq.y() = pnt_freq;
+    freq.z() = 0;
     updateAttrib(HdTokens->displayColor, "Cd"_sh,
 		 scene_delegate, id, dirty_bits, gt_prim, attrib_list,
-                 GT_TYPE_COLOR);
+                 GT_TYPE_COLOR, freq);
     updateAttrib(HdTokens->normals, "N"_sh,
 		 scene_delegate, id, dirty_bits, gt_prim, attrib_list,
-                 GT_TYPE_NORMAL);
+                 GT_TYPE_NORMAL, freq);
     updateAttrib(TfToken("gl_spritetex"), "gl_spritetex"_sh,
 		 scene_delegate, id, dirty_bits, gt_prim, attrib_list,
-                 GT_TYPE_NONE);
+                 GT_TYPE_NONE, freq);
     updateAttrib(TfToken("widths"), "pscale"_sh,
 		 scene_delegate, id, dirty_bits, gt_prim, attrib_list,
-                 GT_TYPE_NONE);
+                 GT_TYPE_NONE, freq);
     updateAttrib(TfToken("spritescale"), "spritescale"_sh,
 		 scene_delegate, id, dirty_bits, gt_prim, attrib_list,
-                 GT_TYPE_NONE);
+                 GT_TYPE_NONE, freq);
 
     auto points = new GT_PrimPointMesh(attrib_list[GT_OWNER_POINT],
 				       attrib_list[GT_OWNER_DETAIL]);
@@ -3028,13 +3066,14 @@ XUSD_HydraGeoBounds::Sync(HdSceneDelegate *scene_delegate,
     // Topology never changes for a bounding box. Just get the bboxmin and max
     // and build a curve mesh from that.
     GT_AttributeListHandle attrib_list[GT_OWNER_MAX];
-    
+
+    UT_Vector3i freq(0,0,0);
     updateAttrib(HdTokens->displayColor, "Cd"_sh,
 		 scene_delegate, id, dirty_bits, gt_prim, attrib_list,
-                 GT_TYPE_COLOR);
+                 GT_TYPE_COLOR, freq);
     updateAttrib(HdTokens->displayOpacity, "Alpha"_sh,
 		 scene_delegate, id, dirty_bits, gt_prim, attrib_list,
-                 GT_TYPE_NONE);
+                 GT_TYPE_NONE, freq);
 
     GfRange3d extents = scene_delegate->GetExtent(id);
 

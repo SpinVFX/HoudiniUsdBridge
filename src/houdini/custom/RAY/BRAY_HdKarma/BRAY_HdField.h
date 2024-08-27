@@ -66,13 +66,15 @@ public:
 				{ return myXfm; }
 
     /// Returns true if registered
-    bool			registerVolume(const UT_StringHolder& volume);
+    bool			registerVolume(const UT_StringHolder& volume,
+                                    HdRenderParam *renderparam);
 
 protected:
 
     HdDirtyBits GetInitialDirtyBitsMask() const override { return AllDirty; }
 
-    void			dirtyVolumes(HdSceneDelegate* sceneDelegate);
+    void			dirtyVolumes(HdSceneDelegate* sceneDelegate,
+                                    HdRenderParam *renderparam);
 
 private:
 
@@ -83,7 +85,6 @@ private:
     UT_StringHolder 		myFilePath;
     UT_StringHolder		myFieldName;
     UT_SmallArray<GfMatrix4d>	myXfm;
-    UT_StringSet		myVolumes;
     int				myFieldIdx;
 };
 

@@ -744,6 +744,27 @@ BRAY_HdParam::aspectConform(ConformPolicy conform,
     return false;
 }
 
+bool
+BRAY_HdParam::registerFieldToVolume(const UT_StringHolder &fieldname,
+        const UT_StringHolder &volumename)
+{
+    UT_AutoWriteLock lock(myFieldToVolumesLock);
+    UT_StringSet &volumes = myFieldToVolumes[fieldname];
+    std::pair<UT_StringSet::iterator, bool> res = volumes.insert(volumename);
+    return res.second;
+}
+
+UT_StringSet
+BRAY_HdParam::getVolumes(const UT_StringHolder &fieldname) const
+{
+    UT_AutoReadLock lock(myFieldToVolumesLock);
+    UT_StringSet result;
+    auto it = myFieldToVolumes.find(fieldname);
+    if (it != myFieldToVolumes.end())
+        result = it->second;
+    return result;
+}
+
 // Instantiate setShutter with open/close
 template bool BRAY_HdParam::setShutter<0>(const VtValue &);
 template bool BRAY_HdParam::setShutter<1>(const VtValue &);

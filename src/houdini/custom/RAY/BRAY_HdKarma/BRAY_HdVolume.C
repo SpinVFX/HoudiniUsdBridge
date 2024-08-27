@@ -209,7 +209,8 @@ BRAY_HdVolume::Sync(HdSceneDelegate* sceneDelegate,
 					       field->getGTPrimitive()));
 
 	    // register the rprim with the bprim as for updates
-	    fieldchanged |= field->registerVolume(id.GetText());
+	    fieldchanged |= field->registerVolume(BRAY_HdUtil::toStr(id),
+                renderParam);
 	}
     }
     if (!topoDirty && myVolume)

@@ -33,7 +33,9 @@
 #include <UT/UT_Set.h>
 #include <UT/UT_Lock.h>
 #include <UT/UT_Map.h>
+#include <UT/UT_RWLock.h>
 #include <UT/UT_StringMap.h>
+#include <UT/UT_StringSet.h>
 #include <UT/UT_StopWatch.h>
 #include <UT/UT_UniquePtr.h>
 #include <BRAY/BRAY_Interface.h>
@@ -211,6 +213,13 @@ public:
         return myDataSharingCache.insert(found, datasharingid.GetText());
     }
 
+    // Add an entry to field name -> volume name map
+    bool            registerFieldToVolume(const UT_StringHolder &fieldname,
+                        const UT_StringHolder &volumename);
+    // List of volumes associated with a field (NOTE that it's possible for
+    // this to return volume names that no longer exist)
+    UT_StringSet    getVolumes(const UT_StringHolder &fieldname) const;
+
 private:
     void        stopRendering();
     exint       getQueueCount() const;
@@ -247,6 +256,9 @@ private:
     LightFilterMap               myLightFilterMap;
 
     DataSharingCache             myDataSharingCache;
+
+    mutable UT_RWLock            myFieldToVolumesLock;
+    UT_StringMap<UT_StringSet>   myFieldToVolumes;
 };
 
 PXR_NAMESPACE_CLOSE_SCOPE
