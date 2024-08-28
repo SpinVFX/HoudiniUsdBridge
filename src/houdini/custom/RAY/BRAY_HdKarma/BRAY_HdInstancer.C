@@ -317,23 +317,26 @@ namespace
     }
 
     /// Rotation matrix taking `w` in degrees
-    GfMatrix4d
-    rotationMatrixDeg(GfVec3f w)
+    void
+    rotationMatrixDeg(GfMatrix4d &xform, const GfVec3d &p, GfVec3f w)
     {
         static constexpr double EPS = 1e-12;
         double   theta = SYSdegToRad(w.Normalize());
         if (theta <= EPS)
-            return GfMatrix4d(1);
+            return;
         double  st, ct;
         double  x = w[0];
         double  y = w[1];
         double  z = w[2];
         SYSsincos(theta, &st, &ct);
         double cr = 1-ct;
-        return GfMatrix4d(cr*x*x + ct  , cr*x*y + st*z, cr*x*z - st*y, 0,
-                          cr*y*x + st*z, cr*y*y + ct  , cr*y*z + st*x, 0,
-                          cr*z*x + st*y, cr*z*y - st*x, cr*z*z + ct,   0,
-                          0, 0, 0, 1);
+        GfMatrix4d  xlate(1.0);
+        xform.SetTranslateOnly(-p);
+        xform *= GfMatrix4d(cr*x*x + ct  , cr*x*y + st*z, cr*x*z - st*y, 0,
+                            cr*y*x - st*z, cr*y*y + ct  , cr*y*z + st*x, 0,
+                            cr*z*x + st*y, cr*z*y - st*x, cr*z*z + ct,   0,
+                            0, 0, 0, 1);
+        xform *= xlate.SetTranslateOnly(p);
     }
 
     void
@@ -377,11 +380,10 @@ namespace
                 if (angularVelocities)
                 {
                     GfMatrix4d  xlate(1.0);
-                    GfVec3d     p = xformList[seg][i].ExtractTranslation();
+                    rotationMatrixDeg(xform,
+                            xformList[seg][i].ExtractTranslation(),     // pivot
+                            (*angularVelocities)[idx] * tm);
                     xform *= xlate.SetTranslateOnly(vel);
-                    xform *= xlate.SetTranslateOnly(-p);
-                    xform *= rotationMatrixDeg((*angularVelocities)[idx] * tm);
-                    xform *= xlate.SetTranslateOnly(p);
                 }
                 else
                 {
