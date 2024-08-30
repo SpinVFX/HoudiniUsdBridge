@@ -29,6 +29,7 @@
 #include "XUSD_Utils.h"
 #include <PY/PY_InterpreterAutoLock.h>
 #include <pxr/base/tf/pyPtrHelpers.h>
+#include BOOST_HEADER(python/object.hpp)
 
 PXR_NAMESPACE_USING_DIRECTIVE
 

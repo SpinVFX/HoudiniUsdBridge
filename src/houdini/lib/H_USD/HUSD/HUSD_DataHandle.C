@@ -31,7 +31,7 @@
 #include "XUSD_Data.h"
 #include "XUSD_PathSet.h"
 #include "XUSD_Utils.h"
-#include <UT/UT_StringArray.h>
+#include BOOST_HEADER(python/extract.hpp)
 
 PXR_NAMESPACE_USING_DIRECTIVE
 
