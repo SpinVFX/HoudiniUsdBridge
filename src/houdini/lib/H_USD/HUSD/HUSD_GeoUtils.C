@@ -41,6 +41,7 @@
 #include <UT/UT_StringArray.h>
 #include <pxr/pxr.h>
 #include <pxr/usd/usd/stage.h>
+#include BOOST_HEADER(python/extract.hpp)
 
 PXR_NAMESPACE_USING_DIRECTIVE
 
