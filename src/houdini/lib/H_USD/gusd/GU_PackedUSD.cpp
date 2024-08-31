@@ -750,13 +750,15 @@ GusdGU_PackedUSD::getRenderingBounds(UT_BoundingBox &box) const
 void
 GusdGU_PackedUSD::getVelocityRange(UT_Vector3 &min, UT_Vector3 &max) const
 {
-
+    min.assign(0, 0, 0);
+    max.assign(0, 0, 0);
 }
 
 void
 GusdGU_PackedUSD::getWidthRange(fpreal &min, fpreal &max) const
 {
-
+    min = 0;
+    max = 0;
 }
 
 bool

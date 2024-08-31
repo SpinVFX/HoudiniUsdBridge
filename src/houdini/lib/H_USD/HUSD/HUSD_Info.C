@@ -2369,6 +2369,12 @@ HUSD_Info::getPointInstancerInstanceCount(const UT_StringRef &primpath,
     return api.GetInstanceCount(HUSDgetNonDefaultUsdTimeCode(time_code));
 }
 
+bool
+HUSD_Info::hasAnyVisibleLights(const HUSD_TimeCode &time_code) const
+{
+    return HUSDhasAnyVisibleLights(myAnyLock.constData()->stage(), time_code);
+}
+
 static inline UT_StringHolder
 husdPropertyPath(const UT_StringRef &primpath, const UT_StringRef &attribname)
 {

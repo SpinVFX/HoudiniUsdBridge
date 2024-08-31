@@ -28,6 +28,7 @@ PXR_NAMESPACE_CLOSE_SCOPE
 
 class PY_PyObject;
 class HUSD_RenderSettings;
+class HUSD_TimeCode;
 class UT_JSONValue;
 class UT_JSONWriter;
 class UT_WorkBuffer;
@@ -201,7 +202,7 @@ public:
     /// @}
 
     /// Return true if there's a light primitive on the stage
-    bool                lightOnStage() const;
+    bool                lightOnStage(const HUSD_TimeCode &tc) const;
 
     /// Set metadata on the IMG_FileParms
     /// This uses the "husk.metadata" keys on the delegate renderer info.

@@ -25,6 +25,7 @@
 #include "XUSD_Utils.h"
 #include "XUSD_Data.h"
 #include "XUSD_DataLock.h"
+#include "XUSD_FindPrimsTask.h"
 #include "XUSD_Format.h"
 #include "XUSD_LockedGeoRegistry.h"
 #include "HUSD_Constants.h"
@@ -58,6 +59,8 @@
 #include <pxr/usd/usdUtils/dependencies.h>
 #include <pxr/usd/usdUtils/flattenLayerStack.h>
 #include <pxr/usd/usdUtils/stitch.h>
+#include <pxr/usd/usdLux/lightAPI.h>
+#include <pxr/usd/usdGeom/imageable.h>
 #include <pxr/usd/usdGeom/pointInstancer.h>
 #include <pxr/usd/usdGeom/metrics.h>
 #include <pxr/usd/usdGeom/modelAPI.h>
@@ -237,6 +240,40 @@ public:
 
 private:
     const SdfLayerRefPtr &mySourceLayer;
+};
+
+class xusd_FindVisibleLightPrim final : public XUSD_FindPrimsTaskData
+{
+public:
+    xusd_FindVisibleLightPrim(const HUSD_TimeCode &tc)
+        : XUSD_FindPrimsTaskData(),
+          myTimeCode(HUSDgetUsdTimeCode(tc))
+    { }
+
+    void addToThreadData(const UsdPrim &prim, bool *prune) override
+    {
+        UsdLuxLightAPI      lux(prim);
+        if (lux)
+        {
+            UsdGeomImageable imageable(prim);
+
+            // If the light somehow is not an imageable prim, or if the
+            // light is visible, then we have found a light. Invisible
+            // lights are not counted.
+            if (!imageable ||
+                imageable.ComputeVisibility(myTimeCode) !=
+                    UsdGeomTokens->invisible)
+                myFound = true;
+        }
+        if (prune)
+            *prune = myFound;
+    }
+    bool foundAnyVisibleLight() const
+    { return myFound; }
+
+private:
+    UsdTimeCode      myTimeCode;
+    bool             myFound = false;
 };
 
 void
@@ -2465,6 +2502,22 @@ HUSDgetSoloLightPaths(const SdfLayerHandle &layer,
 	paths.clear();
 
     return (paths.size() > 0);
+}
+
+bool
+HUSDhasAnyVisibleLights(const UsdStageRefPtr &stage, const HUSD_TimeCode &tc)
+{
+    UsdPrim     root = stage->GetPseudoRoot();
+    auto        predicate = HUSDgetUsdPrimPredicate(
+        HUSD_PrimTraversalDemands(HUSD_TRAVERSAL_ACTIVE_PRIMS |
+                                  HUSD_TRAVERSAL_DEFINED_PRIMS |
+                                  HUSD_TRAVERSAL_NONABSTRACT_PRIMS |
+                                  HUSD_TRAVERSAL_ALLOW_INSTANCE_PROXIES));
+
+    xusd_FindVisibleLightPrim   data(tc);
+    XUSDfindPrims(root, data, predicate, nullptr, nullptr);
+
+    return data.foundAnyVisibleLight();
 }
 
 void

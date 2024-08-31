@@ -9,15 +9,15 @@
  */
 
 #include "HUSD_HuskEngine.h"
+#include "HUSD_Path.h"
 #include "HUSD_RenderSettings.h"
 #include "HUSD_RendererInfo.h"
-#include "HUSD_Path.h"
+#include "HUSD_TimeCode.h"
 #include "XUSD_Format.h"
 #include "XUSD_Tokens.h"
 #include "XUSD_Utils.h"
 #include "XUSD_HuskEngine.h"
 #include "XUSD_RenderSettings.h"
-#include "XUSD_FindPrimsTask.h"
 #include <SYS/SYS_Time.h>
 #include <IMG/IMG_FileParms.h>
 #include <PY/PY_Python.h>
@@ -46,7 +46,6 @@
 #include <pxr/base/gf/size2.h>
 #include <pxr/base/gf/size3.h>
 #include <pxr/usd/usd/stage.h>
-#include <pxr/usd/usdLux/lightAPI.h>
 
 PXR_NAMESPACE_USING_DIRECTIVE
 
@@ -470,39 +469,10 @@ HUSD_HuskEngine::delegateRenderProducts(const HUSD_RenderSettings &settings,
     myEngine->delegateRenderProducts(*settings.myOwner, pgroup);
 }
 
-namespace
-{
-    class xusd_FindLightPrim final : public XUSD_FindPrimsTaskData
-    {
-    public:
-        void    addToThreadData(const UsdPrim &prim, bool *prune) override
-        {
-            UsdLuxLightAPI      lux(prim);
-            if (lux)
-            {
-                // TODO: Check the prim is invisible
-                myFound = true;
-            }
-            if (prune)
-                *prune = myFound;
-        }
-        bool    myFound = false;
-    };
-}
-
 bool
-HUSD_HuskEngine::lightOnStage() const
+HUSD_HuskEngine::lightOnStage(const HUSD_TimeCode &tc) const
 {
-    UsdPrim     root = myEngine->stage()->GetPseudoRoot();
-    auto        predicate = HUSDgetUsdPrimPredicate(HUSD_PrimTraversalDemands(
-                          HUSD_TRAVERSAL_ACTIVE_PRIMS
-                        | HUSD_TRAVERSAL_DEFINED_PRIMS
-                        | HUSD_TRAVERSAL_NONABSTRACT_PRIMS
-                        | HUSD_TRAVERSAL_ALLOW_INSTANCE_PROXIES));
-
-    xusd_FindLightPrim          data;
-    XUSDfindPrims(root, data, predicate, nullptr, nullptr);
-    return data.myFound;
+    return HUSDhasAnyVisibleLights(myEngine->stage(), tc);
 }
 
 namespace

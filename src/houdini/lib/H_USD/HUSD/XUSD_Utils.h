@@ -299,6 +299,11 @@ HUSD_API bool
 HUSDgetSoloLightPaths(const SdfLayerHandle &layer,
 	HUSD_PathSet &paths);
 
+// Warning: this function can traverse the stage, and so can be quite expensive.
+// It looks for any light prim that is visible at the specified time code.
+HUSD_API bool
+HUSDhasAnyVisibleLights(const UsdStageRefPtr &stage, const HUSD_TimeCode &tc);
+
 // Set the list of SdfPaths of all solo'ed geometry. This information is stored
 // as custom data on the HoudiniLayerInfo prim. These methods should only be
 // used by HUSD_Overrides.

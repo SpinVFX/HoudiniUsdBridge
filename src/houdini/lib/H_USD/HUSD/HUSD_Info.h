@@ -359,6 +359,10 @@ public:
                                 const UT_StringRef &primpath,
                                 const HUSD_TimeCode &time_code) const;
 
+    // Lights
+    bool                 hasAnyVisibleLights(
+                                const HUSD_TimeCode &time_code) const;
+
     // Variants
     bool		 getVariantSets(const UT_StringRef &primpath,
 				UT_StringArray &vset_names) const;
