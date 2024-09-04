@@ -918,9 +918,30 @@ const TfToken &
 XUSD_RenderVar::sourceType() const
 {
     auto it = myHdDesc.aovSettings.find(UsdRenderTokens->sourceType);
-    UT_ASSERT(it != myHdDesc.aovSettings.end());
+    if (it == myHdDesc.aovSettings.end())
+    {
+        // No sourceType specified - in theory, this should have come from the
+        // schema, but it doesn't.
+        return UsdRenderTokens->raw;
+    }
     UT_ASSERT(it->second.IsHolding<TfToken>());
-    return it->second.UncheckedGet<TfToken>();
+    if (it->second.IsHolding<TfToken>())
+	return it->second.Get<TfToken>();
+
+    // Fall back if it's a string
+    if (it->second.IsHolding<std::string>())
+    {
+        UT_ErrorLog::error("RenderVar {} has string value for sourceType",
+                aovName());
+        // Leak this since we need to return a reference and the user made a
+        // mistake.
+        TfToken *tmp = new TfToken(it->second.Get<std::string>());
+        return *tmp;
+    }
+
+    UT_ErrorLog::error("RenderVar {} has bad sourceType - assuming raw",
+            aovName());
+    return UsdRenderTokens->raw;
 }
 
 void
