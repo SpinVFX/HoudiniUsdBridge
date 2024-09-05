@@ -568,14 +568,14 @@ GusdGU_PackedUSD::getUsdTransform() const
         return m_transformCache;
     }
 
-    if( prim.IsA<UsdGeomXformable>() )
+    if (GusdUSD_XformCache::GetInstance().GetLocalToWorldTransform(
+                prim, m_frame, m_transformCache))
     {
-        GusdUSD_XformCache::GetInstance().GetLocalToWorldTransform( 
-             prim, m_frame, m_transformCache );
         m_transformCacheValid = true;
     }
     else
-        m_transformCache = UT_Matrix4D(1);
+        m_transformCache.identity();
+
 
     return m_transformCache;
 }
