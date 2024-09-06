@@ -33,6 +33,7 @@
 
 #include "pxr/usd/usdGeom/boundable.h"
 #include "pxr/usd/usdGeom/xformable.h"
+#include <pxr/usd/usdVol/fieldBase.h>
 
 #include <GT/GT_CatPolygonMesh.h>
 #include <GT/GT_PrimCollect.h>
@@ -318,7 +319,7 @@ CreateEntryFn::operator()(
         }
         return new CacheEntry( instancePrim );
     }
-    else if( prim.IsA<UsdGeomBoundable>() )
+    else if( prim.IsA<UsdGeomBoundable>() || prim.IsA<UsdVolFieldBase>() )
     {
         UsdGeomImageable imageable( prim );
 
