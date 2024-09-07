@@ -49,8 +49,12 @@ public:
     static const UT_StringHolder	&getHoudiniFieldAssetPrimType();
     static const UT_StringHolder	&getPointInstancerPrimType();
 
+    static const UT_StringHolder	&getMaterialPrimType();
     static const UT_StringHolder	&getMaterialPrimTypeName();
+    static const UT_StringHolder	&getShaderPrimType();
     static const UT_StringHolder	&getShaderPrimTypeName();
+    static const UT_StringHolder	&getShadeNodeGraphPrimType();
+    static const UT_StringHolder	&getShadeNodeGraphPrimTypeName();
 
     static const UT_StringHolder	&getLuxLightAPIName();
     static const UT_StringHolder	&getGeomModelAPIName();

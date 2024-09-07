@@ -154,6 +154,14 @@ HUSD_Constants::getPointInstancerPrimType()
 }
 
 const UT_StringHolder &
+HUSD_Constants::getMaterialPrimType()
+{
+    static constexpr UT_StringLit s("UsdShadeMaterial");
+
+    return s.asHolder();
+}
+
+const UT_StringHolder &
 HUSD_Constants::getMaterialPrimTypeName()
 {
     static constexpr UT_StringLit s("Material");
@@ -162,9 +170,33 @@ HUSD_Constants::getMaterialPrimTypeName()
 }
 
 const UT_StringHolder &
+HUSD_Constants::getShaderPrimType()
+{
+    static constexpr UT_StringLit s("UsdShadeShader");
+
+    return s.asHolder();
+}
+
+const UT_StringHolder &
 HUSD_Constants::getShaderPrimTypeName()
 {
     static constexpr UT_StringLit s("Shader");
+
+    return s.asHolder();
+}
+
+const UT_StringHolder &
+HUSD_Constants::getShadeNodeGraphPrimType()
+{
+    static constexpr UT_StringLit s("UsdShadeNodeGraph");
+
+    return s.asHolder();
+}
+
+const UT_StringHolder &
+HUSD_Constants::getShadeNodeGraphPrimTypeName()
+{
+    static constexpr UT_StringLit s("NodeGraph");
 
     return s.asHolder();
 }
