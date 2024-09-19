@@ -33,6 +33,7 @@
 #include <UT/UT_StringHolder.h>
 #include <UT/UT_WorkArgs.h>
 #include <pxr/base/tf/pathUtils.h>
+#include <pxr/usd/ar/resolver.h>
 
 static constexpr UT_StringLit	 thePopulateAllKey("populateall");
 static constexpr UT_StringLit	 thePopulatePathsKey("populatepaths");
@@ -339,13 +340,15 @@ HUSD_LoadMasks::isPathPopulated(const UT_StringHolder &path,
 void
 HUSD_LoadMasks::addMuteLayer(const UT_StringHolder &identifier)
 {
-    myMuteLayers.insert(PXR_NS::TfNormPath(identifier.toStdString()));
+    myMuteLayers.insert(
+        PXR_NS::ArGetResolver().CreateIdentifier(identifier.toStdString()));
 }
 
 void
 HUSD_LoadMasks::removeMuteLayer(const UT_StringHolder &identifier)
 {
-    myMuteLayers.erase(PXR_NS::TfNormPath(identifier.toStdString()));
+    myMuteLayers.erase(
+        PXR_NS::ArGetResolver().CreateIdentifier(identifier.toStdString()));
 }
 
 void
