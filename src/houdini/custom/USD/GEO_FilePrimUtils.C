@@ -240,6 +240,29 @@ geoGetPartitionElementType(
     return UT_NULLOPT;
 }
 
+/// Allow overriding the "reversepolygons" import option with an attribute
+/// varying per prim.
+static bool
+geoGetReversePolygons(
+        const GT_Primitive &gtprim,
+        const GEO_ImportOptions &options)
+{
+    bool reverse = options.myReversePolygons;
+
+    static constexpr UT_StringLit theReverseAttribName(
+            "usdconfigreversepolygons");
+    // Although this is a boolean value, all of the config attributes are string
+    // types.
+    static constexpr UT_StringLit theReverseValue("1");
+
+    UT_StringHolder attrib_val = GEOgetStringFromAttrib(
+            gtprim, theReverseAttribName.asRef());
+    if (attrib_val)
+        reverse = (attrib_val == theReverseValue.asRef());
+
+    return reverse;
+}
+
 GT_DataArrayHandle
 GEOreverseWindingOrder(const GT_DataArrayHandle &faceCounts,
                        const GT_DataArrayHandle &vertices)
@@ -2486,13 +2509,10 @@ initDrawModeAttrib(
 
 /// Author the orientation attribute (left or right-handed).
 static void
-initOrientationAttrib(
-        GEO_FilePrim &fileprim,
-        const GEO_ImportOptions &options)
+geoInitOrientationAttrib(GEO_FilePrim &fileprim, bool reverse_polygons)
 {
-    TfToken orientation = options.myReversePolygons ?
-                                  UsdGeomTokens->rightHanded :
-                                  UsdGeomTokens->leftHanded;
+    TfToken orientation = reverse_polygons ? UsdGeomTokens->rightHanded
+                                           : UsdGeomTokens->leftHanded;
 
     GEO_FileProp *prop = fileprim.addProperty(
             UsdGeomTokens->orientation, SdfValueTypeNames->Token,
@@ -3546,8 +3566,9 @@ geoInitTetMesh(
 
     // Even if we aren't authoring topology, we need the indirect list to
     // correctly author vertex attributes.
+    const bool reverse_polys = geoGetReversePolygons(*tetmesh, options);
     GT_DataArrayHandle vertex_indirect;
-    if (options.myReversePolygons)
+    if (reverse_polys)
         vertex_indirect = geoReverseTetWindingOrder(*tetmesh);
 
     if (options.myTopologyHandling != GEO_USD_TOPOLOGY_NONE)
@@ -3555,7 +3576,7 @@ geoInitTetMesh(
         GEO_FileProp *prop = nullptr;
 
         GT_DataArrayHandle tet_vtx_indices = geoBuildTetVertexList(
-                *tetmesh, options.myReversePolygons);
+                *tetmesh, reverse_polys);
 
         prop = GEOinitProperty<GfVec4i, int>(
                 fileprim, tet_vtx_indices, UT_StringHolder::theEmptyString,
@@ -3566,7 +3587,7 @@ geoInitTetMesh(
         prop->setValueIsDefault(
                 options.myTopologyHandling == GEO_USD_TOPOLOGY_STATIC);
 
-        initOrientationAttrib(fileprim, options);
+        geoInitOrientationAttrib(fileprim, reverse_polys);
 
         const GT_DataArrayHandle &face_verts = tetmesh->getFaceVertices();
         const GT_DataArrayHandle &shared_face
@@ -3581,7 +3602,7 @@ geoInitTetMesh(
              tet_idx < num_tets; ++tet_idx)
         {
             std::bitset<4> smask = shared_face->getI32(tet_idx);
-            if (options.myReversePolygons)
+            if (reverse_polys)
             {
                 // Also swap to match the new face ordering after reversing the
                 // winding order.
@@ -3657,13 +3678,15 @@ geoInitNurbsPatch(
     fileprim.setTypeName(GEO_FilePrimTypeTokens->NurbsPatch);
     UT_IntrusivePtr<GT_PrimNuPatch> patch
             = UTverify_cast<GT_PrimNuPatch *>(gtprim.get());
-    if (options.myReversePolygons)
+
+    const bool reverse_polys = geoGetReversePolygons(*patch, options);
+    if (reverse_polys)
         patch = patch->reverseU();
 
     GT_DataArrayHandle vertex_indirect;
     if (options.myTopologyHandling != GEO_USD_TOPOLOGY_NONE)
     {
-        initOrientationAttrib(fileprim, options);
+        geoInitOrientationAttrib(fileprim, reverse_polys);
 
         const bool static_topology =
                 (options.myTopologyHandling == GEO_USD_TOPOLOGY_STATIC);
@@ -3757,114 +3780,108 @@ GEOinitGTPrim(GEO_FilePrim &fileprim,
     if (gtprim->getPrimitiveType() == GT_PRIM_POLYGON_MESH ||
 	gtprim->getPrimitiveType() == GT_PRIM_SUBDIVISION_MESH)
     {
-	const GT_PrimPolygonMesh	*gtmesh = nullptr;
+        auto gtmesh = UTverify_cast<const GT_PrimPolygonMesh *>(gtprim.get());
 
-	gtmesh = UTverify_cast<const GT_PrimPolygonMesh *>(gtprim.get());
-	if (gtmesh)
-	{
-	    GT_DataArrayHandle	 hou_attr;
-	    GT_DataArrayHandle	 vertex_indirect;
-	    GEO_FileProp	*prop = nullptr;
+        GT_DataArrayHandle hou_attr;
+        GT_DataArrayHandle vertex_indirect;
+        GEO_FileProp *prop = nullptr;
 
-	    fileprim.setTypeName(GEO_FilePrimTypeTokens->Mesh);
+        fileprim.setTypeName(GEO_FilePrimTypeTokens->Mesh);
 
-	    if (options.myTopologyHandling != GEO_USD_TOPOLOGY_NONE)
-	    {
-		hou_attr = gtmesh->getFaceCounts();
-                prop = GEOinitProperty<int>(
-                        fileprim, hou_attr, UT_StringHolder::theEmptyString,
-                        UT_StringHolder::theEmptyString, GT_OWNER_INVALID,
-                        false, options, UsdGeomTokens->faceVertexCounts,
-                        SdfValueTypeNames->IntArray, false, &topology_id,
-                        GT_DataArrayHandle(), false);
-                prop->setValueIsDefault(
-		    options.myTopologyHandling == GEO_USD_TOPOLOGY_STATIC);
+        const bool reverse_polys = geoGetReversePolygons(*gtmesh, options);
+        if (options.myTopologyHandling != GEO_USD_TOPOLOGY_NONE)
+        {
+            hou_attr = gtmesh->getFaceCounts();
+            prop = GEOinitProperty<int>(
+                    fileprim, hou_attr, UT_StringHolder::theEmptyString,
+                    UT_StringHolder::theEmptyString, GT_OWNER_INVALID, false,
+                    options, UsdGeomTokens->faceVertexCounts,
+                    SdfValueTypeNames->IntArray, false, &topology_id,
+                    GT_DataArrayHandle(), false);
+            prop->setValueIsDefault(
+                    options.myTopologyHandling == GEO_USD_TOPOLOGY_STATIC);
 
-		hou_attr = gtmesh->getVertexList();
-		if (options.myReversePolygons)
-		{
-                    vertex_indirect = GEOreverseWindingOrder(
-                        gtmesh->getFaceCounts(), gtmesh->getVertexList());
-                    hou_attr = new GT_DAIndirect(vertex_indirect, hou_attr);
-		}
-                prop = GEOinitProperty<int>(
-                        fileprim, hou_attr, UT_StringHolder::theEmptyString,
-                        UT_StringHolder::theEmptyString, GT_OWNER_INVALID,
-                        false, options, UsdGeomTokens->faceVertexIndices,
-                        SdfValueTypeNames->IntArray, false, &topology_id,
-                        vertex_indirect, false);
-                prop->setValueIsDefault(
-		    options.myTopologyHandling == GEO_USD_TOPOLOGY_STATIC);
-
-                initOrientationAttrib(fileprim, options);
-
-                TfToken subd_scheme = UsdGeomTokens->none;
-                if (gtprim->getPrimitiveType() == GT_PRIM_SUBDIVISION_MESH)
-		{
-		    const GT_PrimSubdivisionMesh	*gtsubdmesh = nullptr;
-
-		    gtsubdmesh = UTverify_cast<const GT_PrimSubdivisionMesh *>(
-			gtprim.get());
-		    if (gtsubdmesh->scheme() == GT_CATMULL_CLARK)
-			subd_scheme = UsdGeomTokens->catmullClark;
-		    else if (gtsubdmesh->scheme() == GT_LOOP)
-			subd_scheme = UsdGeomTokens->loop;
-		    else if (gtsubdmesh->scheme() == GT_BILINEAR)
-			subd_scheme = UsdGeomTokens->bilinear;
-
-                    initSubdAttribs(fileprim, gtsubdmesh, processed_attribs,
-                                    options, vertex_indirect);
-                }
-                // Used during refinement when deciding whether to create the
-                // GT_PrimSubdivisionMesh.
-                processed_attribs.insert("osd_scheme"_sh);
-
-		prop = fileprim.addProperty(UsdGeomTokens->subdivisionScheme,
-		    SdfValueTypeNames->Token,
-		    new GEO_FilePropConstantSource<TfToken>(
-			subd_scheme));
-		prop->setValueIsDefault(true);
-		prop->setValueIsUniform(true);
-	    }
-	    else if (options.myReversePolygons)
-	    {
-		// If we have been asked not to create topology information,
-		// but we have been asked to reverse polygons, we need to
-		// create the vertex index remapping attribute.
-                vertex_indirect = GEOreverseWindingOrder(
-                    gtmesh->getFaceCounts(), gtmesh->getVertexList());
-            }
-
-	    static GT_Owner owners[] = {
-		GT_OWNER_VERTEX, GT_OWNER_POINT, GT_OWNER_UNIFORM,
-		GT_OWNER_DETAIL, GT_OWNER_INVALID
-	    };
-	    initCommonAttribs(fileprim, gtprim,
-		processed_attribs, options,
-		false, vertex_indirect);
-	    initExtentAttrib(fileprim, gtprim, processed_attribs, options);
-	    initVisibilityAttrib(fileprim, *gtprim, options);
-	    initExtraAttribs(fileprim, extra_prims,
-		gtprim, owners,
-		processed_attribs, options,
-		false, vertex_indirect);
-            initSubsets(
-                    fileprim, extra_prims, UsdGeomTokens->face,
-                    gtmesh->faceSetMap(), options);
-            initSubsets(
-                    fileprim, extra_prims, UsdGeomTokens->point,
-                    gtmesh->pointSetMap(), options);
-            GEOinitXformAttrib(
-                    fileprim, prim_xform, options,
-                    geoShouldAuthorIdentityXforms(*gtprim));
-
-            if (agent_shape_info)
+            hou_attr = gtmesh->getVertexList();
+            if (reverse_polys)
             {
-                initBlendShapes(
-                        fileprim, extra_prims, *gtprim, *agent_shape_info);
-                initAgentShape(fileprim, options, *agent_shape_info);
+                vertex_indirect = GEOreverseWindingOrder(
+                        gtmesh->getFaceCounts(), gtmesh->getVertexList());
+                hou_attr = new GT_DAIndirect(vertex_indirect, hou_attr);
             }
-	}
+            prop = GEOinitProperty<int>(
+                    fileprim, hou_attr, UT_StringHolder::theEmptyString,
+                    UT_StringHolder::theEmptyString, GT_OWNER_INVALID, false,
+                    options, UsdGeomTokens->faceVertexIndices,
+                    SdfValueTypeNames->IntArray, false, &topology_id,
+                    vertex_indirect, false);
+            prop->setValueIsDefault(
+                    options.myTopologyHandling == GEO_USD_TOPOLOGY_STATIC);
+
+            geoInitOrientationAttrib(fileprim, reverse_polys);
+
+            TfToken subd_scheme = UsdGeomTokens->none;
+            if (gtprim->getPrimitiveType() == GT_PRIM_SUBDIVISION_MESH)
+            {
+                const GT_PrimSubdivisionMesh *gtsubdmesh = nullptr;
+
+                gtsubdmesh = UTverify_cast<const GT_PrimSubdivisionMesh *>(
+                        gtprim.get());
+                if (gtsubdmesh->scheme() == GT_CATMULL_CLARK)
+                    subd_scheme = UsdGeomTokens->catmullClark;
+                else if (gtsubdmesh->scheme() == GT_LOOP)
+                    subd_scheme = UsdGeomTokens->loop;
+                else if (gtsubdmesh->scheme() == GT_BILINEAR)
+                    subd_scheme = UsdGeomTokens->bilinear;
+
+                initSubdAttribs(
+                        fileprim, gtsubdmesh, processed_attribs, options,
+                        vertex_indirect);
+            }
+            // Used during refinement when deciding whether to create the
+            // GT_PrimSubdivisionMesh.
+            processed_attribs.insert("osd_scheme"_sh);
+
+            prop = fileprim.addProperty(
+                    UsdGeomTokens->subdivisionScheme, SdfValueTypeNames->Token,
+                    new GEO_FilePropConstantSource<TfToken>(subd_scheme));
+            prop->setValueIsDefault(true);
+            prop->setValueIsUniform(true);
+        }
+        else if (reverse_polys)
+        {
+            // If we have been asked not to create topology information,
+            // but we have been asked to reverse polygons, we need to
+            // create the vertex index remapping attribute.
+            vertex_indirect = GEOreverseWindingOrder(
+                    gtmesh->getFaceCounts(), gtmesh->getVertexList());
+        }
+
+        static GT_Owner owners[] = {
+                GT_OWNER_VERTEX, GT_OWNER_POINT, GT_OWNER_UNIFORM,
+                GT_OWNER_DETAIL, GT_OWNER_INVALID};
+        initCommonAttribs(
+                fileprim, gtprim, processed_attribs, options, false,
+                vertex_indirect);
+        initExtentAttrib(fileprim, gtprim, processed_attribs, options);
+        initVisibilityAttrib(fileprim, *gtprim, options);
+        initExtraAttribs(
+                fileprim, extra_prims, gtprim, owners, processed_attribs,
+                options, false, vertex_indirect);
+        initSubsets(
+                fileprim, extra_prims, UsdGeomTokens->face,
+                gtmesh->faceSetMap(), options);
+        initSubsets(
+                fileprim, extra_prims, UsdGeomTokens->point,
+                gtmesh->pointSetMap(), options);
+        GEOinitXformAttrib(
+                fileprim, prim_xform, options,
+                geoShouldAuthorIdentityXforms(*gtprim));
+
+        if (agent_shape_info)
+        {
+            initBlendShapes(fileprim, extra_prims, *gtprim, *agent_shape_info);
+            initAgentShape(fileprim, options, *agent_shape_info);
+        }
     }
     else if (gtprim->getPrimitiveType() == GT_PRIM_NUPATCH)
     {

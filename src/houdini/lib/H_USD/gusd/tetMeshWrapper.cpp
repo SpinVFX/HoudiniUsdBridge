@@ -206,6 +206,9 @@ GusdTetMeshWrapper::refine(GT_Refine &refiner, const GT_RefineParms *parms) cons
     const exint num_tets = tet_vtx_indices.size();
     const exint num_verts = 4 * num_tets;
 
+    if (reverse_winding)
+        addReversePolygonsAttrib(uniform_attribs, num_tets);
+
     VtVec3fArray normals;
     if (myUsdTetMesh.GetNormalsAttr().Get(&normals, m_time))
     {

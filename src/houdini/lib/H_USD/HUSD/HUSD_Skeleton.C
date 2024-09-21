@@ -577,8 +577,10 @@ HUSDimportSkeletonPose(
         GU_Detail &gdp,
         const HUSD_SkeletonCache &opaque_cache,
         HUSD_SkeletonPoseType pose_type,
-        fpreal timecode_val)
+        HUSD_TimeCode timecode)
 {
+    UsdTimeCode usd_timecode = HUSDgetUsdTimeCode(timecode);
+
     UT_ASSERT(opaque_cache.isValid());
     auto &&cache = opaque_cache.impl();
 
@@ -609,16 +611,17 @@ HUSDimportSkeletonPose(
         case HUSD_SkeletonPoseType::Animation:
         {
             VtMatrix4dArray local_xforms;
-            const UsdTimeCode timecode(timecode_val);
-            if (!skelquery.ComputeJointLocalTransforms(&local_xforms, timecode))
+            if (!skelquery.ComputeJointLocalTransforms(
+                        &local_xforms, usd_timecode))
             {
                 HUSD_ErrorScope::addError(
                     HUSD_ERR_STRING, "Failed to compute local transforms.");
                 return false;
             }
 
-            if (!husdComputeWorldTransforms(skel, topology, timecode,
-                                            local_xforms, world_xforms))
+            if (!husdComputeWorldTransforms(
+                        skel, topology, usd_timecode, local_xforms,
+                        world_xforms))
             {
                 return false;
             }
@@ -631,7 +634,7 @@ HUSDimportSkeletonPose(
 
                 if (!channel_names.empty()
                     && !animquery.ComputeBlendShapeWeights(
-                            &channel_values, timecode))
+                            &channel_values, usd_timecode))
                 {
                     HUSD_ErrorScope::addWarning(
                             HUSD_ERR_STRING,
@@ -681,9 +684,9 @@ HUSDimportSkeletonPose(
                 return false;
             }
 
-            const UsdTimeCode timecode(timecode_val);
-            if (!husdComputeWorldTransforms(skel, topology, timecode,
-                                            local_xforms, world_xforms))
+            if (!husdComputeWorldTransforms(
+                        skel, topology, usd_timecode, local_xforms,
+                        world_xforms))
             {
                 return false;
             }

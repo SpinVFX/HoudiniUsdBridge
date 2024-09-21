@@ -20,6 +20,7 @@
 #include "HUSD_API.h"
 
 #include "HUSD_DataHandle.h"
+#include "HUSD_TimeCode.h"
 
 #include <GU/GU_AgentClip.h>
 #include <GU/GU_AgentRig.h>
@@ -107,7 +108,7 @@ HUSD_API bool HUSDimportSkeletonPose(
         GU_Detail &gdp,
         const HUSD_SkeletonCache &cache,
         HUSD_SkeletonPoseType pose_type,
-        fpreal timecode);
+        HUSD_TimeCode timecode);
 
 /// Builds an agent rig from the SkelRoot's first Skeleton prim.
 HUSD_API GU_AgentRigPtr

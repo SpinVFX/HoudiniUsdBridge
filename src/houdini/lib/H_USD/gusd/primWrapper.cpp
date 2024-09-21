@@ -2128,4 +2128,22 @@ GusdPrimWrapper::loadSubsets(
             num_uniform, point_attribs, num_points, time);
 }
 
+void
+GusdPrimWrapper::addReversePolygonsAttrib(
+        GT_AttributeListHandle& attrib_list,
+        exint num_elements)
+{
+    static constexpr UT_StringLit theReversePolysName(
+            "usdconfigreversepolygons");
+    static constexpr UT_StringLit theReversePolysValue("1");
+
+    auto reverse_polys = UTmakeIntrusive<GT_DAIndexedString>(num_elements);
+    for (exint i = 0; i < num_elements; ++i)
+        reverse_polys->setString(i, 0, theReversePolysValue.asHolder());
+
+    attrib_list = attrib_list->addAttribute(
+            theReversePolysName.asHolder(), reverse_polys,
+            /*replace_existing=*/true);
+}
+
 PXR_NAMESPACE_CLOSE_SCOPE

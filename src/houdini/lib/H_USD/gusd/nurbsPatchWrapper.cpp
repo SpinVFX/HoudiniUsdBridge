@@ -125,6 +125,11 @@ GusdNurbsPatchWrapper::refine(GT_Refine &refiner, const GT_RefineParms *parms) c
     }
     auto vknots = UTmakeIntrusive<GusdGT_VtArray<double>>(vknot_values);
 
+    TfToken orientation;
+    m_usdPatch.GetOrientationAttr().Get(&orientation, m_time);
+    const bool reverse_orientation
+            = (orientation == UsdGeomTokens->rightHanded);
+
     const int ucount = uknots->entries() - uorder;
     const int vcount = vknots->entries() - vorder;
     const exint num_points = ucount * vcount;
@@ -191,6 +196,9 @@ GusdNurbsPatchWrapper::refine(GT_Refine &refiner, const GT_RefineParms *parms) c
             points.size(), 0, m_usdPatch.GetPath().GetAsString(), nullptr,
             &vertex_attribs, nullptr, &detail_attribs, nullptr);
 
+    if (reverse_orientation)
+        addReversePolygonsAttrib(detail_attribs, 1);
+
     // Load trim curves.
     UT_UniquePtr<GT_TrimNuCurves> trim;
     {
@@ -245,9 +253,7 @@ GusdNurbsPatchWrapper::refine(GT_Refine &refiner, const GT_RefineParms *parms) c
     patch->setTrimCurves(std::move(trim));
 
     // Reverse the orientation if needed.
-    TfToken orientation;
-    m_usdPatch.GetOrientationAttr().Get(&orientation, m_time);
-    if (orientation == UsdGeomTokens->rightHanded)
+    if (reverse_orientation)
         patch = patch->reverseU();
 
     refiner.addPrimitive(patch);

@@ -240,6 +240,12 @@ public:
                     const UsdAttribute& attr, 
                     const VtValue& val);
 
+    /// Add the "usdconfigreversepolygons" attribute to record whether the
+    /// winding order was reversed.
+    static void addReversePolygonsAttrib(
+            GT_AttributeListHandle& attrib_list,
+            exint num_elements);
+
     /// Import geometry subsets as either partition attributes or groups (face
     /// sets).
     /// @param uniform_element_type Specifies the element type (e.g. face or

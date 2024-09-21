@@ -336,6 +336,9 @@ GusdMeshWrapper::refine(
 
     gtPointAttrs = gtPointAttrs->addAttribute(GA_Names::P, gtPoints, true);
 
+    if (reverseWindingOrder)
+        addReversePolygonsAttrib(gtUniformAttrs, usdCounts.size());
+
     UsdAttribute normalsAttr = m_usdMesh.GetNormalsAttr();
     if (normalsAttr.Get(&vtVec3Array, m_time))
     {
