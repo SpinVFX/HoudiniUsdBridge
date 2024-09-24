@@ -96,6 +96,168 @@ namespace
             }
         }
     }
+
+    bool
+    getLocalPrimVisibility(const SdfLayerRefPtr &layer,
+            const UsdGeomImageable &imageable,
+            const UsdTimeCode &usdtime)
+    {
+        auto primspec = layer->GetPrimAtPath(imageable.GetPath());
+        if (primspec)
+        {
+            const SdfPath visspecpath =
+                imageable.GetPath().AppendProperty(UsdGeomTokens->visibility);
+            SdfAttributeSpecHandle visspec;
+
+            visspec = primspec->GetAttributeAtPath(visspecpath);
+            if (visspec && visspec->HasDefaultValue())
+            {
+                VtValue value = visspec->GetDefaultValue();
+                if (value.IsHolding<TfToken>())
+                    return (value.UncheckedGet<TfToken>() !=
+                        UsdGeomTokens->invisible);
+            }
+        }
+
+        TfToken primvis;
+        return (!imageable.GetVisibilityAttr().Get(&primvis, usdtime) ||
+                primvis != UsdGeomTokens->invisible);
+    }
+
+    void
+    setPrimVisibility(const SdfLayerRefPtr &layer,
+            const SdfPath &path,
+            const TfToken &vistoken)
+    {
+        SdfPrimSpecHandle primspec;
+
+        primspec = SdfCreatePrimInLayer(layer, path);
+        if (primspec)
+        {
+            const SdfPath visspecpath =
+                path.AppendProperty(UsdGeomTokens->visibility);
+            SdfAttributeSpecHandle visspec;
+
+            visspec = primspec->GetAttributeAtPath(visspecpath);
+            if (!visspec)
+                visspec = SdfAttributeSpec::New(primspec,
+                    UsdGeomTokens->visibility,
+                    SdfValueTypeNames->Token);
+            if (visspec)
+                visspec->SetDefaultValue(VtValue(vistoken));
+        }
+    }
+
+    void
+    removePrimVisibility(const SdfLayerRefPtr &layer,
+            const SdfPath &path)
+    {
+        SdfPrimSpecHandle	 primspec;
+
+        primspec = layer->GetPrimAtPath(path);
+        if (primspec)
+        {
+            SdfAttributeSpecHandle	 visspec;
+
+            visspec = primspec->GetAttributeAtPath(
+                SdfPath::ReflexiveRelativePath().
+                AppendProperty(UsdGeomTokens->visibility));
+            if (visspec)
+            {
+                primspec->RemoveProperty(visspec);
+                layer->RemovePrimIfInert(primspec);
+            }
+        }
+    }
+
+    void
+    setAncestorsVisible(const SdfLayerRefPtr &layer,
+            const UsdPrim &prim,
+            const UsdTimeCode &usdtime,
+            const SdfPathSet &setting_visible_paths,
+            bool &has_invisible_ancestor)
+    {
+        // This function is basically the same as UsdGeomImageable::MakeVisible.
+        // The difference is basically that we use Sdf APIs to set the visibility
+        // opinions into a specific layer.
+        UsdPrim parent(prim.GetParent());
+
+        if (parent)
+        {
+            UsdGeomImageable parentimageable(parent);
+
+            setAncestorsVisible(layer, parent, usdtime,
+                setting_visible_paths, has_invisible_ancestor);
+            if (parentimageable)
+            {
+                // If the prim (or any ancestor) is marked invisible, we need to
+                // mark this prim visible and all siblings of the passed in prim
+                // as invisible.
+                bool parent_marked_invisible =
+                    !getLocalPrimVisibility(layer, parentimageable, usdtime);
+                if (parent_marked_invisible || has_invisible_ancestor)
+                {
+                    has_invisible_ancestor = true;
+                    if (parent_marked_invisible)
+                        setPrimVisibility(layer, parent.GetPath(),
+                            UsdGeomTokens->inherited);
+                    else
+                        removePrimVisibility(layer, parent.GetPath());
+                    for (auto &&child : parent.GetChildren())
+                    {
+                        // Don't mark a sibling invisible if it is the specific
+                        // child we are interested in, or if it is part of the
+                        // set of prims that we are explicitly making visible.
+                        if (child.GetPath() != prim.GetPath() &&
+                            setting_visible_paths.find(child.GetPath()) ==
+                                setting_visible_paths.end())
+                            setPrimVisibility(layer, child.GetPath(),
+                                UsdGeomTokens->invisible);
+                    }
+                }
+            }
+        }
+    }
+
+    void
+    setAncestorsInvisible(const SdfLayerRefPtr &layer,
+            const UsdPrim &prim,
+            const UsdTimeCode &usdtime)
+    {
+        UsdPrim parent = prim.GetParent();
+        bool found_visible_sibling = false;
+
+        if (parent)
+        {
+            for (auto &&sibling : parent.GetChildren())
+            {
+                UsdGeomImageable imageable(sibling);
+
+                if (imageable &&
+                    getLocalPrimVisibility(layer, imageable, usdtime))
+                {
+                    found_visible_sibling = true;
+                    break;
+                }
+            }
+
+            if (!found_visible_sibling)
+            {
+                setPrimVisibility(layer, parent.GetPath(),
+                    UsdGeomTokens->invisible);
+
+                for (auto &&sibling : parent.GetChildren())
+                {
+                    SdfPath path = sibling.GetPath();
+                    SdfPrimSpecHandle prim = layer->GetPrimAtPath(path);
+                    if (prim)
+                        prim->GetNameParent()->RemoveNameChild(prim);
+                }
+
+                setAncestorsInvisible(layer, parent, usdtime);
+            }
+        }
+    }
 }
 
 HUSD_Overrides::HUSD_Overrides()
@@ -381,29 +543,12 @@ HUSD_Overrides::setVisible(HUSD_AutoWriteOverridesLock &lock,
 	auto	 layer = myData->layer(HUSD_OVERRIDES_BASE_LAYER);
 
 	{
-	    // Run through and delete the "active" override currently set on
+	    // Run through and delete the "visible" override currently set on
 	    // any prims we have been asked to change.
 	    SdfChangeBlock	 changeblock;
 
 	    for (auto &&path : pathset.sdfPathSet())
-	    {
-		SdfPrimSpecHandle	 primspec;
-
-		primspec = layer->GetPrimAtPath(path);
-		if (primspec)
-		{
-		    SdfAttributeSpecHandle	 visspec;
-
-		    visspec = primspec->GetAttributeAtPath(
-			SdfPath::ReflexiveRelativePath().
-			AppendProperty(UsdGeomTokens->visibility));
-		    if (visspec)
-		    {
-			primspec->RemoveProperty(visspec);
-			layer->RemovePrimIfInert(primspec);
-		    }
-		}
-	    }
+                removePrimVisibility(layer, path);
 	}
 
 	{
@@ -420,24 +565,42 @@ HUSD_Overrides::setVisible(HUSD_AutoWriteOverridesLock &lock,
 
 	    for (auto &&path : pathset.sdfPathSet())
 	    {
-		UsdGeomImageable	 prim(stage->GetPrimAtPath(path));
+                UsdPrim                  prim(stage->GetPrimAtPath(path));
+		UsdGeomImageable	 imageable(prim);
 
-		if (prim && prim.ComputeVisibility(usdtime) != vistoken)
+		if (imageable &&
+                    imageable.ComputeVisibility(usdtime) != vistoken)
 		{
-		    SdfPrimSpecHandle	 primspec;
+                    TfToken primvis;
 
-		    primspec = SdfCreatePrimInLayer(layer, path);
-		    if (primspec)
-		    {
-			SdfAttributeSpecHandle	 visspec;
-
-			visspec = SdfAttributeSpec::New(primspec,
-			    UsdGeomTokens->visibility,
-			    SdfValueTypeNames->Token);
-			if (visspec)
-			    visspec->SetDefaultValue(VtValue(vistoken));
-		    }
+                    // Author an opinion on the target prim to make it
+                    // invisible, or to mark it as visible if it is currently
+                    // explicitly marked as invisible. If it isn't marked as
+                    // invisible, it must be invisible because of an ancestor.
+                    if (!visible ||
+                        (imageable.GetVisibilityAttr() &&
+                         imageable.GetVisibilityAttr().Get(&primvis, usdtime) &&
+                         primvis == UsdGeomTokens->invisible))
+                        setPrimVisibility(layer, path, vistoken);
 		}
+
+                // Whether we just marked the target prim visible or not,
+                // we now need to make sure that none of our ancestors are
+                // marked as invisible. If they are, mark them visible,
+                // and set all their children (except the path to the
+                // target) as invisible. Going in reverse, if all our siblings
+                // are marked invisible, clear these opinions and mark the
+                // parent prim invisible.
+                if (visible)
+                {
+                    bool has_invisible_ancestor = false;
+                    setAncestorsVisible(layer, prim.GetPrim(),
+                        usdtime, pathset.sdfPathSet(), has_invisible_ancestor);
+                }
+                else
+                {
+                    setAncestorsInvisible(layer, prim, usdtime);
+                }
 	    }
 	}
     }
@@ -899,8 +1062,8 @@ HUSD_Overrides::showPurpose(HUSD_AutoWriteOverridesLock &lock,
         // from this prim down.
         purposegeo.addDescendants();
 
-        const XUSD_PathSet &purposegeoset
-            = purposegeo.getExpandedPathSet().sdfPathSet();
+        const XUSD_PathSet &purposegeoset =
+            purposegeo.getExpandedPathSet().sdfPathSet();
 
         {
             SdfChangeBlock changeblock;
