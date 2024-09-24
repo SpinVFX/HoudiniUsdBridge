@@ -32,6 +32,7 @@
 #include <pxr/base/tf/pyContainerConversions.h>
 #include BOOST_HEADER(python.hpp)
 #include BOOST_HEADER(python/stl_iterator.hpp)
+#include <ostream>
 
 PXR_NAMESPACE_USING_DIRECTIVE
 
@@ -412,5 +413,22 @@ HUSD_PathSet::iterator
 HUSD_PathSet::end() const
 {
     return iterator(new XUSD_PathSet::iterator(myPathSet->end()));
+}
+
+std::ostream &
+operator<<(std::ostream &os, const HUSD_PathSet &pathset)
+{
+    os << "(" << pathset.size() << ")[";
+    bool first = true;
+    for (auto &&s : pathset)
+    {
+        if (!first)
+            os << ", ";
+        else
+            first = false;
+        os << s;
+    }
+    os << "]";
+    return os;
 }
 

@@ -32,6 +32,7 @@
 #include <pxr/pxr.h>
 #include <initializer_list>
 #include <stddef.h>
+#include <iosfwd>
 
 PXR_NAMESPACE_OPEN_SCOPE
 class XUSD_PathSet;
@@ -141,9 +142,13 @@ public:
     iterator                     begin() const;
     iterator                     end() const;
 
+    friend HUSD_API std::ostream &operator<<(std::ostream &os, const HUSD_PathSet &pathset);
+
 private:
     PXR_NS::XUSD_PathSet        *myPathSet;
 };
+
+HUSD_API std::ostream &operator<<(std::ostream &os, const HUSD_PathSet &pathset);
 
 #endif
 

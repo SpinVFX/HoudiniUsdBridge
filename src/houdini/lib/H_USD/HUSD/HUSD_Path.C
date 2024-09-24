@@ -29,6 +29,7 @@
 #include <pxr/usd/sdf/path.h>
 #include <pxr/base/tf/pyUtils.h>
 #include BOOST_HEADER(python.hpp)
+#include <ostream>
 
 PXR_NAMESPACE_USING_DIRECTIVE
 
@@ -180,4 +181,10 @@ HUSD_Path::getPythonPath() const
     PY_InterpreterAutoLock	 pylock;
 
     return BOOST_NS::python::incref(TfPyObject<SdfPath>(sdfPath()).ptr());
+}
+
+HUSD_API std::ostream &
+operator<<(std::ostream &os, const HUSD_Path &path)
+{
+    return os << path.pathStr();
 }

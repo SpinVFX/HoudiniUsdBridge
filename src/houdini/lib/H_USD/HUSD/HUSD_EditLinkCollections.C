@@ -132,44 +132,62 @@ getLinkData(const SdfPath &sdfpath,
         husd_EditLinkCollectionsPrivate::LinkDefinitionsMap &linkdefs,
         UT_StringArray *errors)
 {
-    UsdCollectionAPI collection(husdGetCollectionAPI(writelock, sdfpath, linktype, errors));
-    auto linkpair = linkdefs.find(sdfpath);
+    UsdCollectionAPI collection(
+            husdGetCollectionAPI(writelock, sdfpath, linktype, errors));
+    auto linkdef = linkdefs.find(sdfpath);
 
-    if (linkpair == linkdefs.end())
+    if (linkdef == linkdefs.end())
     {
-	linkpair = linkdefs.emplace(sdfpath,
-	    husd_EditLinkCollectionsPrivate::LinkDefinition()).first;
+        linkdef = linkdefs.emplace(
+                                  sdfpath, husd_EditLinkCollectionsPrivate::
+                                                   LinkDefinition())
+                          .first;
 
-	if (collection)
+        // First link created here, and there's already links on the prim.
+        // Roll the existing links into the new link since it will replace the
+        // existing one.
+        if (collection)
         {
-	    SdfPathVector		 sdfpaths;
-	    std::string			 reason;
-	    if (!collection.Validate(&reason))
+            SdfPathVector sdfpaths;
+            std::string reason;
+            if (collection.Validate(&reason))
+            {
+                // Add any existing includes/excludes
+                if (collection.GetIncludesRel().GetTargets(&sdfpaths))
+                {
+                    includes.sdfPathSet().insert(
+                            sdfpaths.begin(), sdfpaths.end());
+                }
+
+                if (collection.GetExcludesRel().GetTargets(&sdfpaths))
+                {
+                    excludes.sdfPathSet().insert(
+                            sdfpaths.begin(), sdfpaths.end());
+                }
+
+                collection.GetIncludeRootAttr().Get(
+                        &linkdef->second.myIncludeRoot);
+            }
+            else
             {
                 errors->append(reason);
-                linkpair->second.myIncludeRoot = false;
+                linkdef->second.myIncludeRoot = false;
             }
-	    else
-	    {
-		// Add any existing includes/excludes
-		if (collection.GetIncludesRel().GetTargets(&sdfpaths))
-		    includes.sdfPathSet().insert(sdfpaths.begin(), sdfpaths.end());
-
-		if (collection.GetExcludesRel().GetTargets(&sdfpaths))
-		    excludes.sdfPathSet().insert(sdfpaths.begin(), sdfpaths.end());
-
-		collection.GetIncludeRootAttr().Get(&linkpair->second.myIncludeRoot);
-	    }
         }
         else
         {
-            linkpair->second.myIncludeRoot = false;
+            linkdef->second.myIncludeRoot = false;
         }
+        linkdef->second.myIncludes.swap(includes);
+        linkdef->second.myExcludes.swap(excludes);
     }
-    linkpair->second.myIncludes.swap(includes);
-    linkpair->second.myExcludes.swap(excludes);
+    else
+    {
+        linkdef->second.myIncludes.insert(includes);
+        linkdef->second.myExcludes.insert(excludes);
+    }
 
-    return linkpair->second;
+    return linkdef->second;
 }
 
 HUSD_EditLinkCollections::HUSD_EditLinkCollections(HUSD_AutoWriteLock &lock,
@@ -192,6 +210,13 @@ HUSD_EditLinkCollections::addReverseLinkItems(const HUSD_FindPrims &linksource,
         const HUSD_TimeCode &tc,
         UT_StringArray *errors)
 {
+    /*
+     * In a reverse collection link, the include prims and exclude prims are
+     * really the owner prim of the collection link.  The owner prim here is
+     * then put into the appropriate section of that collection, to be either
+     * included or excluded as indicated.
+     *
+     */
     auto			 outdata = myWriteLock.data();
     int				 old_numerrors = errors ? errors->entries() : 0;
 
@@ -236,6 +261,9 @@ HUSD_EditLinkCollections::addReverseLinkItems(const HUSD_FindPrims &linksource,
 		// Get the link info or create a new one.
 		getLinkData(sdfpath, includes, excludes, myLinkType,
 		    myWriteLock, myPrivate->myLinkDefinitions, errors);
+                //UT_DBGOS(
+                //        __FUNCTION__ << "  addincs - path:" << sdfpath << " - inc:"
+                //                     << includes << " - exc:" << excludes);
 	    }
 	}
     }
@@ -264,6 +292,9 @@ HUSD_EditLinkCollections::addReverseLinkItems(const HUSD_FindPrims &linksource,
 	// Get the link info or create a new one.
 	getLinkData(sdfpath, includes, excludes, myLinkType,
 	    myWriteLock, myPrivate->myLinkDefinitions, errors);
+        // UT_DBGOS(
+        //         __FUNCTION__ << "  addexcs - path:" << sdfpath << " - inc:"
+        //                      << includes << " - exc:" << excludes);
     }
     return (errors == nullptr) || (old_numerrors == errors->entries());
 }
@@ -282,6 +313,12 @@ HUSD_EditLinkCollections::addLinkItems(const HUSD_FindPrims &linksource,
 				       const HUSD_TimeCode &tc,
 				       UT_StringArray *errors)
 {
+    /*
+     * In a regular (forward) collection link, the include and exclude prims map
+     * directly to the inclue and exclude parts of the collection on the owner
+     * prim.
+     *
+     */
     auto			 outdata = myWriteLock.data();
     bool			 success = true;
     int				 old_numerrors = errors ? errors->entries() : 0;

@@ -27,6 +27,7 @@
 
 #include "HUSD_API.h"
 #include <UT/UT_WorkBuffer.h>
+#include <iosfwd>
 #include <stddef.h>
 #include <pxr/pxr.h>
 
@@ -70,6 +71,8 @@ public:
 
     static const HUSD_Path       theRootPrimPath;
 
+    friend HUSD_API std::ostream &operator<<(std::ostream &os, const HUSD_Path &path);
+
 private:
     // The size of an SdfPath object is 8. We create a block of data that
     // we will treat as an SdfPath object within the implementation.
@@ -81,5 +84,6 @@ SYS_FORCE_INLINE size_t hash_value(const HUSD_Path &path)
     return path.hash();
 }
 
+HUSD_API std::ostream &operator<<(std::ostream &os, const HUSD_Path &path);
 #endif
 
