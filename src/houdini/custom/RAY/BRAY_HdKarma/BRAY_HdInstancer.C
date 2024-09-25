@@ -736,7 +736,6 @@ void
 BRAY_HdInstancer::getSegment(int nsegs, float time,
         int &seg0, int &seg1, float &lerp) const
 {
-    nsegs = SYSmin(nsegs, mySegments);
     if (nsegs == 1)
     {
         seg0 = seg1 = 0;
