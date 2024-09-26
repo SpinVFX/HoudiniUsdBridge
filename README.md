@@ -49,13 +49,13 @@ OpenSubdiv (and then USD) to rebuild with these changes.
 
 ## SideFX Changes to the USD Library
 
-The USD library that ships with Houdini is forked from the official USD 22.05
+The USD library that ships with Houdini 20.5 is forked from the official USD 24.03
 release. Some SideFX-specific changes have since been applied to fix bugs, or
 deal with SideFX-specific build issues. Whenever possible we submit pull
 requests to have our changes integrated into the next USD release, but
 sometimes this isn't possible. And in any case, these changes are not part
-of the USD 22.05 release. This section lists every deviation of the SideFX
-USD library from Pixar's 22.05 branch, to help you decide which of these
+of the USD 24.03 release. This section lists every deviation of the SideFX
+USD library from Pixar's 24.03 branch, to help you decide which of these
 changes you may want or need to incorporate into your own USD build.
 
 Changes ordered from oldest to newest at initial release of Houdini 20.5:
