@@ -451,9 +451,10 @@ HUSD_HuskEngine::setRendererPlugin(const HUSD_RenderSettings &settings,
 }
 
 bool
-HUSD_HuskEngine::setAOVs(const HUSD_RenderSettings &settings)
+HUSD_HuskEngine::setAOVs(const HUSD_RenderSettings &settings,
+        HUSD_CustomProductAction custom_product_action)
 {
-    return myEngine->setAOVs(*settings.myOwner);
+    return myEngine->setAOVs(*settings.myOwner, custom_product_action);
 }
 
 void

@@ -12,6 +12,7 @@
 #define __HUSD_HuskEngine__
 
 #include "HUSD_API.h"
+#include "HUSD_Utils.h"
 #include <pxr/pxr.h>
 #include <UT/UT_StringHolder.h>
 #include <UT/UT_StringMap.h>
@@ -161,7 +162,8 @@ public:
     /// for the union of all product groups.  It's assumed that the normal use
     /// case is that all product groups will share the same render vars (i.e.
     /// stereo cameras).
-    bool setAOVs(const HUSD_RenderSettings &settings);
+    bool setAOVs(const HUSD_RenderSettings &settings,
+                        HUSD_CustomProductAction custom_product_action);
 
     /// Update settings for the next frame.
     /// Render Settings may have multiple product groups.  This only updates

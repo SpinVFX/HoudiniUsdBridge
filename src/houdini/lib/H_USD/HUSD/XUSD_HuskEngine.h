@@ -12,8 +12,9 @@
 #define __XUSD_HuskEngine__
 
 #include "HUSD_API.h"
-#include "HUSD_RendererInfo.h"
 #include "HUSD_HuskEngine.h"
+#include "HUSD_RendererInfo.h"
+#include "HUSD_Utils.h"
 #include <UT/UT_NonCopyable.h>
 #include <UT/UT_UniquePtr.h>
 #include <UT/UT_String.h>
@@ -90,7 +91,8 @@ public:
 	    const HUSD_HuskEngine::DelegateParms &rparms);
 
     /// Once render products have been finalized, set the AOVs.
-    bool setAOVs(const XUSD_RenderSettings &settings);
+    bool setAOVs(const XUSD_RenderSettings &settings,
+                        HUSD_CustomProductAction custom_product_action);
 
     /// Update settings for the next frame
     void updateSettings(const XUSD_RenderSettings &settings);

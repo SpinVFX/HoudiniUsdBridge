@@ -12,6 +12,7 @@
 #define __HUSD_RenderSettings__
 
 #include "HUSD_API.h"
+#include "HUSD_Utils.h"
 #include <pxr/pxr.h>
 #include <UT/UT_StringHolder.h>
 #include <UT/UT_NonCopyable.h>
@@ -365,7 +366,7 @@ public:
     /// no render vars on any delegate render products.
     bool        resolveProducts(const HUSD_HuskEngine &engine,
                     HUSD_RenderSettingsContext &ctx,
-                    bool create_dummy_raster_product);
+                    HUSD_CustomProductAction custom_product_action);
 
 
     /// Set up to render the given @c frame and @c product_group.  This will
@@ -379,7 +380,7 @@ public:
                     int product_group,
                     bool make_product_directories,
                     bool process_delegate_products,
-                    bool create_dummy_render_product);
+                    HUSD_CustomProductAction custom_product_action);
 
     /// @{
     /// Query settings on the underlying render setting

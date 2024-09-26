@@ -294,7 +294,8 @@ public:
     /// non-raster products or the offset into the list of raster products.
     bool   expandProduct(const XUSD_RenderSettingsContext &opts,
                     int product_index, int frame);
-    bool   collectAovs(TfTokenVector &aovs, HdAovDescriptorList &descs) const;
+    bool   collectAovs(TfTokenVector &aovs,
+                    HdAovDescriptorList &descs) const;
 
     /// User settings for this product
     const HdAovSettingsMap	&settings() const { return mySettings; }
@@ -361,12 +362,12 @@ public:
     /// Update the frame
     bool	updateFrame(const UsdStageRefPtr &usd,
 			XUSD_RenderSettingsContext &ctx,
-                        bool create_dummy_raster_product);
+                        HUSD_CustomProductAction custom_product_action);
 
     /// Resolve products/vars
     bool	resolveProducts(const UsdStageRefPtr &usd,
 			const XUSD_RenderSettingsContext &ctx,
-                        bool create_dummy_raster_product);
+                        HUSD_CustomProductAction custom_product_action);
 
     /// Get the render settings
     UsdPrim	prim() const { return myUsdSettings.GetPrim(); }
@@ -413,6 +414,7 @@ public:
     void	dump(UT_JSONWriter &w) const;
 
     bool	collectAovs(TfTokenVector &aovs,
+                        HUSD_CustomProductAction custom_product_action,
 			HdAovDescriptorList &descs) const;
 
     static HUSD_AspectConformPolicy conformPolicy(const TfToken &t);

@@ -1494,7 +1494,7 @@ XUSD_RenderSettings::init(const UsdStageRefPtr &usd,
 bool
 XUSD_RenderSettings::updateFrame(const UsdStageRefPtr &usd,
 	XUSD_RenderSettingsContext &ctx,
-        bool create_dummy_render_product)
+        HUSD_CustomProductAction custom_product_action)
 {
     // Indicate we're updating for a subsequent frame in the sequence
     myFirstFrame = false;
@@ -1509,7 +1509,7 @@ XUSD_RenderSettings::updateFrame(const UsdStageRefPtr &usd,
 
     buildRenderSettings(usd, ctx);
 
-    resolveProducts(usd, ctx, create_dummy_render_product);
+    resolveProducts(usd, ctx, custom_product_action);
 
     return true;
 }
@@ -1582,7 +1582,7 @@ XUSD_RenderSettings::accountForExtraProducts(const SdfPathVector &paths) const
 bool
 XUSD_RenderSettings::resolveProducts(const UsdStageRefPtr &usd,
 	const XUSD_RenderSettingsContext &ctx,
-        bool create_dummy_raster_product)
+        HUSD_CustomProductAction custom_product_action)
 {
     if (!myProducts.size())
     {
@@ -1622,7 +1622,7 @@ XUSD_RenderSettings::resolveProducts(const UsdStageRefPtr &usd,
                 return false;
         }
     }
-    if (create_dummy_raster_product)
+    if (custom_product_action == CUSTOM_PRODUCT_CREATE_DUMMY_RASTER)
     {
         int     src_prod = -1;
         bool    has_raster = false;
@@ -1964,13 +1964,16 @@ XUSD_RenderSettings::buildRenderSettings(const UsdStageRefPtr &usd,
 }
 
 bool
-XUSD_RenderSettings::collectAovs(TfTokenVector &aovs, HdAovDescriptorList &descs) const
+XUSD_RenderSettings::collectAovs(TfTokenVector &aovs,
+        HUSD_CustomProductAction custom_product_action,
+        HdAovDescriptorList &descs) const
 {
     int         num_raster = 0;
     for (auto &&p : myProducts)
     {
         // If the product isn't a raster product, we will likely skip the AOVs
-        if (p->productType() != UsdRenderTokens->raster)
+        if (custom_product_action != CUSTOM_PRODUCT_ADD_AOVS &&
+            p->productType() != UsdRenderTokens->raster)
         {
             UT_ErrorLog::format(4, "Non-raster product ({})", p->productType());
             auto it = p->settings().find(HusdHuskTokens->includeAovs);

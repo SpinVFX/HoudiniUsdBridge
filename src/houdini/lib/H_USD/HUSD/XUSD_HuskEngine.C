@@ -556,11 +556,12 @@ areEqual(const HdAovDescriptorList &a, const HdAovDescriptorList &b)
 
 
 bool
-XUSD_HuskEngine::setAOVs(const XUSD_RenderSettings &settings)
+XUSD_HuskEngine::setAOVs(const XUSD_RenderSettings &settings,
+        HUSD_CustomProductAction custom_product_action)
 {
     TfTokenVector	aovs;
     HdAovDescriptorList aovdescs;
-    if (!settings.collectAovs(aovs, aovdescs))
+    if (!settings.collectAovs(aovs, custom_product_action, aovdescs))
 	return false;
 
     UT_ASSERT(settings.products().size());

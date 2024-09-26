@@ -1143,12 +1143,12 @@ HUSD_RenderSettings::updateFrame(HUSD_RenderSettingsContext &ctx,
         int product_group,
         bool mkdirs,
         bool delegate_products,
-        bool create_dummy_render_product)
+        HUSD_CustomProductAction custom_product_action)
 {
     HUSD_HuskEngine     *engine = SYSconst_cast(ctx.huskEngine());
     UT_ASSERT(engine);
     if (!myOwner->updateFrame(engine->impl()->stage(),
-                ctx.impl(), create_dummy_render_product))
+            ctx.impl(), custom_product_action))
     {
         return false;
     }
@@ -1195,11 +1195,11 @@ HUSD_RenderSettings::huskNullRasterName()
 bool
 HUSD_RenderSettings::resolveProducts(const HUSD_HuskEngine &engine,
         HUSD_RenderSettingsContext &ctx,
-        bool create_dummy)
+        HUSD_CustomProductAction custom_product_action)
 {
     return myOwner->resolveProducts(engine.impl()->stage(),
             ctx.impl(),
-            create_dummy);
+            custom_product_action);
 }
 
 UT_UniquePtr<HUSD_RenderProduct>
