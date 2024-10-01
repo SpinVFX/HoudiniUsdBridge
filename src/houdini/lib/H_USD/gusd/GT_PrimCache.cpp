@@ -50,7 +50,7 @@
 
 PXR_NAMESPACE_OPEN_SCOPE
 
-#ifdef DEBUG
+#if 0
 #define DBG(x) x
 #else
 #define DBG(x)
@@ -150,16 +150,33 @@ namespace {
         {
             const int primTypeId = prim->getPrimitiveType();
 
-            if( primTypeId == GT_PRIM_SUBDIVISION_MESH ||
-                primTypeId == GT_PRIM_COLLECT ||
-                primTypeId == GusdGT_PackedUSDMesh::getStaticPrimitiveType() ) {
-
-                prim->refine( *this );
+            // If an instancer references a GusdPrimWrapper, keep refining it
+            // down to standard GT primitive types.
+            if (primTypeId == GT_PRIM_INSTANCE)
+            {
+                auto instance
+                        = UTverify_cast<const GT_PrimInstance*>(prim.get());
+                const int instance_geo_type
+                        = instance->geometry()->getPrimitiveType();
+                if (instance_geo_type
+                            == GusdPrimWrapper::getStaticPrimitiveType()
+                    || instance_geo_type == GT_PRIM_COLLECT
+                    || instance_geo_type == GT_PRIM_INSTANCE)
+                {
+                    instance->refineToInstances(*this, nullptr);
+                    return;
+                }
             }
 
-            else if( primTypeId == GT_PRIM_POLYGON_MESH ) {  
-
-
+            if (primTypeId == GT_PRIM_SUBDIVISION_MESH
+                || primTypeId == GT_PRIM_COLLECT
+                || primTypeId == GusdGT_PackedUSDMesh::getStaticPrimitiveType()
+                || primTypeId == GusdPrimWrapper::getStaticPrimitiveType())
+            {
+                prim->refine( *this );
+            }
+            else if (primTypeId == GT_PRIM_POLYGON_MESH)
+            {
                 // There are significant performace advantages to combining as 
                 // many meshes as possible. 
 
@@ -195,9 +212,8 @@ namespace {
                     sourceMeshes.last().append( mesh );
                 }
             }
-            else {
+            else
                 GT_RefineCollect::addPrimitive( prim );
-            }
         }
     };
 

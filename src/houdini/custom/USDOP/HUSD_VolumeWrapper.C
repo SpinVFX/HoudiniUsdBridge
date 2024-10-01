@@ -21,6 +21,8 @@
 #include <pxr/usd/usdVol/fieldAsset.h>
 #include <pxr/usd/usdVol/volume.h>
 
+#include <GT/GT_Refine.h>
+
 #include <mutex>
 
 PXR_NAMESPACE_OPEN_SCOPE
@@ -90,6 +92,36 @@ HUSD_VolumeWrapper::isValid() const
 }
 
 bool
+HUSD_VolumeWrapper::refine(GT_Refine &refiner, const GT_RefineParms *parms) const
+{
+    if (!isValid())
+    {
+        TF_WARN("Invalid prim");
+        return false;
+    }
+
+    UsdStagePtr stage = myUsdVolume.GetPrim().GetStage();
+    for (auto &&field : myUsdVolume.GetFieldPaths())
+    {
+        UsdVolFieldAsset field_prim(stage->GetPrimAtPath(field.second));
+        if (!field_prim)
+        {
+            TF_WARN("Invalid field '%s' for volume '%s'",
+                    field.second.GetAsString().c_str(),
+                    myUsdVolume.GetPath().GetAsString().c_str());
+            continue;
+        }
+
+        auto field_wrapper = UTmakeIntrusive<HUSD_FieldWrapper>(
+                field_prim, m_time, m_purposes);
+        field_wrapper->setPrimitiveTransform(getPrimitiveTransform());
+        refiner.addPrimitive(field_wrapper);
+    }
+
+    return true;
+}
+
+bool
 HUSD_VolumeWrapper::unpack(
         UT_Array<GU_DetailHandle> &details,
         const UT_StringRef &fileName,
@@ -107,6 +139,8 @@ HUSD_VolumeWrapper::unpack(
     }
 
     // Directly unpack each of the field primitives.
+    // This ensures that the SOP volume name / path attributes are assigned from
+    // the appropriate field primitives, rather than the parent Volume prim.
     UsdStagePtr stage = myUsdVolume.GetPrim().GetStage();
     for (auto &&field : myUsdVolume.GetFieldPaths())
     {
@@ -121,6 +155,7 @@ HUSD_VolumeWrapper::unpack(
 
         auto field_wrapper = UTmakeIntrusive<HUSD_FieldWrapper>(
                 field_prim, m_time, m_purposes);
+        field_wrapper->setPrimitiveTransform(getPrimitiveTransform());
         field_wrapper->unpack(
                 details, fileName, field_prim.GetPath(), xform, frame,
                 viewportLod, purposes, rparms);
