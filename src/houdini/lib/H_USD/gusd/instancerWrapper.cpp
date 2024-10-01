@@ -26,6 +26,7 @@
 #include "context.h"
 #include "GT_PrimCache.h"
 #include "GU_PackedUSD.h"
+#include "GU_USD.h"
 #include "refiner.h"
 #include "USD_XformCache.h"
 #include "UT_Gf.h"
@@ -446,10 +447,8 @@ defineForRead( const UsdGeomImageable&  sourcePrim,
                UsdTimeCode              time,
                GusdPurposeSet           purposes )
 {
-    return new GusdInstancerWrapper( 
-                    UsdGeomPointInstancer( sourcePrim.GetPrim() ),
-                    time,
-                    purposes );
+    return UTmakeIntrusive<GusdInstancerWrapper>(
+            UsdGeomPointInstancer(sourcePrim.GetPrim()), time, purposes);
 }
 
 bool GusdInstancerWrapper::
@@ -540,8 +539,7 @@ getMemoryUsage() const
 GT_PrimitiveHandle GusdInstancerWrapper::
 doSoftCopy() const
 {
-    // TODO
-    return GT_PrimitiveHandle(new GusdInstancerWrapper( *this ));
+    return UTmakeIntrusive<GusdInstancerWrapper>( *this );
 }
 
 
@@ -1432,11 +1430,11 @@ refine( GT_Refine& refiner,
             continue;
         }
 
-        GT_PrimitiveHandle gtPrim = GusdGT_PrimCache::GetInstance().GetPrim( 
-                                        p, m_time, m_purposes );
+        GT_PrimitiveHandle gt_prim = GusdPrimWrapper::defineForRead(
+                UsdGeomImageable(p), m_time, m_purposes);
+        UT_ASSERT(gt_prim);
 
-
-        auto transforms = new GT_TransformArray();
+        auto transforms = UTmakeIntrusive<GT_TransformArray>();
         for( size_t i = 0; i < indices.size(); ++i ) {
 
             int idx = indices[i];
@@ -1450,11 +1448,15 @@ refine( GT_Refine& refiner,
             }
 
             const UT_Matrix4D& m = GusdUT_Gf::Cast( frames[i] );
-            transforms->append( new GT_Transform( &m, 1 ) );
+            transforms->append( UTmakeIntrusive<GT_Transform>( &m, 1 ) );
         }
-        if( transforms->entries() > 0 ) {
 
-            refiner.addPrimitive( new GT_PrimInstance( gtPrim, transforms ));
+        if (transforms->entries() > 0)
+        {
+            auto instances = UTmakeIntrusive<GT_PrimInstance>(
+                    gt_prim, transforms);
+            instances->setPrimitiveTransform(getPrimitiveTransform());
+            refiner.addPrimitive(instances);
         }
     }
     return true;
@@ -1463,8 +1465,9 @@ refine( GT_Refine& refiner,
 GT_DataArrayHandle
 Gusd_ConvertDegToRad(const GT_DataArrayHandle &deg_attr)
 {
-    UT_IntrusivePtr<GT_DANumeric<float>> rad_attr = new GT_DANumeric<float>(
-        deg_attr->entries(), deg_attr->getTupleSize(), deg_attr->getTypeInfo());
+    auto rad_attr = UTmakeIntrusive<GT_DANumeric<float>>(
+            deg_attr->entries(), deg_attr->getTupleSize(),
+            deg_attr->getTypeInfo());
 
     GT_DataArrayHandle buffer;
     const float *deg_data = deg_attr->getF32Array(buffer);
@@ -1520,6 +1523,10 @@ GusdInstancerWrapper::unpack(UT_Array<GU_DetailHandle> &details,
 {
     UsdPrim usdPrim = m_usdPointInstancer.GetPrim();
 
+    UT_Matrix4D gt_prim_xform(1.0);
+    if (getPrimitiveTransform())
+        getPrimitiveTransform()->getMatrix(gt_prim_xform);
+
     UsdRelationship relationship = m_usdPointInstancer.GetPrototypesRel();
     SdfPathVector targets;
     relationship.GetForwardedTargets( &targets );
@@ -1530,12 +1537,6 @@ GusdInstancerWrapper::unpack(UT_Array<GU_DetailHandle> &details,
         TF_WARN( "error getting indicies" );
         return false;
     }
-
-    UT_Matrix4D instancerXform;
-    GusdUSD_XformCache::GetInstance().
-        GetLocalToWorldTransform( usdPrim,
-                                  UsdTimeCode( frame ),
-                                  instancerXform );
 
     VtArray<GfMatrix4d> frames;
     if( !m_usdPointInstancer.ComputeInstanceTransformsAtTime( &frames,
@@ -1564,9 +1565,12 @@ GusdInstancerWrapper::unpack(UT_Array<GU_DetailHandle> &details,
         }
     }
 
-    auto detail = new GU_Detail();
+    const auto pivot = static_cast<GusdGU_PackedUSD::PivotLocation>(
+            GT_RefineParms::getInt(&rparms, GUSD_REFINE_PIVOTLOCATION, 0));
+
     GU_DetailHandle gdh;
-    gdh.allocateAndSet(detail);
+    gdh.allocateAndSet(new GU_Detail(), /*own=*/true);
+    GU_Detail *detail = gdh.gdpNC();
 
     for( size_t i = 0; i < indices.size(); ++i )
     {
@@ -1577,10 +1581,12 @@ GusdInstancerWrapper::unpack(UT_Array<GU_DetailHandle> &details,
             continue;
         }
 
-        const UT_Matrix4D m = GusdUT_Gf::Cast(frames[i]) * xform;
+        UT_Matrix4D m = GusdUT_Gf::Cast(frames[i]) * gt_prim_xform;
+        m *= xform;
+
         GusdGU_PackedUSD::Build(
                 *detail, fileName, targets[idx], primPath, i, frame,
-                viewportLod, purposes, UsdPrim(), &m);
+                viewportLod, purposes, UsdPrim(), &m, pivot);
     }
 
 

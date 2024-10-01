@@ -42,10 +42,12 @@
 #include <GA/GA_Iterator.h>
 #include <GA/GA_Names.h>
 #include <GA/GA_SplittableRange.h>
+#include <GT/GT_RefineParms.h>
 #include <GU/GU_Detail.h>
 #include <GU/GU_PrimPacked.h>
 #include <UT/UT_Interrupt.h>
 #include <UT/UT_ParallelUtil.h>
+#include <UT/UT_UniquePtr.h>
 
 PXR_NAMESPACE_OPEN_SCOPE
 
@@ -1257,12 +1259,22 @@ GusdGU_USD::AppendExpandedPackedPrimsFromLopNode(
         dstPurposes.GetArray()(i) = srcPurposes(primIndexPairs(i).second);
     }
 
+    const exint unpack_iters = GT_RefineParms::getInt(
+            refineParms, GUSD_REFINE_ITERATIONS, 1);
+    const bool unpack_trivial = !unpackToPolygons && unpack_iters == 1;
+
     // Make a GU_Detail pointer to help handle 2 cases:
     // 1. If unpacking to polygons, point to a new temporary detail so
     //    that intermediate prims don't get appended to gd.
     // 2. If NOT unpacking to polygons, point to gd so result prims do
     //    get appended to it.
-    GU_Detail* gdPtr = unpackToPolygons ? new GU_Detail : &gd;
+    GU_Detail* gdPtr = &gd;
+    UT_UniquePtr<GU_Detail> temp_detail;
+    if (!unpack_trivial)
+    {
+        temp_detail = UTmakeUnique<GU_Detail>();
+        gdPtr = temp_detail.get();
+    }
 
     GA_Size start = gdPtr->getNumPrimitives();
     AppendPackedPrimsFromLopNode(
@@ -1294,8 +1306,15 @@ GusdGU_USD::AppendExpandedPackedPrimsFromLopNode(
     // including repeats for expanded prims. 
     GA_OffsetList srcOffsets;
 
-    if (unpackToPolygons) {
+    if (!unpack_trivial) {
         GA_Size gdStart = gd.getNumPrimitives();
+
+        GT_RefineParms parms;
+        if (refineParms)
+            parms = *refineParms;
+
+        parms.set(GUSD_REFINE_UNPACKTOPOLYGONS, unpackToPolygons);
+        parms.set(GUSD_REFINE_PIVOTLOCATION, static_cast<exint>(pivotloc));
 
         // If unpacking down to polygons, iterate through the intermediate
         // packed prims in gdPtr, convert them to GU_Details, and merge them
@@ -1304,7 +1323,7 @@ GusdGU_USD::AppendExpandedPackedPrimsFromLopNode(
                 *gdPtr, primvarPattern, importInheritedPrimvars,
                 attributePattern, translateSTtoUV,
                 nonTransformingPrimvarPattern, filePathAttrib, primPathAttrib,
-                refineParms);
+                &parms);
         UTparallelReduce(
             UT_BlockedRange<exint>(start, gdPtr->getNumPrimitives()), task);
 
@@ -1329,9 +1348,6 @@ GusdGU_USD::AppendExpandedPackedPrimsFromLopNode(
         // primDstRng needs to be reset to be the range of unpacked prims in
         // gd (instead of the range of intermediate packed prims in gdPtr).
         primDstRng = GA_Range(gd.getPrimitiveRangeSlice(gdStart));
-
-        // All done with gdPtr.
-        delete gdPtr;
     } else {
         // Compute list of source offsets.
         srcOffsets.setEntries(dstSize);

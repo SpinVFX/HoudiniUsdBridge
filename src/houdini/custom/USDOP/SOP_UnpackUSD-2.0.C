@@ -83,6 +83,24 @@ static const char* theDsFile = R"THEDSFILE(
             }
         }
         parm {
+            name	"limititerations"
+            label	"Limit Iterations"
+            cppname	"LimitIterations"
+            type	toggle
+            nolabel
+            joinnext
+            default	{ "1" }
+        }
+        parm {
+            name	"iterations"
+            label	"Iterations"
+            cppname	"Iterations"
+            type	integer
+            default	{ "1" }
+            range       { 1! 10 }
+            disablewhen "{ limititerations == 0 }"
+        }
+        parm {
             name    "pivot"
             cppname "PivotLocation"
             label   "Pivot Location"
@@ -143,6 +161,23 @@ static const char* theDsFile = R"THEDSFILE(
             type    string
             default { "usdpath" }
             disablewhen "{ addfilepathattrib == 0 }"
+        }
+        parm {
+            name    "addinstancelevelattrib"
+            cppname "AddInstanceLevelAttrib"
+            label   "Add Instance Level Attribute"
+            type    toggle
+            nolabel
+            joinnext
+            default { "0" }
+        }
+        parm {
+            name    "instancelevelattrib"
+            cppname "InstanceLevelAttrib"
+            label   "Instance Level Attribute"
+            type    string
+            default { "instancelevel" }
+            disablewhen "{ addinstancelevelattrib == 0 }"
         }
         parm {
             name    "transferattributes"
@@ -379,12 +414,12 @@ sopUnpackUSDPrims(
             return;
         }
     }
-    else if (unpack_to_polys)
+    else
     {
-        // If there is no traversal specified, but unpack to polygons is
+        // If there is no traversal specified, just copy the original packed
+        // prims into traversedPrims. Note that if unpack to polygons is
         // enabled, a second traversal will be done upon traversedPrims to make
-        // sure it contains gprim level prims. Just copy the original packed
-        // prims into traversedPrims.
+        // sure it contains gprim level prims.
         const exint n = root_prims.size();
         traversed_prims.setSize(n);
         for (exint i = 0; i < n; ++i)
@@ -492,10 +527,22 @@ sopUnpackUSDPrims(
     if (parms.getAddPathAttrib())
         path_attrib_name = parms.getPathAttrib();
 
+    exint iterations = -1;
+    if (parms.getLimitIterations())
+        iterations = parms.getIterations();
+
     GT_RefineParms refine_parms;
     refine_parms.set(
             GUSD_REFINE_IMPORTCOMPUTEDVISIBILITY,
             parms.getImportComputedVisibility());
+    refine_parms.set(GUSD_REFINE_ITERATIONS, iterations);
+
+    refine_parms.set(
+            GUSD_REFINE_ADDINSTANCELEVELATTRIB,
+            parms.getAddInstanceLevelAttrib());
+    refine_parms.set(
+            GUSD_REFINE_INSTANCELEVELATTRIB, parms.getInstanceLevelAttrib());
+
     GusdGU_USD::AppendExpandedPackedPrimsFromLopNode(
             detail, src_detail, src_range, traversed_prims, traversed_times,
             filter, unpack_to_polys, parms.getImportPrimvars().c_str(),

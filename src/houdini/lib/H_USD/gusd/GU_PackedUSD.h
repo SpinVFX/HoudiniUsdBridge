@@ -75,9 +75,9 @@ class GUSD_API GusdGU_PackedUSD : public GU_PackedImpl
 #endif
 {
 public:
-    enum class PivotLocation
+    enum class PivotLocation : int
     {
-        Origin,
+        Origin = 0,
         Centroid
     };
 

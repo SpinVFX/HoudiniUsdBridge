@@ -47,6 +47,7 @@
 #include "pxr/usd/usdGeom/xform.h"
 #include "pxr/usd/usdGeom/scope.h"
 #include "pxr/usd/usdGeom/xformable.h"
+#include "pxr/usd/usdVol/fieldBase.h"
 
 
 #include "pxr/base/tf/fileUtils.h"
@@ -828,6 +829,106 @@ Gusd_AccumulateAttribPattern(
     return pattern;
 }
 
+namespace
+{
+using GusdPrimWrapperConstPtr = UT_IntrusivePtr<const GusdPrimWrapper>;
+
+struct gusdUnpackPrimInfo
+{
+    GusdPrimWrapperConstPtr myPrim;
+    exint myInstanceLevel = 0;
+};
+
+/// Performs additional iterations of unpacking (by refining the GT wrappers for
+/// USD prims) before converting to SOP geometry.
+class gusdPackedUSDRefiner : public GT_Refine
+{
+public:
+    gusdPackedUSDRefiner(const GT_RefineParms &parms, bool unpack_to_polys)
+        : myParms(parms)
+        , myUnpackToPolys(unpack_to_polys)
+        , myRemainingIterations(
+                  GT_RefineParms::getInt(&myParms, GUSD_REFINE_ITERATIONS, 1))
+    {
+    }
+
+    const UT_Array<gusdUnpackPrimInfo> &getPrimsToUnpack() const
+    {
+        return myPrimsToUnpack;
+    }
+
+    bool allowThreading() const final { return false; }
+
+    void addPrimitive(const GT_PrimitiveHandle &prim) final
+    {
+        int prim_type = prim->getPrimitiveType();
+
+        // Unpacking a non-leaf prim (e.g. Xform) produces a collection of child
+        // prims.
+        if (prim_type == GT_PRIM_COLLECT)
+        {
+            prim->refine(*this, &myParms);
+            return;
+        }
+
+        // Unpacking a point instancer should produce separate packed USD prims
+        // for each instance.
+        if (prim_type == GT_PRIM_INSTANCE)
+        {
+            auto instancer = UTverify_cast<const GT_PrimInstance *>(prim.get());
+            ++myInstanceLevel;
+            instancer->flattenInstances(*this, &myParms);
+            --myInstanceLevel;
+            return;
+        }
+
+        if (prim_type != GusdPrimWrapper::getStaticPrimitiveType())
+        {
+            // Unpacking to polygons takes place in GusdPrimWrapper::unpack()
+            // and shouldn't happen here.
+            UT_ASSERT_MSG(
+                    false, "We should not have unpacked to anything other than "
+                           "GusdPrimWrapper!");
+            return;
+        }
+
+        auto wrapper = UTverify_cast<const GusdPrimWrapper *>(prim.get());
+        const UsdPrim usd_prim = wrapper->getUsdPrim().GetPrim();
+
+        // If we reached a leaf USD prim, we're done. Otherwise, keep refining
+        // to child prims until we hit the max number of iterations.
+        // Note that we stop at 1 since there is implicitly one iteration
+        // already (the initial traversal done in the Unpack USD SOP, along with
+        // unpacking to polygons after). A negative number of iterations implies
+        // unpacking as far as possible.
+        if (myRemainingIterations == 1 || usd_prim.IsA<UsdGeomGprim>()
+            || usd_prim.IsA<UsdVolFieldBase>())
+        {
+            // If we landed on a point instancer, add one since
+            // GusdInstancerWrapper::unpack() will bring us to the next instance
+            // level.
+            exint instance_level = myInstanceLevel;
+            if (myUnpackToPolys && usd_prim.IsA<UsdGeomPointInstancer>())
+                ++instance_level;
+
+            myPrimsToUnpack.append({wrapper, instance_level});
+            return;
+        }
+
+        --myRemainingIterations;
+        prim->refine(*this, &myParms);
+        ++myRemainingIterations;
+    }
+
+private:
+    GT_RefineParms myParms;
+    const bool myUnpackToPolys = false;
+    exint myRemainingIterations = 1;
+    exint myInstanceLevel = 0;
+    UT_SmallArray<gusdUnpackPrimInfo> myPrimsToUnpack;
+};
+}
+
 bool
 GusdGU_PackedUSD::unpackPrim(
     UT_Array<GU_DetailHandle> &details,
@@ -856,13 +957,94 @@ GusdGU_PackedUSD::unpackPrim(
         return false;
     }
 
-    auto wrapper = UTverify_cast<const GusdPrimWrapper *>(gtPrim.get());
-    return wrapper->unpack(
-            details, fileName(), primPath, xform, intrinsicFrame(),
-            srcgdp ? intrinsicViewportLOD(UTverify_cast<const GU_PrimPacked *>(
-                    srcgdp->getPrimitive(srcprimoff))) :
-                     "full",
-            m_purposes, rparms);
+    const char *lod = "full";
+    if (srcgdp)
+    {
+        lod = intrinsicViewportLOD(UTverify_cast<const GU_PrimPacked *>(
+                srcgdp->getPrimitive(srcprimoff)));
+    }
+
+    const bool unpack_to_polys = GT_RefineParms::getBool(
+            &rparms, GUSD_REFINE_UNPACKTOPOLYGONS, true);
+
+    // Perform any additional iterations of unpacking.
+    gusdPackedUSDRefiner refiner(rparms, unpack_to_polys);
+    refiner.addPrimitive(gtPrim);
+
+    bool add_instance_attrib = false;
+    UT_StringHolder instance_attrib_name;
+    if (rparms.get(GUSD_REFINE_ADDINSTANCELEVELATTRIB, false)
+        && rparms.import(GUSD_REFINE_INSTANCELEVELATTRIB, instance_attrib_name)
+        && instance_attrib_name)
+    {
+        add_instance_attrib = true;
+    }
+
+    bool success = true;
+    if (unpack_to_polys)
+    {
+        for (const gusdUnpackPrimInfo &info : refiner.getPrimsToUnpack())
+        {
+            exint details_start = details.size();
+            success &= info.myPrim->unpack(
+                    details, fileName(), primPath, xform, intrinsicFrame(), lod,
+                    m_purposes, rparms);
+
+            if (add_instance_attrib)
+            {
+                for (exint i = details_start, n = details.size(); i < n; ++i)
+                {
+                    GU_Detail &detail = *details[i].gdpNC();
+                    GA_RWHandleI iterations_attrib = detail.addIntTuple(
+                            GA_ATTRIB_PRIMITIVE, instance_attrib_name, 1);
+
+                    iterations_attrib.makeConstant(info.myInstanceLevel);
+                }
+            }
+        }
+    }
+    else
+    {
+        // If not unpacking to polygons, create packed prims for the referenced
+        // USD prims.
+        GU_DetailHandle gdh;
+        gdh.allocateAndSet(new GU_Detail(), /*own=*/true);
+        GU_Detail *gdp = gdh.gdpNC();
+
+        GA_RWHandleI instance_attrib;
+        if (add_instance_attrib)
+        {
+            instance_attrib = gdp->addIntTuple(
+                    GA_ATTRIB_PRIMITIVE, instance_attrib_name, 1);
+        }
+
+        const auto pivot = static_cast<GusdGU_PackedUSD::PivotLocation>(
+                GT_RefineParms::getInt(&rparms, GUSD_REFINE_PIVOTLOCATION, 0));
+
+        for (const gusdUnpackPrimInfo &info : refiner.getPrimsToUnpack())
+        {
+            const GusdPrimWrapperConstPtr &wrapper = info.myPrim;
+            UsdPrim prim = wrapper->getUsdPrim().GetPrim();
+
+            UT_Matrix4D prim_xform;
+            wrapper->getPrimitiveTransform()->getMatrix(prim_xform);
+            prim_xform *= xform;
+
+            GU_PrimPacked *packed = GusdGU_PackedUSD::Build(
+                    *gdp, prim, intrinsicFrame(), lod, m_purposes, &prim_xform,
+                    pivot);
+
+            if (instance_attrib.isValid())
+            {
+                instance_attrib.set(
+                        packed->getMapOffset(), info.myInstanceLevel);
+            }
+        }
+
+        details.append(gdh);
+    }
+
+    return success;
 }
 
 bool

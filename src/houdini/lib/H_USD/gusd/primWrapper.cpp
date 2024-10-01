@@ -211,8 +211,10 @@ defineForRead( const UsdGeomImageable&  sourcePrim,
                         USDTypeToDefineFuncMap::accessor accessor;
                         s_usdTypeToFuncMap.insert(accessor, typeName);
                         accessor->second = caccessor->second;
-                        TF_WARN("Type \"%s\" not registered, using base type \"%s\".",
+#if 0
+                        GUSD_WARN().Msg("Type \"%s\" not registered, using base type \"%s\".",
                                 typeName.GetText(), typeAlias.c_str());
+#endif
                         break;
                     }
                 }
@@ -329,6 +331,13 @@ bool
 GusdPrimWrapper::isValid() const
 { 
     return false;
+}
+
+int
+GusdPrimWrapper::getStaticPrimitiveType()
+{
+    static const int thePrimitiveType = GT_Primitive::createPrimitiveTypeId();
+    return thePrimitiveType;
 }
 
 /// Record the "usdxform" point attribute with the prim's original transform
