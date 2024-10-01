@@ -49,6 +49,9 @@ public:
 
     bool isValid() const override;
 
+    bool refine(GT_Refine &refiner,
+                const GT_RefineParms *parms = nullptr) const override;
+
     bool unpack(
             UT_Array<GU_DetailHandle> &details,
             const UT_StringRef &fileName,

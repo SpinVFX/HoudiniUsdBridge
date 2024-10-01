@@ -36,6 +36,7 @@
 #include <GA/GA_Names.h>
 #include <GA/GA_Range.h>
 #include <UT/UT_ErrorManager.h>
+#include <UT/UT_StringHolder.h>
 
 #include "pxr/pxr.h"
 
@@ -73,6 +74,8 @@ PXR_NAMESPACE_OPEN_SCOPE
 #define GUSD_REFINE_PATHATTRIB              "usd:pathAttribute"
 #define GUSD_REFINE_ADDPRIMPATHATTRIB       "usd:addPrimPathAttribute"
 #define GUSD_REFINE_PRIMPATHATTRIB          "usd:primPathAttribute"
+#define GUSD_REFINE_ADDINSTANCELEVELATTRIB  "usd:addInstanceLevelAttrib"_UTsh
+#define GUSD_REFINE_INSTANCELEVELATTRIB     "usd:instanceLevelAttrib"_UTsh
 #define GUSD_REFINE_ADDMATERIALPATHATTRIB   "usd:addMaterialPathAttribute"
 #define GUSD_REFINE_ADDVISIBILITYATTRIB     "usd:addVisibilityAttribute"
 #define GUSD_REFINE_IMPORTCOMPUTEDVISIBILITY "usd:importComputedVisibility"
@@ -82,6 +85,9 @@ PXR_NAMESPACE_OPEN_SCOPE
 #define GUSD_REFINE_IMPORTINHERITEDPRIMVARS "usd:importInheritedPrimvars"
 #define GUSD_REFINE_ATTRIBUTEPATTERN        "usd:attributePattern"
 #define GUSD_REFINE_TRANSLATESTTOUV         "usd:translateSTtoUV"
+#define GUSD_REFINE_ITERATIONS              "usd:iterations"_UTsh
+#define GUSD_REFINE_UNPACKTOPOLYGONS        "usd:unpacktopolygons"_UTsh
+#define GUSD_REFINE_PIVOTLOCATION           "usd:pivotlocation"_UTsh
 /** @} */
 
 /** Set of helpers for working with ranges of prims/points, etc.*/

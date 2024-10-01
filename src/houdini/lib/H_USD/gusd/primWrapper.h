@@ -178,6 +178,13 @@ public:
     GusdPrimWrapper( const GusdPrimWrapper &in );
     ~GusdPrimWrapper() override;
 
+    static int getStaticPrimitiveType();
+
+    int getPrimitiveType() const final
+    {
+        return getStaticPrimitiveType();
+    }
+
     /// Return true if the underlying USD prim is valid
     virtual bool isValid() const;
 

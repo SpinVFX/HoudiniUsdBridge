@@ -179,7 +179,7 @@ HUSD_FieldWrapper::refine(GT_Refine &refiner, const GT_RefineParms *parms) const
         vol->setUniformAttributes(attribs);
     }
 
-    refiner.addPrimitive(volume);
+    refiner.addPrimitive(volume->copyTransformed(getPrimitiveTransform()));
     return true;
 }
 
