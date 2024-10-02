@@ -225,9 +225,10 @@ namespace
             const UsdTimeCode &usdtime)
     {
         UsdPrim parent = prim.GetParent();
+        UsdGeomImageable parentimageable(parent);
         bool found_visible_sibling = false;
 
-        if (parent)
+        if (parentimageable)
         {
             for (auto &&sibling : parent.GetChildren())
             {
