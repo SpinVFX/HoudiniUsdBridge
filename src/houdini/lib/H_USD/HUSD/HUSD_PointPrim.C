@@ -58,14 +58,32 @@ namespace
 	    const UT_StringArray &targetprimpaths,
 	    const UT_Int64Array *srcdataindices)
     {
-	UT_StringHolder attribname(attrib.GetName());
+        static constexpr UT_StringLit thePrimvarsPrefix("primvars:");
+        static constexpr UT_StringLit theIndicesSuffix(":indices");
+
+        UT_StringHolder attribname(attrib.GetName());
 	UT_Array<uttype> values;
 
-	if (!getattrs.getAttributeArray(
-                sourceprimpath, attribname, values, timecode))
-	    return false;
+        if (attribname.startsWith(thePrimvarsPrefix.asRef()))
+        {
+            // Ignore the primvars:foo:indices attribute.
+            if (attribname.endsWith(theIndicesSuffix.asRef()))
+                return false;
 
-	exint count = SYSmin(targetprimpaths.size(), values.size());
+            if (!getattrs.getFlattenedPrimvar(
+                        sourceprimpath, attribname, values, timecode,
+                        /*allow_inheritance=*/false))
+            {
+                return false;
+            }
+        }
+        else if (!getattrs.getAttributeArray(
+                         sourceprimpath, attribname, values, timecode))
+        {
+	    return false;
+        }
+
+        exint count = SYSmin(targetprimpaths.size(), values.size());
 	UT_StringHolder valuetype(attrib.GetTypeName().GetAsToken().GetText());
 
 	// For now just assume that the array primvar & attributes are
@@ -73,7 +91,7 @@ namespace
 	//
 	// This already covers many uses cases, like writing to standard light
 	// attributes.
-	attribname.substitute("primvars:", "");
+	attribname.substitute(thePrimvarsPrefix.asRef(), "");
 	valuetype.substitute("[]", "");
 
 	UT_String    tempname;
@@ -419,6 +437,49 @@ namespace
 
         return true;
     }
+
+    /// Wrapper for HUSD_GetAttributes::getAttributeArray() which also validates
+    /// the array length.
+    template <typename UtValueType>
+    inline bool
+    husdGetAttributeArray(
+            const HUSD_GetAttributes &getattrs,
+            const UT_StringRef &primpath,
+            const UT_StringRef &attribname,
+            UT_Array<UtValueType> &value,
+            const HUSD_TimeCode &timecode,
+            const exint expected_size)
+    {
+        return getattrs.getAttributeArray(primpath, attribname, value, timecode)
+               && value.size() == expected_size;
+    }
+
+    /// Convert the data array to vertex interpolation and validate the array
+    /// length.
+    /// For now we just support constant -> vertex, since other interpolation
+    /// types need prim-specific logic.
+    template <typename T>
+    bool
+    husdPromoteToVertexInterpolation(
+            UT_Array<T> &values,
+            const UT_StringRef &interpolation,
+            const exint num_vertices)
+    {
+        if (interpolation == HUSD_Constants::getInterpolationVertex())
+            return values.size() == num_vertices;
+
+        if (interpolation == HUSD_Constants::getInterpolationConstant())
+        {
+            if (values.size() != 1)
+                return false;
+
+            values.appendMultiple(values[0], num_vertices - 1);
+            return true;
+        }
+
+        // Unsupported interpolation type.
+        return false;
+    }
 }
 
 bool
@@ -463,66 +524,75 @@ HUSD_PointPrim::extractTransforms(HUSD_AutoAnyLock &readlock,
 			timecode))
 		    return false;
 
-		if (orients)
+                const exint num_points = tmppositions.size();
+
+                if (orients)
 		{
-		    hasorient = getattrs.getAttributeArray(
-			    primpath,
-			    { "primvars:orient" },
-			    tmporientationsH,
-			    timecode);
+                    hasorient = husdGetAttributeArray(
+                            getattrs, primpath, "primvars:orient"_UTsh,
+                            tmporientationsH, timecode, num_points);
+
+                    if (!hasorient)
+		    {
+                        hasorient = husdGetAttributeArray(
+                                getattrs, primpath, "primvars:orient"_UTsh,
+                                tmporientationsF, timecode, num_points);
+                    }
 		    if (!hasorient)
 		    {
-			hasorient = getattrs.getAttributeArray(
-				primpath,
-				{ "primvars:orient" },
-				tmporientationsF,
-				timecode);
-		    }
-		    if (!hasorient)
+		    	static constexpr UT_StringLit theNormalsName("normals");
+                        hasorient = getattrs.getAttributeArray(
+                                primpath, theNormalsName.asRef(), tmpnormals,
+                                timecode);
+
+                        if (hasorient)
+                        {
+                            hasorient = husdPromoteToVertexInterpolation(
+                                    tmpnormals,
+                                    getattrs.getAttributeInterpolation(
+                                            primpath, theNormalsName.asRef()),
+                                    num_points);
+                        }
+                    }
+                    if (!hasorient)
 		    {
-			hasorient = getattrs.getAttributeArray(
-				primpath,
-				{ "normals" },
-				tmpnormals,
-				timecode);
-		    }
-		    if (!hasorient)
-		    {
-			hasorient = getattrs.getAttributeArray(
-				primpath,
-				{ "velocities" },
-				tmpnormals,
-				timecode);
-		    }
+                        hasorient = husdGetAttributeArray(
+                                getattrs, primpath, "velocities"_UTsh,
+                                tmpnormals, timecode, num_points);
+                    }
 		    if (hasorient) // not a typo, we want to do this if *true*
 		    {
-			getattrs.getAttributeArray(
-				primpath,
-				{ "primvars:up" },
-				tmpups,
-				timecode);
-		    }
+                        husdGetAttributeArray(
+                                getattrs, primpath, "primvars:up"_UTsh, tmpups,
+                                timecode, num_points);
+                    }
 		}
 
 		if (scales)
 		{
-		    hasscale = getattrs.getAttributeArray(
-			    primpath,
-			    { "primvars:scale" },
-			    tmpscales,
-			    timecode);
-		    haspscale = getattrs.getAttributeArray(
-			    primpath,
-			    { "primvars:pscale" },
-			    tmppscales,
-			    timecode);
-		    if (!haspscale)
+                    hasscale = husdGetAttributeArray(
+                            getattrs, primpath, "primvars:scale"_UTsh,
+                            tmpscales, timecode, num_points);
+                    haspscale = husdGetAttributeArray(
+                            getattrs, primpath, "primvars:pscale"_UTsh,
+                            tmppscales, timecode, num_points);
+                    if (!haspscale)
 		    {
-			haspscale = getattrs.getAttributeArray(
-			    primpath,
-			    { "widths" },
-			    tmppscales,
-			    timecode);
+		    	static constexpr UT_StringLit theWidthsName("widths");
+
+                        haspscale = getattrs.getAttributeArray(
+                                primpath, theWidthsName.asRef(), tmppscales,
+                                timecode);
+
+                        // The widths attribute might not have vertex interpolation.
+                        if (haspscale)
+                        {
+                            haspscale = husdPromoteToVertexInterpolation(
+                                    tmppscales,
+                                    getattrs.getAttributeInterpolation(
+                                            primpath, theWidthsName.asRef()),
+                                    num_points);
+                        }
 
                         // Convert the widths attribute from diameter to radius.
                         for (float &pscale : tmppscales)
@@ -539,23 +609,23 @@ HUSD_PointPrim::extractTransforms(HUSD_AutoAnyLock &readlock,
 			timecode))
 		    return false;
 
+                const exint num_points = tmppositions.size();
+
 		if (orients)
 		{
-		    hasorient = getattrs.getAttributeArray(
-			    primpath,
-			    { HUSD_Constants::getAttributePointOrientations() },
-			    tmporientationsH,
-			    timecode);
-		}
+                    hasorient = husdGetAttributeArray(
+                            getattrs, primpath,
+                            HUSD_Constants::getAttributePointOrientations(),
+                            tmporientationsH, timecode, num_points);
+                }
 
 		if (scales)
 		{
-		    hasscale = getattrs.getAttributeArray(
-			    primpath,
-			    { HUSD_Constants::getAttributePointScales() },
-			    tmpscales,
-			    timecode);
-		}
+                    hasscale = husdGetAttributeArray(
+                            getattrs, primpath,
+                            HUSD_Constants::getAttributePointScales(),
+                            tmpscales, timecode, num_points);
+                }
 	    }
 	    else
 	    {

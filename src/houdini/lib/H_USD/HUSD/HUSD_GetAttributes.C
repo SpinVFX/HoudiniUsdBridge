@@ -27,6 +27,9 @@
 #include "XUSD_AttributeUtils.h"
 #include "XUSD_Data.h"
 #include "XUSD_Utils.h"
+
+#include <SYS/SYS_TypeTraits.h>
+
 #include <pxr/usd/usd/stage.h>
 #include <pxr/usd/usdGeom/primvarsAPI.h>
 
@@ -110,16 +113,41 @@ HUSD_GetAttributes::getPrimvar(const UT_StringRef &primpath,
     return HUSDgetValue( vt_value, value );
 }
 
-template<typename UtValueType>
-bool
-HUSD_GetAttributes::getAttributeOrPrimvar(const UT_StringRef &primpath,
-	const UT_StringRef &name,
-	UtValueType &value,
-	const HUSD_TimeCode &timecode) const
+// Type traits for identifying a value that is a UT_Array<T>.
+namespace
 {
-    if (!getAttribute(primpath, name, value, timecode))
-	return getPrimvar(primpath, name, value, timecode);
-    return true;
+template <typename T>
+struct husdIsUtArray : SYS_FalseType {};
+
+template <typename T>
+struct husdIsUtArray<UT_Array<T>> : SYS_TrueType {};
+} // namespace
+
+template <typename UtValueType>
+bool
+HUSD_GetAttributes::getAttributeOrPrimvar(
+        const UT_StringRef &primpath,
+        const UT_StringRef &name,
+        UtValueType &value,
+        const HUSD_TimeCode &timecode,
+        bool flatten_primvar) const
+{
+    // getFlattenedPrimvar() only works for UT_Array values.
+    if constexpr (husdIsUtArray<UtValueType>::value)
+    {
+        if (flatten_primvar
+            && getFlattenedPrimvar(primpath, name, value, timecode))
+        {
+            return true;
+        }
+    }
+    else
+        flatten_primvar = false;
+
+    if (!flatten_primvar && getPrimvar(primpath, name, value, timecode))
+        return true;
+
+    return getAttribute(primpath, name, value, timecode);
 }
 
 bool
@@ -197,6 +225,23 @@ HUSD_GetAttributes::getPrimvarIndices(const UT_StringRef &primpath,
     return true;
 }
 
+UT_StringHolder
+HUSD_GetAttributes::getAttributeInterpolation(
+        const UT_StringRef &primpath,
+        const UT_StringRef &attribname) const
+{
+    UsdPrim prim = husdGetPrimAtPath(myAnyLock, primpath);
+    if (!prim)
+        return UT_StringHolder::theEmptyString;
+
+    UsdAttribute attrib = prim.GetAttribute(TfToken(attribname.toStdString()));
+    TfToken interp;
+    if (!attrib || !attrib.GetMetadata(UsdGeomTokens->interpolation, &interp))
+        return UT_StringHolder::theEmptyString;
+
+    return UT_StringHolder(interp.GetString());
+}
+
 UT_StringHolder	
 HUSD_GetAttributes::getPrimvarInterpolation(const UT_StringRef &primpath,
 	const UT_StringRef &primvarname, bool inherit) const
@@ -245,7 +290,8 @@ HUSD_GetAttributes::getIsTimeVarying() const
 	const UT_StringRef	&primpath,				\
 	const UT_StringRef	&name,					\
 	UtType			&value,					\
-	const HUSD_TimeCode	&timecode) const;			\
+	const HUSD_TimeCode	&timecode,                              \
+	bool flatten_primvar) const;			                \
 
 #define HUSD_EXPLICIT_INSTANTIATION_SET(UtType)				\
     HUSD_EXPLICIT_INSTANTIATION(UtType)					\

@@ -58,7 +58,8 @@ public:
     bool		 getAttributeOrPrimvar(const UT_StringRef &primpath,
 				const UT_StringRef &name,
 				UtValueType &value,
-				const HUSD_TimeCode &timecode) const;
+				const HUSD_TimeCode &timecode,
+				bool flatten_primvar = false) const;
     /// @}
 
 
@@ -85,8 +86,12 @@ public:
     bool		 getAttributeOrPrimvarArray(const UT_StringRef &primpath,
 				const UT_StringRef &name,
 				UT_Array<UtValueType> &value,
-				const HUSD_TimeCode &timecode) const
-    { return getAttributeOrPrimvar(primpath, name, value, timecode); }
+				const HUSD_TimeCode &timecode,
+				bool flatten_primvar = false) const
+    {
+        return getAttributeOrPrimvar(
+                primpath, name, value, timecode, flatten_primvar);
+    }
     /// @}
     
     /// Obtains the size of an array attribute (0 if the attribute
@@ -95,6 +100,11 @@ public:
 				const UT_StringRef &attribname,
 				size_t &arraylength,
 				const HUSD_TimeCode &timecode) const;
+
+    /// Returns the interpolation style of an attribute.
+    /// This is only valid for certain attributes, e.g. UsdGeomPoints 'widths'.
+    UT_StringHolder	 getAttributeInterpolation(const UT_StringRef &primpath,
+				const UT_StringRef &primvarname) const;
 
     /// Obtains array value of a flattened primvar.
     template<typename UtValueType>

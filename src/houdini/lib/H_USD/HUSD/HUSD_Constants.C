@@ -773,6 +773,14 @@ HUSD_Constants::getInterpolationVarying()
 }
 
 const UT_StringHolder &
+HUSD_Constants::getInterpolationVertex()
+{
+    static const UT_StringHolder s(UsdGeomTokens->vertex);
+
+    return s;
+}
+
+const UT_StringHolder &
 HUSD_Constants::getUpAxisY()
 {
     static const UT_StringHolder s(UsdGeomTokens->y);

@@ -1229,6 +1229,55 @@ private:
 };
 
 ////////////////////////////////////////////////////////////////////////////
+// XUSD_PayloadAutoCollection
+////////////////////////////////////////////////////////////////////////////
+
+class XUSD_PayloadAutoCollection : public XUSD_RandomAccessAutoCollection
+{
+public:
+    XUSD_PayloadAutoCollection(
+        const UT_StringHolder &collectionname,
+        const UT_StringArray &orderedargs,
+        const UT_StringMap<UT_StringHolder> &namedargs,
+        HUSD_AutoAnyLock &lock,
+        HUSD_PrimTraversalDemands demands,
+        int nodeid,
+        const HUSD_TimeCode &timecode)
+        : XUSD_RandomAccessAutoCollection(collectionname, orderedargs, namedargs,
+              lock, demands, nodeid, timecode)
+    {
+        // We are only interested in direct payload compositions authored on
+        // this prim. We don't care about variants, references, inherits, or
+        // specializes.
+        myQueryFilter.arcTypeFilter =
+            UsdPrimCompositionQuery::ArcTypeFilter::Payload;
+        myQueryFilter.dependencyTypeFilter =
+            UsdPrimCompositionQuery::DependencyTypeFilter::Direct;
+    }
+    ~XUSD_PayloadAutoCollection() override
+    { }
+
+    bool matchPrimitive(const UsdPrim &prim,
+        bool *prune_branch) const override
+    {
+        // Quick check that this prim has at least some payload metadata
+        // authored on it.
+        if (prim.HasAuthoredPayloads())
+        {
+            // Use a UsdPrimCompositionQuery to find all composition arcs.
+            UsdPrimCompositionQuery query(prim, myQueryFilter);
+
+            return (query.GetCompositionArcs().size() > 0);
+        }
+
+        return false;
+    }
+
+private:
+    UsdPrimCompositionQuery::Filter  myQueryFilter;
+};
+
+////////////////////////////////////////////////////////////////////////////
 // XUSD_ReferenceAutoCollection
 ////////////////////////////////////////////////////////////////////////////
 
@@ -1266,7 +1315,7 @@ public:
     bool matchPrimitive(const UsdPrim &prim,
             bool *prune_branch) const override
     {
-        // Quick check this this prim has at least some inherit, specialize,
+        // Quick check that this prim has at least some inherit, specialize,
         // or reference metadata authored on it.
         if (prim.HasAuthoredReferences() ||
             prim.HasAuthoredInherits() ||
@@ -1365,7 +1414,7 @@ public:
         {
             UsdPrim prim = stage->GetPrimAtPath(path);
 
-            // Quick check this this prim has at least some inherit, specialize,
+            // Quick check that this prim has at least some inherit, specialize,
             // or reference metadata authored on it.
             if (prim &&
                 (prim.HasAuthoredReferences() ||
@@ -3210,6 +3259,8 @@ XUSD_AutoCollection::registerPlugins()
         <XUSD_PurposeAutoCollection>("purpose"));
     registerPlugin(new XUSD_SimpleAutoCollectionFactory
         <XUSD_AuthoredPurposeAutoCollection>("authoredpurpose"));
+    registerPlugin(new XUSD_SimpleAutoCollectionFactory
+        <XUSD_PayloadAutoCollection>("payload"));
     registerPlugin(new XUSD_SimpleAutoCollectionFactory
         <XUSD_ReferenceAutoCollection>("reference"));
     registerPlugin(new XUSD_SimpleAutoCollectionFactory
