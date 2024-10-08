@@ -135,6 +135,7 @@ HUSD_RendererInfo::getRendererInfo(const UT_StringHolder &name,
     UT_StringArray	 restartcamerasettings;
     UT_StringArray	 renderstats;
     HuskMetadata         husk_metadata;
+    UT_StringHolder      husk_stats_metadata;
     StatsDataPaths       statsdatapaths;
     UT_StringHolder      husk_verbose_script;
     fpreal               husk_verbose_interval = 0;
@@ -192,6 +193,12 @@ HUSD_RendererInfo::getRendererInfo(const UT_StringHolder &name,
         getStringMap(name, husk_metadata, options, "husk.metadata");
         getStringMap(name, statsdatapaths, options, "statsdatapaths");
 
+        static constexpr UT_StringLit       theHuskStatsMetadataDefault("*");
+        if (options.hasOption("husk.stats_metadata"))
+            husk_stats_metadata = options.getOptionS("husk.stats_metadata");
+        else
+            husk_stats_metadata = theHuskStatsMetadataDefault.asHolder();
+
         options.importOption("husk.verbose_callback", husk_verbose_script);
         options.importOption("husk.verbose_interval", husk_verbose_interval);
 
@@ -216,6 +223,7 @@ HUSD_RendererInfo::getRendererInfo(const UT_StringHolder &name,
             restartcamerasettings,
             renderstats,
             husk_metadata,
+            husk_stats_metadata,
             statsdatapaths,
             husk_verbose_script,
             husk_verbose_interval,

@@ -78,6 +78,7 @@ public:
                 const UT_StringArray &restartcamerasettings,
                 const UT_StringArray &renderstats,
                 const HuskMetadata &husk_metadata,
+                const UT_StringHolder &husk_stats_metadata,
                 const StatsDataPaths &statsdatapaths,
                 const UT_StringHolder &husk_verbose_script,
                 fpreal husk_verbose_interval,
@@ -101,6 +102,7 @@ public:
          , myRestartCameraSettings(restartcamerasettings)
          , myRenderViewStats(renderstats)
          , myHuskMetadata(husk_metadata)
+         , myHuskStatsMetadata(husk_stats_metadata)
          , myStatsDataPaths(statsdatapaths)
          , myHuskVerboseScript(husk_verbose_script)
          , myHuskVerboseInterval(husk_verbose_interval)
@@ -215,6 +217,15 @@ public:
     const HuskMetadata      &huskMetadata() const
                              { return myHuskMetadata; }
 
+    /// Some delegates prefer to pass metadata from GetRenderStats() directly
+    /// to image metadata.  This option passes a string pattern (see
+    /// UT_String::multiMatch) for render stats which should be stored as
+    /// metadata directly.  This defaults to `*` (meaning all the stats from
+    /// GetRenderStats will be stored as metadata).  If you set
+    /// `husk.metadata`, you probably want to set this to an empty string.
+    const UT_StringHolder   &huskStatsMetadata() const
+                             { return myHuskStatsMetadata; }
+
     /// Similar to the husk metadata, this returns the statsdatapaths, which
     /// gives the JSON path to the render stat required by the viewer or husk.
     /// Currently thses are:
@@ -283,6 +294,7 @@ private:
     UT_StringArray       myRenderViewStats;
     StatsDataPaths       myStatsDataPaths;
     HuskMetadata         myHuskMetadata;
+    UT_StringHolder      myHuskStatsMetadata;
     UT_StringHolder      myHuskVerboseScript;
     fpreal               myHuskVerboseInterval;
     bool		 myIsValid;

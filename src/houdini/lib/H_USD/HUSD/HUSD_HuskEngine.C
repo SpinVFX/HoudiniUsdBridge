@@ -566,13 +566,40 @@ HUSD_HuskEngine::addMetadata(IMG_FileParms &fparms,
         const UT_JSONValue &base_dict,
         const char *render_stats) const
 {
-    const auto          &metadata = myEngine->rendererInfo().huskMetadata();
+    const auto  &metadata = myEngine->rendererInfo().huskMetadata();
+    const auto  &stats_metadata = myEngine->rendererInfo().huskStatsMetadata();
+
+    if (!stats_metadata && !metadata.size())
+        return;         // Nothing to do
+
+    // Convert VtDictionary to a UT_JSONValue
+    UT_JSONValue         stats;
+    {
+        UT_AutoJSONWriter       w(stats);
+        HUSDconvertDictionary(*w, myEngine->renderStats(), nullptr);
+    }
+
+    if (stats_metadata)
+    {
+        // If the delegate doesn't specify any specific data, convert all the
+        // stats to metadata.
+        const UT_JSONValueMap   *smap = stats.getMap();
+        if (smap && smap->size())
+        {
+            UT_StringArray      keys;
+            smap->getKeys(keys);
+            for (exint i = 0, n = smap->size(); i < n; ++i)
+            {
+                if (keys[i].multiMatch(stats_metadata))
+                    fparms.setFileParm(keys[i], *smap->get(i));
+            }
+        }
+    }
 
     if (!metadata.size())
         return;
 
     UT_JSONValue         combined;
-    UT_JSONValue         stats;
     UT_JSONValueMap     *map = combined.startMap();
 
     const UT_JSONValueMap       *src_map = base_dict.getMap();
@@ -583,10 +610,6 @@ HUSD_HuskEngine::addMetadata(IMG_FileParms &fparms,
         src_map->getKeys(keys);
         for (exint i = 0, n = src_map->size(); i < n; ++i)
             map->insert(keys[i], *src_map->get(i));
-    }
-    {
-        UT_AutoJSONWriter       w(stats);
-        HUSDconvertDictionary(*w, myEngine->renderStats(), nullptr);
     }
     map->insert(render_stats, stats);
 
