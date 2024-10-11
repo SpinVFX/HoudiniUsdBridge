@@ -2113,9 +2113,14 @@ BRAY_HdUtil::convertAttribute(const SdfPath &id,
     else if (data->getStorage() == GT_STORE_STRING
             && data->entries() > 32)
     {
-        UT_ErrorLog::format(2,
-                "Warning: Non-indexed attribute '{}' string found on {}. {}",
-                token, id, "This may affect performance");
+        static int warn_count = 0;
+        if (warn_count++ < 4)
+        {
+            UT_ErrorLog::format(2,
+                    "Warning: Non-indexed attribute '{}' string found on {}. {}{}",
+                    token, id, "This may affect performance",
+                    warn_count == 4 ? " - further messages will be truncated":"");
+        }
     }
     return data;
 }
