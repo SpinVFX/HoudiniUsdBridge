@@ -227,7 +227,8 @@ static bool
 husdImportBlendShapes(
         GU_Detail &detail,
         const UsdSkelSkinningQuery &skinning_query,
-        const SdfPath &root_path);
+        const SdfPath &root_path,
+        const UT_Matrix4D &geom_bind_xform);
 
 bool
 HUSDimportSkinnedGeometry(GU_Detail &gdp, HUSD_AutoReadLock &readlock,
@@ -292,13 +293,21 @@ HUSDimportSkinnedGeometry(GU_Detail &gdp, HUSD_AutoReadLock &readlock,
                             " ^skel:jointIndices ^skel:jointWeights");
                 }
 
+                // skel:geomBindTransform only applies if there is skinning.
+                UT_Matrix4D geom_bind_xform(1.0);
+                if (skinning_query.HasJointInfluences())
+                {
+                    geom_bind_xform = GusdUT_Gf::Cast(
+                            skinning_query.GetGeomBindTransform());
+                }
+
                 if (!GusdGU_USD::ImportPrimUnpacked(
-                        *skin_gdp, skinning_query.GetPrim(), parms.myTime,
-                        parms.myLOD, parms.myPurpose, primvar_pattern.buffer(),
-                        UT_StringHolder::theEmptyString, true,
-                        UT_StringHolder::theEmptyString,
-                        &GusdUT_Gf::Cast(skinning_query.GetGeomBindTransform()),
-                        parms.myRefineParms))
+                            *skin_gdp, skinning_query.GetPrim(), parms.myTime,
+                            parms.myLOD, parms.myPurpose,
+                            primvar_pattern.buffer(),
+                            UT_StringHolder::theEmptyString, true,
+                            UT_StringHolder::theEmptyString, &geom_bind_xform,
+                            parms.myRefineParms))
                 {
                     UT_WorkBuffer msg;
                     msg.format(
@@ -319,7 +328,8 @@ HUSDimportSkinnedGeometry(GU_Detail &gdp, HUSD_AutoReadLock &readlock,
                 // Import blendshape inputs.
                 if (skinning_query.HasBlendShapes()
                     && !husdImportBlendShapes(
-                            *skin_gdp, skinning_query, root_path))
+                            *skin_gdp, skinning_query, root_path,
+                            geom_bind_xform))
                 {
                     UT_WorkBuffer msg;
                     msg.format(
@@ -793,12 +803,17 @@ husdGetNormalOffsets(
 /// consists of point positions and an id attribute (for sparse blendshapes).
 /// In-between shapes use the point indices from the primary shape, if
 /// authored.
+/// Note since we pre-apply skel:geomBindTransform to the rest
+/// geometry if there is skinning, the blendshape offsets also need to be
+/// transformed accordingly.
 template <typename BlendshapeT>
 static bool
-husdImportBlendShape(GU_Detail &detail,
-                     const BlendshapeT &blendshape_or_inbetween,
-                     const UsdSkelBlendShape &blendshape,
-                     const GU_Detail &base_shape)
+husdImportBlendShape(
+        GU_Detail &detail,
+        const BlendshapeT &blendshape_or_inbetween,
+        const UsdSkelBlendShape &blendshape,
+        const GU_Detail &base_shape,
+        const UT_Matrix4D &geom_bind_xform)
 {
     VtVec3fArray offsets;
     const bool has_P = husdGetOffsets(blendshape_or_inbetween, offsets);
@@ -865,6 +880,13 @@ husdImportBlendShape(GU_Detail &detail,
     if (has_N)
         normal_attrib = detail.addNormalAttribute(GA_ATTRIB_POINT);
 
+    UT_Matrix3D inv_geom_bind_xform;
+    if (has_N)
+    {
+        inv_geom_bind_xform = geom_bind_xform;
+        inv_geom_bind_xform.invert();
+    }
+
     GA_Offset ptoff = detail.appendPointBlock(num_target_pts);
     for (exint i = 0, n = num_target_pts; i < n; ++i, ++ptoff)
     {
@@ -888,7 +910,7 @@ husdImportBlendShape(GU_Detail &detail,
         // for agents we need the actual point positions.
         UT_Vector3 pos = base_shape.getPos3(base_ptoff);
         if (has_P)
-            pos += GusdUT_Gf::Cast(offsets[i]);
+            pos += rowVecMult3(GusdUT_Gf::Cast(offsets[i]), geom_bind_xform);
 
         detail.setPos3(ptoff, pos);
 
@@ -898,7 +920,8 @@ husdImportBlendShape(GU_Detail &detail,
             if (src_normal_attrib.isValid())
                 normal = src_normal_attrib.get(base_ptoff);
 
-            normal += GusdUT_Gf::Cast(normal_offsets[i]);
+            normal += colVecMult(
+                    inv_geom_bind_xform, GusdUT_Gf::Cast(normal_offsets[i]));
             normal.normalize();
 
             normal_attrib.set(ptoff, normal);
@@ -971,7 +994,8 @@ static bool
 husdImportBlendShapes(
         GU_Detail &detail,
         const UsdSkelSkinningQuery &skinning_query,
-        const SdfPath &root_path)
+        const SdfPath &root_path,
+        const UT_Matrix4D &geom_bind_xform)
 {
     VtTokenArray channel_names;
     UT_Array<UsdSkelBlendShape> blendshapes;
@@ -990,7 +1014,8 @@ husdImportBlendShapes(
 
         GU_DetailHandleAutoWriteLock shape_detail(shape_gdh);
         if (!husdImportBlendShape(
-                    *shape_detail, blendshape, blendshape, detail))
+                    *shape_detail, blendshape, blendshape, detail,
+                    geom_bind_xform))
         {
             UT_WorkBuffer msg;
             msg.format(
@@ -1020,7 +1045,8 @@ husdImportBlendShapes(
 
             GU_DetailHandleAutoWriteLock inbetween_detail(inbetween_gdh);
             if (!husdImportBlendShape(
-                        *inbetween_detail, inbetween, blendshape, detail))
+                        *inbetween_detail, inbetween, blendshape, detail,
+                        geom_bind_xform))
             {
                 UT_WorkBuffer msg;
                 msg.format(
@@ -1116,7 +1142,8 @@ husdImportAgentBlendShapes(
         UT_Array<GU_DetailHandle> &all_shape_details,
         UT_StringArray &all_shape_names,
         const UsdSkelSkinningQuery &skinning_query,
-        const SdfPath &root_path)
+        const SdfPath &root_path,
+        const UT_Matrix4D &geom_bind_xform)
 {
     VtTokenArray channel_names_attr;
     UT_Array<UsdSkelBlendShape> blendshapes;
@@ -1146,7 +1173,9 @@ husdImportAgentBlendShapes(
         gdh.allocateAndSet(new GU_Detail());
 
         GU_DetailHandleAutoWriteLock detail(gdh);
-        if (!husdImportBlendShape(*detail, blendshape, blendshape, base_shape))
+        if (!husdImportBlendShape(
+                    *detail, blendshape, blendshape, base_shape,
+                    geom_bind_xform))
         {
             UT_WorkBuffer msg;
             msg.format("Failed to import blendshape '{}'",
@@ -1178,7 +1207,8 @@ husdImportAgentBlendShapes(
             GU_DetailHandleAutoWriteLock inbetween_detail(inbetween_gdh);
 
             if (!husdImportBlendShape(
-                    *inbetween_detail, inbetween, blendshape, base_shape))
+                        *inbetween_detail, inbetween, blendshape, base_shape,
+                        geom_bind_xform))
             {
                 UT_WorkBuffer msg;
                 msg.format("Failed to import in-between '{}' for '{}'",
@@ -1261,11 +1291,16 @@ HUSDimportAgentShapes(GU_AgentShapeLib &shapelib,
                 skinning_query.IsRigidlyDeformed() &&
                 (skinning_query.GetNumInfluencesPerComponent() == 1);
 
+            UT_Matrix4D geom_bind_xform(1.0);
+            if (skinning_query.HasJointInfluences())
+            {
+                geom_bind_xform = GusdUT_Gf::Cast(
+                        skinning_query.GetGeomBindTransform());
+            }
+
             // For a static shape, record the joint that it's attached to, and
             // bake in the inverse bind transform since static agent shapes are
             // simply transformed by the joint transform.
-            UT_Matrix4D geom_bind_xform =
-                GusdUT_Gf::Cast(skinning_query.GetGeomBindTransform());
             if (is_static_shape)
             {
                 VtIntArray joint_indices;
@@ -1357,7 +1392,7 @@ HUSDimportAgentShapes(GU_AgentShapeLib &shapelib,
                 if (husdImportAgentBlendShapes(
                             *gdp, shapes[i].myBlendShapeDetails,
                             shapes[i].myBlendShapeNames, skinning_query,
-                            root_path))
+                            root_path, geom_bind_xform))
                 {
                     has_blendshapes = true;
                 }
