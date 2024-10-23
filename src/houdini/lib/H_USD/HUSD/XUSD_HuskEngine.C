@@ -591,6 +591,16 @@ XUSD_HuskEngine::delegateRenderProducts(const XUSD_RenderSettings &settings,
             settings.delegateRenderProducts(product_group));
 }
 
+void
+XUSD_HuskEngine::rasterRenderProducts(const XUSD_RenderSettings &settings,
+                        int productGroup)
+{
+    myRenderIndex->GetRenderDelegate()->SetRenderSetting(
+            HusdHuskTokens->rasterRenderProducts,
+            settings.rasterRenderProducts(productGroup));
+}
+
+
 //----------------------------------------------------------------------------
 // AOVs and Renderer Settings
 //----------------------------------------------------------------------------

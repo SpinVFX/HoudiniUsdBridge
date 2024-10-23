@@ -198,6 +198,7 @@ ARCH_PRAGMA_POP
     (karmaTask)                 \
     (orderedVars)               \
     (randomseed)                \
+    (rasterRenderProducts)      \
     (renderBufferDescriptor)    \
     (renderCameraPath)          \
     (renderPassState)           \
@@ -205,7 +206,7 @@ ARCH_PRAGMA_POP
     (sourcePrim)                \
     (sourceType)                \
     (stageMetersPerUnit)        \
-    (vex)                     \
+    (vex)                       \
     (viewerMouseClick)          \
     \
     ((aovDescriptor_aovSettings,        "aovDescriptor.aovSettings"))   \

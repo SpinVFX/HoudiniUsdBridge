@@ -448,7 +448,12 @@ public:
 
     // Return a VtValue for all non-raster render products for the delegate
     // render product interface.
-    VtValue             delegateRenderProducts(int product_group) const;
+    VtValue             delegateRenderProducts(int product_group) const
+                            { return renderProducts(product_group, false); }
+
+    // Return a VtValue for the raster render products.
+    VtValue             rasterRenderProducts(int product_group) const
+                            { return renderProducts(product_group, true); }
 
     virtual bool        supportedDelegate(const TfToken &name) const;
 
@@ -473,6 +478,8 @@ protected:
     /// in the mplay monitor or the dummy raster product).  Returns true if the
     /// path list size matches.
     bool        accountForExtraProducts(const SdfPathVector &paths) const;
+
+    VtValue     renderProducts(int product_group, bool raster) const;
 
     UsdRenderSettings		myUsdSettings;
     SdfPath			myCameraPath;

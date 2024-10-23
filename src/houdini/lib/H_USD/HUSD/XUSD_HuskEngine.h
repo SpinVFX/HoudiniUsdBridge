@@ -101,6 +101,10 @@ public:
     void delegateRenderProducts(const XUSD_RenderSettings &settings,
                         int productGroup);
 
+    /// Send the delegate render products
+    void rasterRenderProducts(const XUSD_RenderSettings &settings,
+                        int productGroup);
+
     /// Set an arbitrary render setting
     void setRenderSetting(const TfToken &token, const VtValue &val);
 

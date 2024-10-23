@@ -1158,6 +1158,8 @@ HUSD_RenderSettings::updateFrame(HUSD_RenderSettingsContext &ctx,
     expandProducts(ctx, frame, product_group);
     if (delegate_products)
         engine->delegateRenderProducts(*this, product_group);
+    // Always send the list of raster products
+    engine->rasterRenderProducts(*this, product_group);
 
     if (mkdirs)
     {

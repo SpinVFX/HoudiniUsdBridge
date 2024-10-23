@@ -470,6 +470,13 @@ HUSD_HuskEngine::delegateRenderProducts(const HUSD_RenderSettings &settings,
     myEngine->delegateRenderProducts(*settings.myOwner, pgroup);
 }
 
+void
+HUSD_HuskEngine::rasterRenderProducts(const HUSD_RenderSettings &settings,
+        int pgroup)
+{
+    myEngine->rasterRenderProducts(*settings.myOwner, pgroup);
+}
+
 bool
 HUSD_HuskEngine::lightOnStage(const HUSD_TimeCode &tc) const
 {

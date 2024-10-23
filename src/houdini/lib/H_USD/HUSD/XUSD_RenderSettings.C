@@ -2140,7 +2140,7 @@ XUSD_RenderSettings::supportedDelegate(const TfToken &name) const
 }
 
 VtValue
-XUSD_RenderSettings::delegateRenderProducts(int product_group) const
+XUSD_RenderSettings::renderProducts(int product_group, bool raster) const
 {
     using delegateProduct = HdAovSettingsMap;
     using delegateVar = HdAovSettingsMap;
@@ -2149,7 +2149,7 @@ XUSD_RenderSettings::delegateRenderProducts(int product_group) const
     for (int pidx : myProductGroups[product_group])
     {
         const XUSD_RenderProduct        *p = myProducts[pidx].get();
-	if (p->productType() == UsdRenderTokens->raster)
+	if ((p->productType() == UsdRenderTokens->raster) != raster)
 	    continue;
 
 	drp.push_back(delegateProduct());

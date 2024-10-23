@@ -176,6 +176,12 @@ public:
     void delegateRenderProducts(const HUSD_RenderSettings &settings,
                         int product_group);
 
+    /// Send the delegate the raster render products
+    /// Render Settings may have multiple product groups.  This only generates
+    /// raster render products for the specified product group.
+    void rasterRenderProducts(const HUSD_RenderSettings &settings,
+                        int product_group);
+
     /// @{
     /// Common render stats
     struct ActiveBucket
