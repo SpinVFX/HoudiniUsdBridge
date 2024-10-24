@@ -1155,7 +1155,8 @@ XUSD_RenderProduct::buildDummyRaster(const XUSD_RenderSettingsContext &ctx,
     mySettings[UsdRenderTokens->productName] = HusdHuskTokens->huskNullRaster;
     mySettings[HusdHuskTokens->sourcePrim] = theHuskDummyRaster;
 
-    myVars.emplace_back(src.vars()[0]->clone());
+    for (const auto &var : src.vars())
+        myVars.emplace_back(var->clone());
     return true;
 }
 
