@@ -1061,11 +1061,15 @@ XUSD_RenderProduct::updateSettings(const UsdStageRefPtr &usd,
                     "Time varying product name ({} frames)", numFrames);
 	    fpreal timeInc = ctx.frameInc();
 	    fpreal time = ctx.startFrame();
+            const std::vector<fpreal>   *flist = ctx.frameList();
 	    VtValue val;
 	    VtArray<TfToken> names(numFrames);
 	    for (int i = 0; i < numFrames; ++i)
 	    {
-		productName.Get(&val, UsdTimeCode(time + i*timeInc));
+                double  ff = time + i*timeInc;
+                if (flist && i < flist->size())
+                    ff = (*flist)[i];
+		productName.Get(&val, UsdTimeCode(ff));
 		UT_ASSERT(val.IsHolding<TfToken>());
 		names[i] = val.Get<TfToken>();
 	    }
