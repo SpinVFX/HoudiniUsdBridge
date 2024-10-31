@@ -312,17 +312,38 @@ private:
     HUSD_Imaging    &myOwner;
 };
 
+class husd_CopDefaultsMicroNode : public DEP_TimedMicroNode
+{
+public:
+    husd_CopDefaultsMicroNode(HUSD_Imaging &owner)
+        : myOwner(owner)
+    { }
+
+    void             becameDirty(DEP_MicroNode &src,
+                            const DEP_PropagateData &propdata) override
+    {
+        // One of our COP defaults is dirty.  Need a full clear.
+        myOwner.handleCopTextureChange(true);
+    }
+
+private:
+    HUSD_Imaging    &myOwner;
+};
+
 class HUSD_Imaging::husd_ImagingPrivate
 {
 public:
     husd_ImagingPrivate(HUSD_Imaging &owner)
         : myCopTextureMicroNode(owner)
+        , myCopDefaultsMicroNode(owner)
     { }
 
     void clearCopTextureDependencies(fpreal frame)
     {
         myCopTextureMicroNode.clearInputs();
         myCopTextureMicroNode.update(CHgetTimeFromFrame(frame));
+        myCopDefaultsMicroNode.clearInputs();
+        myCopDefaultsMicroNode.update(CHgetTimeFromFrame(frame));
         myCopTextureCachedNodeIds.clear();
     }
 
@@ -336,6 +357,7 @@ public:
     HdRenderSettingsMap                  myPrimRenderSettingMap;
     HdRenderSettingsMap                  myOldPrimRenderSettingMap;
     husd_CopTextureMicroNode             myCopTextureMicroNode;
+    husd_CopDefaultsMicroNode            myCopDefaultsMicroNode;
     UT_Set<int>                          myCopTextureCachedNodeIds;
 };
 
@@ -833,8 +855,11 @@ HUSD_Imaging::setFrame(fpreal frame)
         // If our COP texture micronode is time dependent, this will trigger
         // the karma texture cache to be flushed.
         fpreal t = CHgetTimeFromFrame(frame);
-        if (myPrivate->myCopTextureMicroNode.requiresUpdate(t))
+        if (myPrivate->myCopDefaultsMicroNode.requiresUpdate(t) ||
+            myPrivate->myCopTextureMicroNode.requiresUpdate(t))
+        {
             handleCopTextureChange(true);
+        }
 
 	return true;
     }
@@ -2888,6 +2913,14 @@ HUSD_Imaging::gatherCopResolverDependencies()
                         node->dataMicroNode());
                     if (node->dataMicroNode().isTimeDependent())
                         myPrivate->myCopTextureMicroNode.setTimeDependent(true);
+
+                    // Build the default context for this node, this
+                    // will then add dependencies in the same way we
+                    // had when we did the cook.
+                    OP_Context context(OP_Context::CurrentEvalTime);
+                    node->buildDefaultCopContext(context,
+                            &myPrivate->myCopDefaultsMicroNode);
+
                     // We only count a node as dirty if it isn't in an error
                     // state (error'ed nodes are perpetually dirty, but we
                     // should still get micronode dirtying events when
