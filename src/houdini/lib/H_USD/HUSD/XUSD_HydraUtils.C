@@ -148,11 +148,7 @@ UT_Matrix4D
 XUSD_HydraUtils::fullTransform(HdSceneDelegate *scene_del,
 			       const SdfPath   &prim_path)
 {
-    GfMatrix4d mat;
-    float ft = 0.0;
-
-    scene_del->SampleTransform(prim_path, 1, &ft, &mat);
-
+    GfMatrix4d mat = scene_del->GetTransform(prim_path);
     return GusdUT_Gf::Cast(mat);
 }
 
