@@ -289,6 +289,9 @@ GusdNURBSCurvesWrapper::refine(
     GT_DataArrayHandle gtOrder = new GusdGT_VtArray<int32>( usdOrder );
 
     const int num_curves = usdCounts.size();
+    if (num_curves == 0)
+        return false; // Nothing to do.
+
     int numPoints = std::accumulate( usdCounts.begin(), usdCounts.end(), 0 );
     int numSegs = numPoints + usdCounts.size(); // # of knots minus degree.
     int numSegEndPoints = numSegs + usdCounts.size();
