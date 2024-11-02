@@ -1217,18 +1217,20 @@ XUSD_RenderProduct::productName(int frame) const
 
 #define SPECIFIC_PRODUCT(MEMBER, MESSAGE) \
     int nauth = 0; \
+    auto prevval = val; \
     for (exint i = 0, np = products.size(); i < np; ++i) { \
         if (products[i]->isRaster() && products[i]->MEMBER.myAuthored) { \
-            nauth++; \
-            if (!products[0]->MEMBER.myAuthored || \
-                    products[0]->MEMBER.myValue != products[i]->MEMBER.myValue) { \
+            if (i && prevval != products[i]->MEMBER.myValue) { \
                 UT_ErrorLog::warning("Not all products have matching {}", \
                         MESSAGE); \
+                break; \
             } \
+            prevval = products[i]->MEMBER.myValue; \
+            nauth++; \
         } \
     } \
-    if (nauth) val = products[0]->MEMBER.myValue; \
-    return nauth > 0; \
+    if (nauth == products.size()) val = prevval; \
+    return nauth > 0;
     /* end macro */
 
 bool
