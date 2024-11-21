@@ -1158,6 +1158,7 @@ XUSD_RenderProduct::buildDummyRaster(const XUSD_RenderSettingsContext &ctx,
     mySettings[UsdRenderTokens->productType] = UsdRenderTokens->raster;
     mySettings[UsdRenderTokens->productName] = HusdHuskTokens->huskNullRaster;
     mySettings[HusdHuskTokens->sourcePrim] = theHuskDummyRaster;
+    myFilename = UTmakeUnsafeRef(HusdHuskTokens->huskNullRaster.GetText());
 
     for (const auto &var : src.vars())
         myVars.emplace_back(var->clone());
@@ -1305,7 +1306,9 @@ XUSD_RenderProduct::expandProduct(const XUSD_RenderSettingsContext &ctx,
 {
     UT_ASSERT(frame < ctx.frameCount());
     const TfToken	&pname = productName(frame);
-    const char          *override = ctx.overrideProductName(*this, pidx);
+    const char          *override = nullptr;
+    if (!isHuskNullRaster(myFilename))
+        override = ctx.overrideProductName(*this, pidx);
     if (!mySettings[UsdRenderTokens->productName].IsArrayValued()
 	|| UTisstring(override))
     {
@@ -1327,7 +1330,7 @@ XUSD_RenderProduct::expandProduct(const XUSD_RenderSettingsContext &ctx,
 	myFilename = pname.GetText();
     }
 
-    if (ctx.tileSuffix())
+    if (!isHuskNullRaster(myFilename) && ctx.tileSuffix())
 	myFilename = addTileSuffix(myFilename, ctx.tileSuffix(), ctx.tileIndex());
 
     myPartname = makePartName(myFilename,
@@ -1733,6 +1736,9 @@ XUSD_RenderSettings::expandProducts(const XUSD_RenderSettingsContext &ctx,
     for (int pidx : myProductGroups[product_group])
     {
         XUSD_RenderProduct      *p = myProducts[pidx].get();
+        if (isHuskNullRaster(p->outputName()))
+            continue;
+
         if (!p->expandProduct(ctx, raster_indices[pidx], frame))
         {
             return false;
