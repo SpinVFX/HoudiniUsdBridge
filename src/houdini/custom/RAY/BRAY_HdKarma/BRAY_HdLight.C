@@ -276,7 +276,9 @@ namespace
 	    }
 	}
 	else if (lightType == HdPrimTypeTokens->domeLight)
+        {
 	    ltype = BRAY_LIGHT_ENVIRONMENT;
+        }
 	else if (lightType == HdPrimTypeTokens->distantLight)
 	    ltype = BRAY_LIGHT_DISTANT;
         else if (isSkyLight(lightType, shaderid))
@@ -648,6 +650,16 @@ BRAY_HdLight::Sync(HdSceneDelegate *sd,
         
         if (ltype == BRAY_LIGHT_ENVIRONMENT)
         {
+            TfToken     format;
+            if (BRAY_HdUtil::evalLightToken(format, sd, id, HdLightTokens->textureFormat))
+            {
+                // Verify that the format is automatic or lat-long
+                if (format != "automatic" && format != "latlong")
+                {
+                    UT_ErrorLog::error("Unsupported dome map texture format: {}",
+                            format);
+                }
+            }
             // domelight poleAxis
             BRAY::SpacePtr domespace = domeSpaceFromPoleAxis(sd, id);
             BRAY::SpacePtr currentspace = BRAY_HdUtil::makeSpace(
