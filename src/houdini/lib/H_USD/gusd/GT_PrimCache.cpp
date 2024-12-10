@@ -145,6 +145,8 @@ namespace {
         UT_Array<GT_CatPolygonMesh> coalescedMeshes;
         UT_Array<SYS_HashType>      coalescedIds;
         UT_Array<UT_Array<GT_PrimitiveHandle> > sourceMeshes;
+
+        bool allowThreading() const override { return false; }
         
         void addPrimitive( const GT_PrimitiveHandle &prim ) override
         {
