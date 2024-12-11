@@ -265,12 +265,12 @@ public:
 
     GEO_PathHandle add( 
         const SdfPath&              path,
-        bool                        addNumericSuffix,
+        bool                        add_numeric_suffix,
         GT_PrimitiveHandle          prim,
         const UT_Matrix4D&          xform,
-        GA_DataId                   topologyId,
+        GA_DataId                   topology_id,
         const TfToken &             purpose,
-        const GEO_AgentShapeInfoPtr& agentShapeInfo);
+        const GEO_AgentShapeInfoPtr& agent_shape_info);
 
     // Complete any final work after refining all prims.
     void finish( GEO_FileRefiner& refiner );

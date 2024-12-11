@@ -45,6 +45,9 @@ ARCH_PRAGMA_MACRO_TOO_FEW_ARGUMENTS
 TF_DECLARE_PUBLIC_TOKENS(GEO_AgentPrimTokens, GEO_AGENT_PRIM_TOKENS);
 ARCH_PRAGMA_POP
 
+struct GEO_AgentShapeInfo;
+using GEO_AgentShapeInfoPtr = UT_IntrusivePtr<GEO_AgentShapeInfo>;
+
 /// Build a list of the joint names in the format required by UsdSkel (i.e.
 /// full paths such as "A/B/C"), and ordered so that parents appear before
 /// children.
@@ -216,6 +219,17 @@ public:
         return myShapeToSkel;
     }
 
+    /// Maps from the shape's id to the shape info and list of associated prims.
+    const UT_Map<exint, GEO_AgentShapeInfoPtr> &getShapeInfoMap() const
+    {
+        return myShapeInfos;
+    }
+
+    void addShapeInfo(exint shape_id, const GEO_AgentShapeInfoPtr &shape_info)
+    {
+        myShapeInfos.emplace(shape_id, shape_info);
+    }
+
     static int getStaticPrimitiveType();
 
     int getPrimitiveType() const override
@@ -251,6 +265,7 @@ private:
     SdfPath myPath;
     UT_Array<GT_PrimSkeletonPtr> mySkeletons;
     UT_Map<exint, exint> myShapeToSkel;
+    UT_Map<exint, GEO_AgentShapeInfoPtr> myShapeInfos;
     GT_AttributeListHandle myAttributeList;
 };
 
@@ -358,9 +373,10 @@ struct GEO_AgentShapeInfo : public UT_IntrusiveRefCounter<GEO_AgentShapeInfo>
     /// not separately instanced by a layer,  and needs to be bound to the
     /// correct skeleton (and joint, for rigid shapes).
     const GU_AgentLayer::ShapeBinding *myBinding;
-};
 
-using GEO_AgentShapeInfoPtr = UT_IntrusivePtr<GEO_AgentShapeInfo>;
+    /// List of the USD primitives that were generated from this shape.
+    UT_SmallArray<GEO_PathHandle> myPrims;
+};
 
 PXR_NAMESPACE_CLOSE_SCOPE
 

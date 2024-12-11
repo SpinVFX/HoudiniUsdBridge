@@ -287,7 +287,8 @@ HUSDimportSkinnedGeometry(GU_Detail &gdp, HUSD_AutoReadLock &readlock,
                 UT_WorkBuffer primvar_pattern;
                 primvar_pattern.append(
                         "* ^skel:geomBindTransform ^skel:skinningMethod");
-                if (!skinning_query.HasJointInfluences() || rigidly_deformed)
+                if (!skinning_query.HasJointInfluences()
+                    || skinning_query.IsRigidlyDeformed())
                 {
                     primvar_pattern.append(
                             " ^skel:jointIndices ^skel:jointWeights");

@@ -1347,10 +1347,10 @@ GEO_FileRefiner::addPrimitive( const GT_PrimitiveHandle& gtPrimIn )
                         const exint skel_id
                                 = shape_to_skeleton.at(shape->uniqueId());
 
-                        shapes_to_import.append(
-                                UTmakeIntrusive<GEO_AgentShapeInfo>(
-                                        defn, shape_name, skeletons[skel_id],
-                                        nullptr));
+                        auto shape_info = UTmakeIntrusive<GEO_AgentShapeInfo>(
+                                defn, shape_name, skeletons[skel_id], nullptr);
+                        shapes_to_import.append(shape_info);
+                        defn_prim->addShapeInfo(shape->uniqueId(), shape_info);
                     }
 
                     refineAgentShapes(
@@ -1835,12 +1835,12 @@ GEO_FileRefiner::addPrimitive( const GT_PrimitiveHandle& gtPrimIn )
 GEO_PathHandle
 GEO_FileRefinerCollector::add(
         const SdfPath &path,
-        bool addNumericSuffix,
+        bool add_numeric_suffix,
         GT_PrimitiveHandle prim,
         const UT_Matrix4D &xform,
-        GA_DataId topologyId,
+        GA_DataId topology_id,
         const TfToken &purpose,
-        const GEO_AgentShapeInfoPtr &agentShapeInfo)
+        const GEO_AgentShapeInfoPtr &agent_shape_info)
 {
     UT_ASSERT(path.IsAbsolutePath());
 
@@ -1851,16 +1851,19 @@ GEO_FileRefinerCollector::add(
     if( it == m_names.end() ) {
         // Name has not been used before
         m_names[path] = NameInfo();
-        if( !addNumericSuffix ) {
+        if( !add_numeric_suffix ) {
             auto path_handle = UTmakeShared<SdfPath>(path);
             m_gprims.emplace_back(
-                    path_handle, prim, xform, topologyId, purpose,
-                    agentShapeInfo);
+                    path_handle, prim, xform, topology_id, purpose,
+                    agent_shape_info);
+            if (agent_shape_info)
+                agent_shape_info->myPrims.append(path_handle);
+
             return path_handle;
         }
     }
     else {
-        if( !addNumericSuffix && it->second.count == 0 ) {
+        if( !add_numeric_suffix && it->second.count == 0 ) {
 
             for (GEO_FileGprimArrayEntry &entry : m_gprims) {
                 if( *entry.path == path ) {
@@ -1881,12 +1884,15 @@ GEO_FileRefinerCollector::add(
     }
 
     // Add a numeric suffix to get a unique name
-    auto newPath =
+    auto new_path =
         UTmakeShared<SdfPath>(TfStringPrintf("%s_%zu", path.GetText(), count));
 
     m_gprims.emplace_back(
-            newPath, prim, xform, topologyId, purpose, agentShapeInfo);
-    return newPath;
+            new_path, prim, xform, topology_id, purpose, agent_shape_info);
+    if (agent_shape_info)
+        agent_shape_info->myPrims.append(new_path);
+
+    return new_path;
 }
 
 void

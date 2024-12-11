@@ -3142,6 +3142,15 @@ initRigidShape(
     initJointInfluenceAttribs(
             fileprim, joint_indices, joint_weights, 1, UsdGeomTokens->constant,
             geom_bind_xform);
+
+    // In case we have a static shape binding where the geometry has capture
+    // weights, we need to block the `skel:joints` attribute for the boneCapture
+    // joint ordering. Here, we're using the skeleton's joint order instead.
+    GEO_FileProp *prop = fileprim.addProperty(
+        UsdSkelTokens->skelJoints, SdfValueTypeNames->TokenArray,
+        new GEO_FilePropConstantSource<SdfValueBlock>(SdfValueBlock()));
+    prop->setValueIsDefault(true);
+    prop->setValueIsUniform(true);
 }
 
 static bool
@@ -3165,34 +3174,16 @@ requiresRigidSkinning(const GU_AgentLayer::ShapeBinding &binding)
     return blendshape_deformer && !blendshape_deformer->postBlendDeformer();
 }
 
-/// Set up any additional properties for an agent shape, e.g. skeleton
-/// bindings, or skel:joints for a deforming shape.
+/// For skinned shapes, author the skel:joints attribute with the joint ordering
+/// from the boneCapture attribute.
 static void
-initAgentShape(
+initSkinnedShape(
         GEO_FilePrim &shape_prim,
-        const GEO_ImportOptions &options,
-        const GEO_AgentShapeInfo &shape_info)
+        const GT_PrimSkeleton &usd_skel,
+        const GU_AgentRig &rig,
+        const GU_AgentShapeLib &shapelib,
+        const GU_AgentShapeLib::Shape &shape)
 {
-    const GU_AgentShapeLib &shapelib = *shape_info.myDefinition->shapeLibrary();
-    const GU_AgentRig &rig = *shape_info.myDefinition->rig();
-    const GU_AgentShapeLib::Shape &shape =
-        *shapelib.findShape(shape_info.myShapeName);
-
-    // If we're not doing any instancing, the shape needs to also be bound to
-    // its skeleton (similar to createLayerPrims() when instancing is enabled).
-    const GT_PrimSkeleton &skel = *shape_info.mySkeleton;
-    if (options.myAgentHandling == GEO_AGENT_SKELROOTS)
-    {
-        shape_prim.addRelationship(
-                UsdSkelTokens->skelSkeleton, SdfPathVector({*skel.getPath()}));
-
-        UT_ASSERT(shape_info.myBinding);
-        if (requiresRigidSkinning(*shape_info.myBinding))
-            initRigidShape(shape_prim, skel, *shape_info.myBinding);
-
-        initSkinningMethod(shape_prim, shape_info.myBinding->deformer());
-    }
-
     // Check if this shape has capture weights.
     GU_ConstDetailHandle gdh = shape.shapeGeometry(shapelib);
     GU_DetailHandleAutoReadLock gdl(gdh);
@@ -3203,7 +3194,7 @@ initAgentShape(
     UT_Array<UT_Matrix4F> xforms;
     int max_pt_regions = 0;
     if (!GU_LinearSkinDeformerSourceWeights::getCaptureParms(
-            gdp, pcapt, attr_capt_path, xforms, max_pt_regions))
+                gdp, pcapt, attr_capt_path, xforms, max_pt_regions))
     {
         return;
     }
@@ -3227,20 +3218,50 @@ initAgentShape(
 
         if (xform_idx >= 0)
         {
-            const exint usd_joint_idx = skel.getJointOrder()[xform_idx];
-            referenced_joints.push_back(skel.getJointPaths()[usd_joint_idx]);
+            const exint usd_joint_idx = usd_skel.getJointOrder()[xform_idx];
+            referenced_joints.push_back(usd_skel.getJointPaths()[usd_joint_idx]);
         }
         else
             referenced_joints.push_back(TfToken());
     }
 
     GEO_FileProp *prop = shape_prim.addProperty(
-        UsdSkelTokens->skelJoints, SdfValueTypeNames->TokenArray,
-        new GEO_FilePropConstantSource<VtTokenArray>(referenced_joints));
+            UsdSkelTokens->skelJoints, SdfValueTypeNames->TokenArray,
+            new GEO_FilePropConstantSource<VtTokenArray>(referenced_joints));
     prop->setValueIsDefault(true);
     prop->setValueIsUniform(true);
+}
 
-    initSkelBindingAPI(shape_prim);
+/// Set up any additional properties for an agent shape, e.g. skeleton
+/// bindings, or skel:joints for a deforming shape.
+static void
+initAgentShape(
+        GEO_FilePrim &shape_prim,
+        const GEO_ImportOptions &options,
+        const GEO_AgentShapeInfo &shape_info)
+{
+    const GU_AgentShapeLib &shapelib = *shape_info.myDefinition->shapeLibrary();
+    const GU_AgentRig &rig = *shape_info.myDefinition->rig();
+    const GU_AgentShapeLib::Shape &shape =
+        *shapelib.findShape(shape_info.myShapeName);
+    const GT_PrimSkeleton &usd_skel = *shape_info.mySkeleton;
+
+    initSkinnedShape(shape_prim, usd_skel, rig, shapelib, shape);
+
+    // If we're not doing any instancing, the shape needs to also be bound to
+    // its skeleton (similar to createLayerPrims() when instancing is enabled).
+    if (options.myAgentHandling == GEO_AGENT_SKELROOTS)
+    {
+        shape_prim.addRelationship(
+                UsdSkelTokens->skelSkeleton, SdfPathVector({*usd_skel.getPath()}));
+
+        UT_ASSERT(shape_info.myBinding);
+        if (requiresRigidSkinning(*shape_info.myBinding))
+            initRigidShape(shape_prim, usd_skel, *shape_info.myBinding);
+
+        initSkinningMethod(shape_prim, shape_info.myBinding->deformer());
+        initSkelBindingAPI(shape_prim);
+    }
 }
 
 /// A layer is translated into a SkelRoot enclosing one or more skeleton
@@ -3255,6 +3276,7 @@ createLayerPrims(
         const SdfPath &layer_root_path,
         const UT_Array<GT_PrimSkeletonPtr> &skeletons,
         const UT_Map<exint, exint> &shape_to_skeleton,
+        const UT_Map<exint, GEO_AgentShapeInfoPtr> &shape_infos,
         const UT_Map<exint, SdfPath> &usd_shape_paths)
 {
     UT_String usd_layer_name(layer.name());
@@ -3311,8 +3333,11 @@ createLayerPrims(
 
         // Add an instance of the shape.
         UT_ASSERT(usd_shape_paths.contains(binding.shapeId()));
+        UT_ASSERT(shape_infos.contains(binding.shapeId()));
         const SdfPath usd_shape_path =
             usd_shape_paths.find(binding.shapeId())->second;
+        const GEO_AgentShapeInfoPtr &shape_info
+                = shape_infos.find(binding.shapeId())->second;
 
         const SdfPath shape_instance_path =
             layer_path.AppendPath(usd_shape_path);
@@ -3335,23 +3360,46 @@ createLayerPrims(
                                        SdfPathVector({skel_path}));
         initSkelBindingAPI(shape_instance);
 
-        // Set up a shape binding that is attached to a joint - for GU_Agent,
-        // this just applies the joint transform to the entire shape. For USD,
-        // this is done with constant joint influences (see see the Rigid
-        // Deformations section in the UsdSkel docs) and an identity bind pose.
-        //
-        // If a shape with the linear skinning deformer is attached to a joint,
-        // we don't need to do anything extra when translating to USD.
-        //
-        // This needs to be done when defining the layers, since it's possible
-        // (although not very useful) to have a static shape binding where the
-        // geometry already has capture weights.
-        if (requiresRigidSkinning(binding))
-            initRigidShape(shape_instance, skel, binding);
+        // The agent shape may have been refined into multiple USD prims
+        // depending on the SOP primitive types it contained.
+        // These prims might already have skinning-related primvars if they had
+        // a boneCapture attribute, so for rigid shape bindings we need to
+        // override the skinning attributes on each of those shapes (bug 142842)
+        for (const GEO_PathHandle &prim_ref_path : shape_info->myPrims)
+        {
+            GEO_FilePrim *prim_instance = nullptr;
+            if (*prim_ref_path == shape_ref_path) // The shape's root is a Gprim.
+                prim_instance = &shape_instance;
+            else
+            {
+                SdfPath rel_path
+                        = prim_ref_path->MakeRelativePath(shape_ref_path);
 
-        // The deformer is part of the shape binding, so this is authored on the
-        // layer's references rather than the shapes.
-        initSkinningMethod(shape_instance, binding.deformer());
+                prim_instance = &extra_prims[extra_prims.append()];
+                prim_instance->setPath(
+                        shape_instance_path.AppendPath(rel_path));
+                prim_instance->setIsDefined(false);
+                prim_instance->setInitialized();
+            }
+
+            // Set up a shape binding that is attached to a joint - for GU_Agent,
+            // this just applies the joint transform to the entire shape. For USD,
+            // this is done with constant joint influences (see see the Rigid
+            // Deformations section in the UsdSkel docs) and an identity bind pose.
+            //
+            // If a shape with the linear skinning deformer is attached to a joint,
+            // we don't need to do anything extra when translating to USD.
+            //
+            // This needs to be done when defining the layers, since it's possible
+            // (although not very useful) to have a static shape binding where the
+            // geometry already has capture weights.
+            if (requiresRigidSkinning(binding))
+                initRigidShape(*prim_instance, skel, binding);
+
+            // The deformer is part of the shape binding, so this is authored on the
+            // layer's references rather than the shapes.
+            initSkinningMethod(*prim_instance, binding.deformer());
+        }
     }
 }
 
@@ -4511,7 +4559,8 @@ GEOinitGTPrim(GEO_FilePrim &fileprim,
                 createLayerPrims(
                         fileprim, *defn_prim, extra_prims, options, *layer,
                         layer_root_path, defn_prim->getSkeletons(),
-                        defn_prim->getShapeToSkelMap(), usd_shape_paths);
+                        defn_prim->getShapeToSkelMap(),
+                        defn_prim->getShapeInfoMap(), usd_shape_paths);
             }
         }
     }
