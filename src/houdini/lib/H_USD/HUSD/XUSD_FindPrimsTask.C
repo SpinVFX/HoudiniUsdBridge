@@ -25,6 +25,8 @@
 #include "XUSD_FindPrimsTask.h"
 #include "XUSD_AutoCollection.h"
 #include "HUSD_Path.h"
+#include <UT/UT_SysClone.h>
+#include <UT/UT_Interrupt.h>
 #include <UT/UT_TaskGroup.h>
 
 PXR_NAMESPACE_OPEN_SCOPE
@@ -119,13 +121,17 @@ public:
             const Usd_PrimFlagsPredicate &predicate,
             const UT_PathPattern *pattern,
             const XUSD_SimpleAutoCollection *autocollection,
-            UT_TaskGroup &task_group)
+            UT_TaskGroup &task_group,
+            UT_AutoInterrupt &boss,
+            UT_ThreadSpecificValue<int> &counters)
         : myPrim(prim)
         , myData(data)
         , myPredicate(predicate)
         , myPattern(pattern)
         , myAutoCollection(autocollection)
         , myTaskGroup(task_group)
+        , myBoss(boss)
+        , myCounters(counters)
     {
     }
 
@@ -138,11 +144,22 @@ private:
     const UT_PathPattern            *myPattern;
     const XUSD_SimpleAutoCollection *myAutoCollection;
     UT_TaskGroup                    &myTaskGroup;
+    UT_AutoInterrupt                &myBoss;
+    UT_ThreadSpecificValue<int>     &myCounters;
 };
 
 void
 xusd_FindPrimsTask::operator()() const
 {
+    int &counter = myCounters.get();
+    // Every 1000 prims on each thread, check if we have been interrupted.
+    if (++counter > 1000)
+    {
+        if (myBoss.wasInterrupted())
+            return;
+        counter = 0;
+    }
+
     // Ignore the HoudiniLayerInfo prim and all of its children.
     if (myPrim.GetPath() == HUSDgetHoudiniLayerInfoSdfPath())
         return;
@@ -175,7 +192,7 @@ xusd_FindPrimsTask::operator()() const
     {
         myTaskGroup.run(xusd_FindPrimsTask(
                 child, myData, myPredicate, myPattern, myAutoCollection,
-                myTaskGroup));
+                myTaskGroup, myBoss, myCounters));
     }
 }
 
@@ -190,9 +207,12 @@ XUSDfindPrims(
         const XUSD_SimpleAutoCollection *autocollection)
 {
     UT_TaskGroup tg;
+    UT_AutoInterrupt boss("Finding primitives.");
+    if (boss.wasInterrupted())
+        return;
+    UT_ThreadSpecificValue<int> counters;
     tg.runAndWait(xusd_FindPrimsTask(prim, data, predicate, pattern,
-                                     autocollection, tg));
+                                     autocollection, tg, boss, counters));
 }
 
 PXR_NAMESPACE_CLOSE_SCOPE
-

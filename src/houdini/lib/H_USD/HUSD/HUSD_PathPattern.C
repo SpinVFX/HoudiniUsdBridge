@@ -35,6 +35,7 @@
 #include "XUSD_FindPrimsTask.h"
 #include "XUSD_PathPattern.h"
 #include "XUSD_Utils.h"
+#include <UT/UT_Interrupt.h>
 #include <UT/UT_StringSet.h>
 #include <UT/UT_WorkArgs.h>
 #include <pxr/usd/usd/collectionAPI.h>
@@ -218,9 +219,16 @@ HUSD_PathPattern::HUSD_PathPattern(const UT_StringRef &pattern,
 	const HUSD_TimeCode &timecode)
     : UT_PathPattern(pattern, case_sensitive, assume_wildcards)
 {
-    HUSD_PerfMonAutoCookEvent perf("Primitive pattern evaluation");
+    HUSD_PerfMonAutoCookEvent    perf("Primitive pattern evaluation");
+    UT_AutoInterrupt             boss("Primitive pattern evaluation");
 
-    initializeSpecialTokens(lock, demands, nodeid, timecode);
+    initializeSpecialTokens(lock, demands, nodeid, timecode, boss);
+
+    if (boss.wasInterrupted())
+    {
+        HUSD_ErrorScope::addError(HUSD_ERR_PATTERN_INTERRUPTED);
+        patternInterrupted();
+    }
 }
 
 HUSD_PathPattern::~HUSD_PathPattern()
@@ -238,7 +246,8 @@ void
 HUSD_PathPattern::initializeSpecialTokens(HUSD_AutoAnyLock &lock,
 	HUSD_PrimTraversalDemands demands,
 	int nodeid,
-	const HUSD_TimeCode &timecode)
+	const HUSD_TimeCode &timecode,
+        UT_AutoInterrupt &boss)
 {
     auto		 indata(lock.constData());
 
@@ -534,6 +543,12 @@ HUSD_PathPattern::initializeSpecialTokens(HUSD_AutoAnyLock &lock,
                 if (!auto_collection_data(i)->
                         myRandomAccessAutoCollection->randomAccess())
                 {
+                    if (boss.wasInterrupted())
+                    {
+                        HUSD_ErrorScope::addError(HUSD_ERR_PATTERN_INTERRUPTED);
+                        return;
+                    }
+
                     auto_collection_data(i)->
                         myRandomAccessAutoCollection->matchPrimitives(
                             auto_collection_data(i)->myCollectionlessPathSet);
@@ -551,6 +566,12 @@ HUSD_PathPattern::initializeSpecialTokens(HUSD_AutoAnyLock &lock,
 	    // VEXpression in a token.
 	    for (int i = 0, n = vex_tokens.size(); i < n; i++)
 	    {
+                if (boss.wasInterrupted())
+                {
+                    HUSD_ErrorScope::addError(HUSD_ERR_PATTERN_INTERRUPTED);
+                    return;
+                }
+
                 UT_UniquePtr<UT_PathPattern> pruning_pattern(
                     createPruningPattern(vex_token_indices(i)));
 
