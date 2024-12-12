@@ -45,6 +45,7 @@
 #include <CVEX/CVEX_Data.h>
 #include <UT/UT_BitArray.h>
 #include <UT/UT_Debug.h>
+#include <UT/UT_Interrupt.h>
 #include <UT/UT_IStream.h>
 #include <UT/UT_UniquePtr.h>
 #include <UT/UT_WorkArgs.h>
@@ -3396,9 +3397,13 @@ HUSD_ThreadedExec::doRunCvexPartial( const UT_JobInfo &info )
     CVEX_InOutData	storage;
     exint		block_start = 0;
     exint		block_end   = 0;
+    UT_AutoInterrupt    boss("Running USD Vex Script");
     while( getNextBlock( block_start, block_end, info ))
     {
-	// Note, cvex_rundata keeps a pointer to proc_ids, so it gets 
+        if (boss.wasInterrupted())
+            break;
+
+	// Note, cvex_rundata keeps a pointer to proc_ids, so it gets
 	// updated values without the need to call setProcId() again.
 	if( myUsdRunData.getDataCommand() )
 	    for( exint i = block_start; i < block_end; i++ )

@@ -29,6 +29,7 @@
 #include "XUSD_Data.h"
 #include "XUSD_Utils.h"
 #include <pxr/usd/usd/variantSets.h>
+#include <UT/UT_Interrupt.h>
 
 PXR_NAMESPACE_USING_DIRECTIVE
 
@@ -48,6 +49,7 @@ HUSD_EditVariants::setVariant(const HUSD_FindPrims &findprims,
         int variantsetindex,
         int variantnameindex)
 {
+    UT_AutoInterrupt	 boss("Setting Variants");
     auto		 outdata = myWriteLock.data();
     bool		 success = false;
 
@@ -59,6 +61,9 @@ HUSD_EditVariants::setVariant(const HUSD_FindPrims &findprims,
 
 	for (auto &&sdfpath : findprims.getExpandedPathSet().sdfPathSet())
 	{
+	    if (boss.wasInterrupted())
+	        return false;
+
 	    auto		 prim = stage->GetPrimAtPath(sdfpath);
 
 	    if (prim)
