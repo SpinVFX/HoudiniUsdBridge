@@ -1409,9 +1409,14 @@ public:
     void matchPrimitives(XUSD_PathSet &matches) const override
     {
         UsdStageRefPtr stage = myLock.constData()->stage();
+        UT_AutoInterrupt boss("Primitive pattern evaluation: %referencedby");
+        int count = 0;
 
         for (auto &&path : myRefPaths)
         {
+            if ((count++ & 0x3FF) == 0 && boss.wasInterrupted())
+                break;
+
             UsdPrim prim = stage->GetPrimAtPath(path);
 
             // Quick check that this prim has at least some inherit, specialize,
@@ -2143,9 +2148,14 @@ public:
     void matchPrimitives(XUSD_PathSet &matches) const override
     {
         UsdStageRefPtr stage = myLock.constData()->stage();
+        UT_AutoInterrupt boss("Primitive pattern evaluation: %relationship");
+        int count = 0;
 
         for (auto &&path : myPaths)
         {
+            if ((count++ & 0x3FF) == 0 && boss.wasInterrupted())
+                break;
+
             SdfPath relpath(path.AppendProperty(myRelationshipName));
             UsdRelationship rel = stage->GetRelationshipAtPath(relpath);
 
@@ -2385,12 +2395,17 @@ public:
     {
         UsdStageRefPtr stage = myLock.constData()->stage();
         auto predicate = HUSDgetUsdPrimPredicate(myDemands);
+        UT_AutoInterrupt boss("Primitive pattern evaluation: %children");
+        int count = 0;
 
         if (!myStrict)
             matches = myPaths;
 
         for (auto &&path : myPaths)
         {
+            if ((count++ & 0x3FF) == 0 && boss.wasInterrupted())
+                break;
+
             UsdPrim root = stage->GetPrimAtPath(path);
 
             if (root)
@@ -2430,9 +2445,15 @@ public:
     {
         UsdStageRefPtr stage = myLock.constData()->stage();
         auto predicate = HUSDgetUsdPrimPredicate(myDemands);
+        UT_AutoInterrupt boss("Primitive pattern evaluation: %descendants");
 
         for (auto &&path : myPaths)
         {
+            // This operation is relatively heavy, so check for interrupts
+            // at each iteration.
+            if (boss.wasInterrupted())
+                break;
+
             UsdPrim root = stage->GetPrimAtPath(path);
 
             if (root)
@@ -2501,12 +2522,17 @@ public:
     void matchPrimitives(XUSD_PathSet &matches) const override
     {
         UsdStageRefPtr stage = myLock.constData()->stage();
+        UT_AutoInterrupt boss("Primitive pattern evaluation: %parents");
+        int count = 0;
 
         if (!myStrict)
             matches = myPaths;
 
         for (auto &&path : myPaths)
         {
+            if ((count++ & 0x3FF) == 0 && boss.wasInterrupted())
+                break;
+
             SdfPath parentpath = path.GetParentPath();
 
             if (!parentpath.IsAbsoluteRootPath() && !parentpath.IsEmpty())
@@ -2539,12 +2565,17 @@ public:
     void matchPrimitives(XUSD_PathSet &matches) const override
     {
         UsdStageRefPtr stage = myLock.constData()->stage();
+        UT_AutoInterrupt boss("Primitive pattern evaluation: %ancestors");
+        int count = 0;
 
         if (!myStrict)
             matches = myPaths;
 
         for (auto &&path : myPaths)
         {
+            if ((count++ & 0x3FF) == 0 && boss.wasInterrupted())
+                break;
+
             SdfPath parentpath = path.GetParentPath();
 
             while (!parentpath.IsAbsoluteRootPath() && !parentpath.IsEmpty())
@@ -2608,9 +2639,14 @@ public:
     {
         SdfPath rootpath;
         SdfPath commonprefix;
+        UT_AutoInterrupt boss("Primitive pattern evaluation: %commonroots");
+        int count = 0;
 
         for (auto &&path : myPaths)
         {
+            if ((count++ & 0x3FF) == 0 && boss.wasInterrupted())
+                break;
+
             if (!path.HasPrefix(rootpath))
             {
                 // Either our first path, or a path with a new root prim.
@@ -2777,9 +2813,11 @@ public:
             exint idx = 0;
             exint start = getValueFromArg("start", 0);
             exint end = getValueFromArg("end", myPaths.size());
-            exint count = getValueFromArg("count", 1);
+            exint icount = getValueFromArg("count", 1);
             exint interval = getValueFromArg("interval", 2);
             bool keepoutsiderange = false;
+            UT_AutoInterrupt boss("Primitive pattern evaluation: %keep");
+            int count = 0;
 
             // Make sure the interval value is valid.
             interval = (interval > 0) ? interval : 1;
@@ -2789,10 +2827,13 @@ public:
 
             for (auto it = myPaths.begin(); it != myPaths.end();)
             {
+                if ((count++ & 0x3FF) == 0 && boss.wasInterrupted())
+                    break;
+
                 if (!keepoutsiderange && (idx < start || idx >= end))
                     it = myPaths.erase(it);
                 else if (idx >= start && idx < end &&
-                    (idx - start) % interval >= count)
+                    (idx - start) % interval >= icount)
                     it = myPaths.erase(it);
                 else
                     ++it;
@@ -2872,12 +2913,18 @@ public:
                 parseFloat(fractionit->second, fraction);
 
             exint removecount = (1.0 - fraction) * myPaths.size();
+            UT_AutoInterrupt boss("Primitive pattern evaluation: %keeprandom");
+            int count = 0;
+
             if (removecount > 0)
             {
                 std::map<SYS_HashType, SdfPath> randommap;
 
                 for (auto &&path : myPaths)
                 {
+                    if ((count++ & 0x3FF) == 0 && boss.wasInterrupted())
+                        break;
+
                     SYS_HashType hash = SYShash(HUSD_Path(path).pathStr());
                     SYShashCombine(hash, seed);
                     while (!randommap.emplace(hash, path).second)
@@ -2886,6 +2933,9 @@ public:
 
                 for (auto &&it : randommap)
                 {
+                    if ((count++ & 0x3FF) == 0 && boss.wasInterrupted())
+                        break;
+
                     myPaths.erase(it.second);
                     if (--removecount == 0)
                         break;
@@ -3194,7 +3244,7 @@ public:
 
     void matchPrimitives(XUSD_PathSet &matches) const override
     {
-        UT_AutoInterrupt boss("Matching primitives: %foreach");
+        UT_AutoInterrupt boss("Primitive pattern evaluation: %foreach");
 
         UTparallelForEachNumber(myRangePaths.size(),
             [&](const UT_BlockedRange<size_t> &r)

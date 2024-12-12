@@ -31,6 +31,7 @@
 #include "XUSD_Data.h"
 #include "XUSD_PathSet.h"
 #include "XUSD_Utils.h"
+#include <UT/UT_Interrupt.h>
 #include <UT/UT_Quaternion.h>
 #include <gusd/UT_Gf.h>
 #include <pxr/usd/usdGeom/xformable.h>
@@ -253,12 +254,17 @@ HUSD_Xform::applyXforms(const HUSD_FindPrims &findprims,
 
     if (outdata && outdata->isStageValid())
     {
+        UT_AutoInterrupt boss("Apply transforms");
 	auto		 stage = outdata->stage();
 	HUSD_XformEntry	 xform_entry = {xform, timecode};
         HUSD_Info        info(myWriteLock);
+        unsigned char    count = 0;
 
 	for (auto &&sdfpath : findprims.getExpandedPathSet().sdfPathSet())
 	{
+            if (count++ == 0 && boss.wasInterrupted())
+                break;
+
 	    husdApplyXform(sdfpath, stage, name,
                 &xform_entry, 1, xform_style,
                 myWarnBadPrimTypes, myCheckEditableFlag,
@@ -281,10 +287,15 @@ HUSD_Xform::applyXforms(const HUSD_XformEntryMap &xform_map,
 
     if (outdata && outdata->isStageValid())
     {
-	auto				 stage = outdata->stage();
+        UT_AutoInterrupt boss("Apply transforms");
+	auto             stage = outdata->stage();
+        unsigned char    count = 0;
 
 	for (auto it = xform_map.begin(); it != xform_map.end(); ++it)
 	{
+            if (count++ == 0 && boss.wasInterrupted())
+                break;
+
 	    SdfPath	 sdfpath = HUSDgetSdfPath(it->first);
 
 	    husdApplyXform(sdfpath, stage, name,
@@ -312,10 +323,15 @@ HUSD_Xform::applyLookAt(const HUSD_FindPrims &findprims,
 
     if (outdata && outdata->isStageValid())
     {
-	auto                 stage = outdata->stage();
+        UT_AutoInterrupt boss("Apply transforms");
+	auto             stage = outdata->stage();
+        unsigned char    count = 0;
 
 	for (auto &&sdfpath : findprims.getExpandedPathSet().sdfPathSet())
 	{
+            if (count++ == 0 && boss.wasInterrupted())
+                break;
+
             UT_Matrix4D          targetprimxform(0.0);
             UT_Matrix4D          prelookatxform(0.0);
             UT_Matrix4D          xform(1.0);
