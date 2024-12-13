@@ -655,7 +655,7 @@ namespace
 	UsdPrim	render = stage->GetPrimAtPath(SdfPath("/Render"));
 	if (render)
 	{
-	    for (auto &&k : render.GetAllChildren())
+	    for (auto &&k : render.GetAllDescendants())
 	    {
 		UsdRenderSettings	sets(k);
 		if (sets)
