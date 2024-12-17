@@ -141,6 +141,18 @@ Changes ordered from oldest to newest at initial release of Houdini 20.5:
   - **Not required**: Guard against warning C4003 on Windows. Change made after 24.03 to fix issue https://github.com/PixarAnimationStudios/OpenUSD/issues/2624.
 - [94b251716d8fef2013239fb31a51c4ea11c92568](https://github.com/sideeffects/USD/commit/94b251716d8fef2013239fb31a51c4ea11c92568):
   - **Not required**: Fix rendering of Capsule_1 prims with differing top and bottom radii. Unmerged PR https://github.com/PixarAnimationStudios/OpenUSD/pull/3129 submitted after the USD 24.03 release.
+- [629fd9fa44fb65244ba1c9bba687d3dd296c2d50](https://github.com/sideeffects/USD/commit/629fd9fa44fb65244ba1c9bba687d3dd296c2d50):
+  - **Not required**: Flagged the GetDataSharingId API to be exported from the usdImaging library.
+- [81fe93ba6a77f148445e11ab88c9781c7f2a2819](https://github.com/sideeffects/USD/commit/81fe93ba6a77f148445e11ab88c9781c7f2a2819):
+  - **Not required**: Fix to MacOS rpath to allow USD binaries such as usdcat to run on that platform.
+- [f725a660e716b682b023691472ba843896998679](https://github.com/sideeffects/USD/commit/f725a660e716b682b023691472ba843896998679):
+  - **Not required**: Fix to MacOS rpath to allow USD binaries such as usdcat to run on that platform.
+- [01849ede9dde2b3f1114e94d89979775c94f0eeb](https://github.com/sideeffects/USD/commit/01849ede9dde2b3f1114e94d89979775c94f0eeb):
+  - **Not required**: Prevent a possible crash during certain hydra updates involving native instances.
+- [677e5ffc46a76d8af8dfcdb25151779f5998c4e0](https://github.com/sideeffects/USD/commit/677e5ffc46a76d8af8dfcdb25151779f5998c4e0):
+  - **Not required**: Fix a crash on Windows when USD tries to resolve the path to a USD file on a removable drive mounted as a folder on an NTFS file system.
+- [75df2a1a34e041c84a205b6ff175fbef0f81dc59](https://github.com/sideeffects/USD/commit/75df2a1a34e041c84a205b6ff175fbef0f81dc59):
+  - **Not required**: Fixes to allow usdview to run on Qt6/PySide6 builds of Houdini.
 
 ## Building Houdini libraries
 
