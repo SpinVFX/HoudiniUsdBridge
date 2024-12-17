@@ -939,7 +939,7 @@ saveStage(const UsdStageWeakPtr &stage,
                 flags.myMuteLayersBeforeSave);
             saved_path_info_map.emplace(fullfilepath, XUSD_SavePathInfo(
                 fullfilepath, filepath, XUSD_EXTERNAL_REF_OTHER,
-                false, filepath_is_time_dependent));
+                std::string(), false, filepath_is_time_dependent));
         }
     }
     else
@@ -1009,7 +1009,8 @@ saveStage(const UsdStageWeakPtr &stage,
 
 	// Create mapping of layer identifiers to layer ref ptrs for all layers
 	// on the stage, either as sublayers or references.
-        referenceinfomap[rootidentifier] = {rootlayer, XUSD_EXTERNAL_REF_OTHER};
+        referenceinfomap[rootidentifier] =
+            { rootlayer, XUSD_EXTERNAL_REF_OTHER, SdfLayerRefPtr() };
 	HUSDaddExternalReferencesToLayerMap(rootlayer, referenceinfomap, true);
         
         // Create mapping of layer identifiers to the paths on disk where the
@@ -1067,25 +1068,43 @@ saveStage(const UsdStageWeakPtr &stage,
             if (identifier == first_sublayer_identifier)
                 first_sublayer = layer;
 
+            // Get the identifier of the layer that referenced this layer.
+            std::string referencing_identifier =
+                data.second.myReferenceLayer
+                    ? data.second.myReferenceLayer->GetIdentifier()
+                    : std::string();
             // As per the long comment above, we'll take note of the data we've
             // collected so far, and will run the output processors in a second
             // pass.
             idtosavepathmap[identifier] = XUSD_SavePathInfo(
                 orig_path, orig_path, data.second.myReferenceType,
-                using_node_path, time_dependent);
+                referencing_identifier, using_node_path, time_dependent);
         }
         
         // Now we need to produce an ordering of the XUSD_SavePathInfo entries
         UT_Array<std::string> ids(idtosavepathmap.size());
         for (auto &&id : idtosavepathmap.key_range())
             ids.emplace_back(id);
+        auto get_depth_fn = [&idtosavepathmap](const std::string &id) {
+            int depth = 0;
+            std::string searchid = id;
+            auto it = idtosavepathmap.find(searchid);
+            while (it != idtosavepathmap.end())
+            {
+                depth++;
+                searchid = it->second.myReferenceLayerId;
+                it = idtosavepathmap.find(searchid);
+            }
+            return depth;
+        };
         ids.sort([&](const std::string &lhs, const std::string &rhs) {
-            // We want to process the root layer first,
-            // so always give it priority
-            if (lhs == rootidentifier)
-                return true;
-            if (rhs == rootidentifier)
-                return false;
+            // Do a depth-first traversal in terms of layers referenced
+            // by other layers.
+            int lhsdepth = get_depth_fn(lhs);
+            int rhsdepth = get_depth_fn(rhs);
+            if (lhsdepth != rhsdepth)
+                return lhsdepth < rhsdepth;
+
             // Otherwise we base our order on the pre-processed path
             const UT_StringHolder &lpath = idtosavepathmap[lhs].myOriginalPath;
             const UT_StringHolder &rpath = idtosavepathmap[rhs].myOriginalPath;
@@ -1099,8 +1118,10 @@ saveStage(const UsdStageWeakPtr &stage,
             auto &savepathmap = idtosavepathmap[id];
             // Send this path to asset processors to get the final save path.
             savepathmap.myFinalPath = runOutputProcessors(
-                    processordata.myProcessors,
-                    savepathmap.myOriginalPath, UT_StringRef(), true, true);
+                processordata.myProcessors,
+                savepathmap.myOriginalPath,
+                idtosavepathmap[savepathmap.myReferenceLayerId].myFinalPath,
+                true, true);
             // Make sure the save path is an absolute path.
             if (!UTisAbsolutePath(savepathmap.myFinalPath))
                 UTmakeAbsoluteFilePath(savepathmap.myFinalPath);

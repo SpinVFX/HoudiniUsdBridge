@@ -2913,7 +2913,7 @@ HUSDaddExternalReferencesToLayerMap(const SdfLayerRefPtr &layer,
                 }
                 else if (HUSDshouldSaveLayerToDisk(reflayer))
 		{
-                    referenceinfomap[ref] = { reflayer, reftype };
+                    referenceinfomap[ref] = { reflayer, reftype, layer };
 		    if (recursive)
 			HUSDaddExternalReferencesToLayerMap(
 			    reflayer, referenceinfomap, recursive);
@@ -2921,7 +2921,7 @@ HUSDaddExternalReferencesToLayerMap(const SdfLayerRefPtr &layer,
                 else if (include_placeholders &&
                          HUSDisLayerPlaceholder(reflayer))
                 {
-                    referenceinfomap[ref] = { reflayer, reftype };
+                    referenceinfomap[ref] = { reflayer, reftype, layer };
                 }
 	    }
 	}
