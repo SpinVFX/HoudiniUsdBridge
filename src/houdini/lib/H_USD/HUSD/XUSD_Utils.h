@@ -105,11 +105,13 @@ public:
     explicit		 XUSD_SavePathInfo(const UT_StringHolder &finalpath,
                                 const UT_StringHolder &originalpath,
                                 XUSD_ExternalRefType reference_type,
+                                const std::string &reference_layer_id,
 				bool node_based_path,
                                 bool time_dependent)
 			     : myFinalPath(finalpath),
                                myOriginalPath(originalpath),
                                myReferenceType(reference_type),
+                               myReferenceLayerId(reference_layer_id),
 			       myNodeBasedPath(node_based_path),
                                myTimeDependent(time_dependent),
                                myWarnedAboutMixedTimeDependency(false)
@@ -118,6 +120,7 @@ public:
     UT_StringHolder	 myFinalPath;
     UT_StringHolder	 myOriginalPath;
     XUSD_ExternalRefType myReferenceType;
+    std::string          myReferenceLayerId;
     bool		 myNodeBasedPath;
     bool                 myTimeDependent;
     bool                 myWarnedAboutMixedTimeDependency;
@@ -128,6 +131,7 @@ class XUSD_ReferenceInfo
 public:
     SdfLayerRefPtr       myLayer;
     XUSD_ExternalRefType myReferenceType;
+    SdfLayerRefPtr       myReferenceLayer;
 };
 
 typedef UT_Map<std::string, SdfLayerRefPtr>
