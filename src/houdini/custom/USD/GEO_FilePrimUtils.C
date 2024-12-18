@@ -76,6 +76,9 @@
 #include <pxr/usd/sdf/assetPath.h>
 #include <pxr/usd/kind/registry.h>
 
+#include "GEO_Boost.h"
+#include BOOST_HEADER(numeric/conversion/cast.hpp)
+
 using namespace UT::Literal;
 
 PXR_NAMESPACE_OPEN_SCOPE
@@ -597,18 +600,25 @@ initPartition(GEO_FilePrim &fileprim,
 
 /// Creates the index array when building indexed primvars (for
 /// GEOcreateIndexedAttr()).
-template <typename GtT, typename GtComponentT>
+template <typename UsdT, typename GtComponentT>
 static void
 GEObuildIndex(
         UT_Array<int> &indices,
-        UT_Array<GtT> &values,
+        UT_Array<UsdT> &values,
         const GT_DataArrayHandle &src_hou_attr,
         int entries_per_elem)
 {
-    GT_DataArrayHandle buffer;
-    const GtT *data = reinterpret_cast<const GtT *>(
-            src_hou_attr->getArray<GtComponentT>(buffer));
-    
+    // Utilize GEO_FilePropAttribSource to safely cast or convert to the USD
+    // data type (e.g. when UsdT=uint32 and GtComponentT=int64)
+    using FilePropAttribSource = GEO_FilePropAttribSource<UsdT, GtComponentT>;
+    auto converter = UTmakeIntrusive<FilePropAttribSource>(src_hou_attr);
+    VtValue value;
+    converter->copyData(GEO_FileFieldValue(&value));
+
+    UT_ASSERT(value.IsHolding<VtArray<UsdT>>());
+    const VtArray<UsdT> &array = value.UncheckedGet<VtArray<UsdT>>();
+    const UsdT *data = array.data();
+
     // We have been asked to author an indices attribute for this
     // primvar. Go through all the values for the primvar, and
     // build a list of unique elements (taking into account `entries_per_elem`)
@@ -620,10 +630,10 @@ GEObuildIndex(
     // the execution here by working directly with a GtT rather than an array
     if (entries_per_elem == 1)
     {
-        UT_Map<GtT, int> attr_map;
+        UT_Map<UsdT, int> attr_map;
         for (exint i = 0, n = src_hou_attr->entries(); i < n; i++)
         {
-            const GtT &value = data[i];
+            const UsdT &value = data[i];
             auto it = attr_map.find(value);
             if (it == attr_map.end())
             {
@@ -635,10 +645,10 @@ GEObuildIndex(
     }
     else
     {
-        UT_Map<UT_Array<GtT>, int> attr_map;
+        UT_Map<UT_Array<UsdT>, int> attr_map;
         for (exint i = 0, n = src_hou_attr->entries(); i < n; i++)
         {
-            UT_Array<GtT> value(entries_per_elem);
+            UT_Array<UsdT> value(entries_per_elem);
             value.append(&data[i * entries_per_elem], entries_per_elem);
             auto it = attr_map.find(value);
             if (it == attr_map.end())
@@ -800,7 +810,7 @@ GEOcreateIndexedAttr(GEO_FilePrim &fileprim,
 
 /// Convert the data array to a single element array (used when converting to
 /// constant interpolation / detail attribute).
-template <typename T, typename ComponentT>
+template <typename ComponentT>
 GT_DataArrayHandle
 geoConvertToConstant(const GT_DataArrayHandle &src)
 {
@@ -871,15 +881,39 @@ geoConvertToScalar(
 
     GT_DataArrayHandle storage;
     const ComponentT *component_data = attr->getArray<ComponentT>(storage);
-    const T *data = reinterpret_cast<const T *>(component_data);
 
-    // Allow integer values to be converted to bool.
-    // TODO - in C++17, if constexpr could be used here. For now, reading from
-    // the ComponentT array ensures that this compiles for all types T.
-    if (SYS_IsIntegral<T>::value && attr_type == SdfValueTypeNames->Bool)
+    // Handle integer conversions to bool / unsigned.
+    if constexpr (SYSisSame<T, bool>())
+    {
         return new GEO_FilePropConstantSource<bool>(component_data[0] != 0);
+    }
+    else if constexpr (SYSisSame<T, uint32>() || SYSisSame<T, uint64>())
+    {
+        T value = 0;
+        try
+        {
+            value = BOOST_NS::numeric_cast<T>(component_data[0]);
+        }
+        catch (const BOOST_NS::bad_numeric_cast &)
+        {
+        }
 
-    return new GEO_FilePropConstantSource<T>(data[0]);
+        return new GEO_FilePropConstantSource<T>(value);
+    }
+    else
+    {
+        // Otherwise, make sure we can safely cast to the USD data type.
+        static_assert(
+                SYSisSame<
+                        ComponentT, typename GusdPodTupleTraits<T>::ValueType>()
+                || (SYSisSame<
+                            typename GusdPodTupleTraits<T>::ValueType, GfHalf>()
+                    && SYSisSame<ComponentT, fpreal16>()));
+
+        const T *data = reinterpret_cast<const T *>(component_data);
+        return new GEO_FilePropConstantSource<T>(data[0]);
+    }
+
 }
 
 template <>
@@ -1010,7 +1044,7 @@ GEOinitProperty(GEO_FilePrim &fileprim,
             // detail attribute. Note we can ignore the vertex indirection in
             // this situation, since all element attribute values are the same.
             attr_owner = GT_OWNER_DETAIL;
-            src_hou_attr = geoConvertToConstant<GtT, GtComponentT>(hou_attr);
+            src_hou_attr = geoConvertToConstant<GtComponentT>(hou_attr);
         }
         else if (attr_owner == GT_OWNER_VERTEX && vertex_indirect)
         {
@@ -1035,7 +1069,7 @@ GEOinitProperty(GEO_FilePrim &fileprim,
             usd_attr_type = usd_attr_type.GetScalarType();
         }
 
-        constexpr int entry_tuple_size = sizeof(GtT) / sizeof(GtComponentT);
+        constexpr int entry_tuple_size = GusdGetTupleSize<GtT>();
         const int entries_per_elem = src_hou_attr->getTupleSize() / entry_tuple_size;
 
         GEO_FilePropSource *prop_source = nullptr;
@@ -2253,6 +2287,20 @@ initExtraAttrib(GEO_FilePrim &fileprim,
     {
         SYS_STATIC_ASSERT(sizeof(bool) == sizeof(uint8));
         INIT_ATTRIB(bool, uint8, SdfValueTypeNames->BoolArray);
+    }
+    else if (
+            GTisInteger(storage)
+            && geoMultiMatch(
+                    options.myUIntAttribs, attr_name, decoded_attr_name))
+    {
+        INIT_ATTRIB(uint32, int64, SdfValueTypeNames->UIntArray);
+    }
+    else if (
+            GTisInteger(storage)
+            && geoMultiMatch(
+                    options.myUInt64Attribs, attr_name, decoded_attr_name))
+    {
+        INIT_ATTRIB(uint64, int64, SdfValueTypeNames->UInt64Array);
     }
     else if (storage == GT_STORE_UINT8)
     {
@@ -3778,6 +3826,148 @@ geoInitNurbsPatch(
             geoShouldAuthorIdentityXforms(*patch));
 }
 
+static void
+geoInitFieldAsset(
+        GEO_FilePrim &fileprim,
+        UT_Array<GEO_FilePrim> &extra_prims,
+        UT_ArrayStringSet &processed_attribs,
+        const GT_PrimitiveHandle &gtprim,
+        const UT_Matrix4D &prim_xform,
+        const GA_DataId &topology_id,
+	const GEO_VolumeFileMap &volume_path_map,
+        const GEO_ImportOptions &options)
+{
+    const GEO_Primitive *geoprim = nullptr;
+
+    if (gtprim->getPrimitiveType() == GT_PRIM_VOXEL_VOLUME)
+    {
+        auto gtvolume = UTverify_cast<const GT_PrimVolume *>(gtprim.get());
+        geoprim = gtvolume->getGeoPrimitive();
+        fileprim.setTypeName(GEO_FilePrimTypeTokens->HoudiniFieldAsset);
+    }
+    else
+    {
+        auto gtvolume = UTverify_cast<const GT_PrimVDB *>(gtprim.get());
+        geoprim = gtvolume->getGeoPrimitive();
+        fileprim.setTypeName(GEO_FilePrimTypeTokens->OpenVDBAsset);
+    }
+
+    UT_ASSERT(geoprim);
+
+    if (options.myTopologyHandling != GEO_USD_TOPOLOGY_NONE)
+    {
+        const bool static_topology
+                = (options.myTopologyHandling == GEO_USD_TOPOLOGY_STATIC);
+        auto init_topology_property
+                = [](GEO_FileProp &prop, bool static_topology,
+                     const GA_DataId &topology_id)
+        {
+            prop.setValueIsDefault(static_topology);
+            prop.addCustomData(HUSDgetDataIdToken(), VtValue(topology_id));
+        };
+
+        SdfAssetPath volume_path;
+        {
+            auto it = volume_path_map.find(geoprim->getParent());
+            // The volume path should have been set up already, along with
+            // storing the XUSD_LockedGeo if the volume was from unpacked
+            // geometry.
+            UT_ASSERT(it != volume_path_map.end());
+            if (it != volume_path_map.end())
+                volume_path = it->second;
+        }
+
+        GEOinitXformAttrib(fileprim, prim_xform, options);
+        GEO_FileProp *prop = fileprim.addProperty(
+                UsdVolTokens->filePath, SdfValueTypeNames->Asset,
+                new GEO_FilePropConstantSource<SdfAssetPath>(volume_path));
+        init_topology_property(*prop, static_topology, topology_id);
+
+        // Find the name attribute, and set it as the field name.
+        GT_Owner nameowner;
+        GT_DataArrayHandle namehandle = gtprim->findAttribute(
+                GA_Names::name, nameowner, 0);
+        if (namehandle && namehandle->getStorage() == GT_STORE_STRING)
+        {
+            prop = fileprim.addProperty(
+                    UsdVolTokens->fieldName, SdfValueTypeNames->Token,
+                    new GEO_FilePropConstantSource<TfToken>(
+                            TfToken(namehandle->getS(0))));
+            init_topology_property(*prop, static_topology, topology_id);
+        }
+        // Houdini Native Volumes have a field index the is used as the
+        // volume's primary identifier. Other volume types use the field index
+        // to disambiguate between multiple volumes with the same name.
+        if (gtprim->getPrimitiveType() == GT_PRIM_VOXEL_VOLUME)
+        {
+            // The field index for Houdini Native Volumes is the primitive
+            // index within the detail, and is the primary identifier.
+            prop = fileprim.addProperty(
+                    UsdVolTokens->fieldIndex, SdfValueTypeNames->Int,
+                    new GEO_FilePropConstantSource<int>(
+                            (int)geoprim->getMapIndex()));
+            init_topology_property(*prop, static_topology, topology_id);
+        }
+        else
+        {
+            // Other volumes use the field index to disambiguate between
+            // primitives of the same name. This function is run in multiple
+            // threads, so rather than counting prims as we go, for every
+            // volume we have to find all matches of the same type and name
+            // and find our index within that list. Note that we ignore the
+            // group membership (if we're only importing some primitives)
+            // because when doing the lookup of the volume from the name and
+            // index, we are doing the lookup in the context of the whole gdp.
+            int index = 0;
+            if (namehandle && namehandle->getStorage() == GT_STORE_STRING)
+            {
+                UT_Array<const GEO_Primitive *> matchingprims;
+                const GEO_Detail &detail
+                        = static_cast<const GEO_Detail &>(geoprim->getDetail());
+                detail.findAllPrimitivesByName(
+                        matchingprims, namehandle->getS(0),
+                        geoprim->getPrimitiveId());
+                for (auto &&matchingprim : matchingprims)
+                {
+                    if (matchingprim == geoprim)
+                        break;
+                    index++;
+                }
+            }
+            prop = fileprim.addProperty(
+                    UsdVolTokens->fieldIndex, SdfValueTypeNames->Int,
+                    new GEO_FilePropConstantSource<int>(index));
+            init_topology_property(*prop, static_topology, topology_id);
+        }
+
+        // If the volume save path was specified, record as custom data.
+        UT_StringHolder save_path = GEOgetStringFromAttrib(
+                *gtprim, theVolumeSavePathName.asRef());
+        if (save_path)
+        {
+            // We record it as a String attribute rather than an Asset Path
+            // because we don't want USD resolving the path for us. Relative
+            // paths should remain relative.
+            prop = fileprim.addProperty(
+                    HUSDgetSavePathToken(), SdfValueTypeNames->String,
+                    new GEO_FilePropConstantSource<std::string>(
+                            save_path.toStdString()));
+            init_topology_property(*prop, static_topology, topology_id);
+        }
+    }
+
+    // Always set extents for volume prims.
+    initExtentAttrib(
+            fileprim, gtprim, processed_attribs, options,
+            /*force*/ true);
+    initVisibilityAttrib(fileprim, *gtprim, options);
+
+    static constexpr GT_Owner theOwners[] = {GT_OWNER_UNIFORM, GT_OWNER_INVALID};
+    initExtraAttribs(
+            fileprim, extra_prims, gtprim, theOwners, processed_attribs, options,
+            false);
+}
+
 void
 GEOinitGTPrim(GEO_FilePrim &fileprim,
 	UT_Array<GEO_FilePrim> &extra_prims,
@@ -4343,109 +4533,9 @@ GEOinitGTPrim(GEO_FilePrim &fileprim,
     else if (gtprim->getPrimitiveType() == GT_PRIM_VOXEL_VOLUME ||
 	     gtprim->getPrimitiveType() == GT_PRIM_VDB_VOLUME)
     {
-	const GEO_Primitive	*geoprim = nullptr;
-	GT_DataArrayHandle	 namehandle;
-	GT_Owner		 nameowner;
-
-	if (gtprim->getPrimitiveType() == GT_PRIM_VOXEL_VOLUME)
-	{
-	    GT_PrimVolume *gtvolume=static_cast<GT_PrimVolume *>(gtprim.get());
-	    geoprim = gtvolume->getGeoPrimitive();
-	    fileprim.setTypeName(GEO_FilePrimTypeTokens->HoudiniFieldAsset);
-	}
-	else
-	{
-	    GT_PrimVDB *gtvolume=static_cast<GT_PrimVDB *>(gtprim.get());
-	    geoprim = gtvolume->getGeoPrimitive();
-	    fileprim.setTypeName(GEO_FilePrimTypeTokens->OpenVDBAsset);
-	}
-
-        SdfAssetPath volume_path;
-        {
-            auto it = volume_path_map.find(geoprim->getParent());
-            // The volume path should have been set up already, along with
-            // storing the XUSD_LockedGeo if the volume was from unpacked
-            // geometry.
-            UT_ASSERT(it != volume_path_map.end());
-            if (it != volume_path_map.end())
-                volume_path = it->second;
-        }
-
-	GEOinitXformAttrib(fileprim, prim_xform, options);
-	fileprim.addProperty(UsdVolTokens->filePath,
-	    SdfValueTypeNames->Asset,
-	    new GEO_FilePropConstantSource<SdfAssetPath>(volume_path));
-	// Find the name attribute, and set it as the field name.
-	namehandle = gtprim->findAttribute(GA_Names::name, nameowner, 0);
-	if (namehandle && namehandle->getStorage() == GT_STORE_STRING)
-	    fileprim.addProperty(UsdVolTokens->fieldName,
-		SdfValueTypeNames->Token,
-		new GEO_FilePropConstantSource<TfToken>(
-		    TfToken(namehandle->getS(0))));
-	// Houdini Native Volumes have a field index the is used as the
-        // volume's primary identifier. Other volume types use the field index
-        // to disambiguate between multiple volumes with the same name.
-	if (gtprim->getPrimitiveType() == GT_PRIM_VOXEL_VOLUME)
-        {
-            // The field index for Houdini Native Volumes is the primitive
-            // index within the detail, and is the primary identifier.
-            fileprim.addProperty(UsdVolTokens->fieldIndex,
-                SdfValueTypeNames->Int,
-                new GEO_FilePropConstantSource<int>(
-                    (int)geoprim->getMapIndex()));
-        }
-        else
-        {
-            // Other volumes use the field index to disambiguate between
-            // primitives of the same name. This function is run in multiple
-            // threads, so rather than counting prims as we go, for every
-            // volume we have to find all matches of the same type and name
-            // and find our index within that list. Note that we ignore the
-            // group membership (if we're only importing some primitives)
-            // because when doing the lookup of the volume from the name and
-            // index, we are doing the lookup in the context of the whole gdp.
-            int index = 0;
-            if (namehandle && namehandle->getStorage() == GT_STORE_STRING)
-            {
-                UT_Array<const GEO_Primitive *> matchingprims;
-                ((GEO_Detail &)geoprim->getDetail()).findAllPrimitivesByName(
-                    matchingprims, namehandle->getS(0),
-                    geoprim->getPrimitiveId());
-                for (auto &&matchingprim : matchingprims)
-                {
-                    if (matchingprim == geoprim)
-                        break;
-                    index++;
-                }
-            }
-            fileprim.addProperty(UsdVolTokens->fieldIndex,
-                SdfValueTypeNames->Int,
-                new GEO_FilePropConstantSource<int>(index));
-        }
-        // Always set extents for volume prims.
-        initExtentAttrib(fileprim, gtprim, processed_attribs, options,
-                         /*force*/ true);
-        initVisibilityAttrib(fileprim, *gtprim, options);
-
-        static constexpr GT_Owner owners[] = {
-            GT_OWNER_UNIFORM, GT_OWNER_INVALID
-        };
-        initExtraAttribs(fileprim, extra_prims, gtprim, owners,
-                         processed_attribs, options, false);
-
-        // If the volume save path was specified, record as custom data.
-        UT_StringHolder save_path =
-            GEOgetStringFromAttrib(*gtprim, theVolumeSavePathName.asRef());
-        if (save_path)
-        {
-            // We record it as a String attribute rather than an Asset Path
-            // because we don't want USD resolving the path for us. Relative
-            // paths should remain relative.
-            fileprim.addProperty(HUSDgetSavePathToken(),
-                SdfValueTypeNames->String,
-                new GEO_FilePropConstantSource<std::string>(
-                    save_path.toStdString()));
-        }
+        geoInitFieldAsset(
+                fileprim, extra_prims, processed_attribs, gtprim, prim_xform,
+                topology_id, volume_path_map, options);
     }
     else if (gtprim->getPrimitiveType() ==
              GT_PrimVolumeCollection::getStaticPrimitiveType())
