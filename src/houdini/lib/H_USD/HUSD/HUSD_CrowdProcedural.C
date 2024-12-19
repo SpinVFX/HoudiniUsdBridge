@@ -1161,9 +1161,10 @@ void
 husdCreateInstances(
         const UsdStageRefPtr &stage,
         const SdfLayerRefPtr &layer,
-        const UT_Set<HUSD_Path> &exemplars_to_bake,
+        UT_Set<HUSD_Path> &exemplars_to_bake,
         const UT_Map<HUSD_Path, HUSD_Path> &paths_to_reduce,
         const UT_Array<HUSD_Path> &paths_skipped,
+        bool bake_all_agents,
         bool visualize,
         const HUSD_Path &prototype_material,
         const HUSD_Path &instance_material,
@@ -1218,16 +1219,24 @@ husdCreateInstances(
         }
     }
 
+    // If we're baking all agents, disable instancing for the remaining agents.
     // If visualization is enabled, color the primitives which weren't affected
     // by the procedural.
-    if (visualize)
+    if (bake_all_agents || visualize)
     {
         for (const HUSD_Path &path : paths_skipped)
         {
             SdfPrimSpecHandle prim_spec = SdfCreatePrimInLayer(
                     layer, path.sdfPath());
 
-            husdBindMaterial(prim_spec, default_material);
+            if (bake_all_agents)
+            {
+                prim_spec->SetInstanceable(false);
+                exemplars_to_bake.insert(path);
+            }
+
+            if (visualize)
+                husdBindMaterial(prim_spec, default_material);
         }
     }
 }
@@ -1339,6 +1348,7 @@ HUSDapplyCrowdProcedural(
         const HUSD_TimeCode &time_sample,
         fpreal lod_threshold,
         bool optimize_identical_poses,
+        bool bake_all_agents,
         const HUSD_Path &prototype_material,
         const HUSD_Path &instance_material,
         const HUSD_Path &default_material)
@@ -1418,8 +1428,7 @@ HUSDapplyCrowdProcedural(
     for (const husdSkelInstanceGroup &group : instance_groups)
     {
         group.getPathsToReduce(
-                exemplars_to_bake, paths_to_reduce,
-                visualize ? &paths_skipped : nullptr);
+                exemplars_to_bake, paths_to_reduce, &paths_skipped);
     }
 
     // Output stats about the optimizations.
@@ -1447,8 +1456,8 @@ HUSDapplyCrowdProcedural(
     // prototypes.
     husdCreateInstances(
             stage, edit_layer, exemplars_to_bake, paths_to_reduce,
-            paths_skipped, visualize, prototype_material, instance_material,
-            default_material);
+            paths_skipped, bake_all_agents, visualize, prototype_material,
+            instance_material, default_material);
 
     GfInterval bake_interval = husdComputeBakeInterval(
             stage, HUSDgetUsdTimeCode(time_sample), shutter_range);

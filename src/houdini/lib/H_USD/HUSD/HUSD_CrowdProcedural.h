@@ -38,6 +38,7 @@ HUSD_API bool HUSDapplyCrowdProcedural(
         const HUSD_TimeCode &time_sample,
         fpreal lod_threshold,
         bool optimize_identical_poses,
+        bool bake_all_agents,
         const HUSD_Path &prototype_material,
         const HUSD_Path &instance_material,
         const HUSD_Path &default_material);
