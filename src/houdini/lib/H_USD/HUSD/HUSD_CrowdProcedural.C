@@ -39,6 +39,7 @@
 #include <UT/UT_WorkBuffer.h>
 #include <gusd/UT_Gf.h>
 
+#include <array>
 #include <numeric>
 
 #include <pxr/usd/sdf/attributeSpec.h>
@@ -60,25 +61,53 @@ PXR_NAMESPACE_USING_DIRECTIVE
 
 namespace
 {
-/// The maximum bucket index is 32^3 = 2^15 fitting into a signed int16
-static constexpr int BUCKET_DIVS = 32;
-using husdBucketCoord = int16;
-
+/// The number of LOD groups. The highest LOD group uses a division size of
+/// 2^(n-1), e.g. 32 if there are 6 groups.
 static constexpr int NUM_LOD_GROUPS = 6;
+static constexpr int BUCKET_DIVS = 1 << (NUM_LOD_GROUPS - 1);
 
-/// Partition agents into multiple LOD groups, which use bucket divisions
-/// of 32, 16, 8, etc.
-static constexpr int theLODDivs[] = { 32, 16, 8, 4, 2, 1 };
-SYS_STATIC_ASSERT(SYSarraySize(theLODDivs) == NUM_LOD_GROUPS);
+/// Type to store a packed bucket coordinate. For example, if the maximum bucket
+/// index is 32^3 = 2^15, this fits into a signed int16.
+using husdBucketCoord = int16;
+static_assert(
+        exint(std::numeric_limits<husdBucketCoord>::max())
+        >= ((1 << (3 * (NUM_LOD_GROUPS - 1))) - 1));
+
+/// Construct a packed bucket coordinate.
+constexpr husdBucketCoord
+husdToBucketCoord(husdBucketCoord x, husdBucketCoord y, husdBucketCoord z)
+{
+    return x * BUCKET_DIVS * BUCKET_DIVS + y * BUCKET_DIVS + z;
+}
+
+/// Number of divisions for each LOD group.
+/// Each LOD group uses half as many divisions, e.g. 32, 16, 8, etc
+static constexpr std::array<int, NUM_LOD_GROUPS> theLODDivs = []() constexpr
+{
+    std::array<int, NUM_LOD_GROUPS> divs = {};
+    for (int i = 0; i < NUM_LOD_GROUPS; ++i)
+        divs[i] = BUCKET_DIVS >> i;
+
+    return divs;
+}();
 
 /// Precomputed masks to compute the husdBucketCoord for the other LOD groups
-/// from the original 32^3 coordinates. For example, (coords & 0x7bde) will
-/// round each coordinate to the nearest multiple of 2, giving us 16^3 possible
-/// values.
-static constexpr husdBucketCoord theLODCoordMasks[] = {
-    0x7fff, 0x7bde, 0x739c, 0x6318, 0x4210, 0x0000
-};
-SYS_STATIC_ASSERT(SYSarraySize(theLODCoordMasks) == NUM_LOD_GROUPS);
+/// from the original coordinates of the first LOD group.
+/// For example, if BUCKET_DIVS is 32 then masks[1] is 0x7bde and (coords &
+/// 0x7bde) will round each coordinate to the nearest multiple of 2, giving us
+/// 16^3 possible values.
+static constexpr std::array<husdBucketCoord, NUM_LOD_GROUPS> theLODCoordMasks = []() constexpr
+{
+    std::array<husdBucketCoord, NUM_LOD_GROUPS> masks = {};
+
+    for (int i = 0; i < NUM_LOD_GROUPS; ++i)
+    {
+        husdBucketCoord coord_mask = BUCKET_DIVS - (1 << i);
+        masks[i] = husdToBucketCoord(coord_mask, coord_mask, coord_mask);
+    }
+
+    return masks;
+}();
 
 // TODO - factor this out into UT and unify with BRAY_Measure
 class husdMeasure
@@ -152,6 +181,11 @@ public:
         return 0.5F * osize * sinc / (odist * odist) * offscreenMult(pos);
     }
 
+    void setOffscreenQuality(float quality)
+    {
+	myOffscreenQuality = quality;
+    }
+
 private:
     float offscreenMult(const UT_Vector3 &p) const
     {
@@ -159,7 +193,7 @@ private:
         if (myOrtho)
             dist = SYSsqrt(p[0] * p[0] + p[1] * p[1]);
         else
-            dist = p.z() / p.length();
+            dist = -p.z() / p.length();
         return SYSlerp(
                 1.0F, myOffscreenQuality,
                 SYSsmooth(myMinOffscreen, myMaxOffscreen, dist));
@@ -563,7 +597,7 @@ husdLODPose::husdLODPose(
         for (int i = 0; i < 3; ++i)
             c[i] = SYSfloor(SYSfit(t[i], box(i, 0), box(i, 1), 0, BUCKET_DIVS));
 
-        myCoords[i] = ((((c[0] * BUCKET_DIVS) + c[1]) * BUCKET_DIVS) + c[2]);
+        myCoords[i] = husdToBucketCoord(c[0], c[1], c[2]);
     }
 }
 
@@ -1064,6 +1098,7 @@ husdReadCameraProperties(
         const HUSD_Path &camera_path,
         const UsdTimeCode &time_sample,
         const UT_Vector2i &resolution,
+        fpreal offscreen_quality,
         husdMeasure &measure,
         UT_Matrix4D &world_to_camera_xform,
         GfInterval &shutter_range)
@@ -1127,6 +1162,8 @@ husdReadCameraProperties(
     double shutter_close = 0;
     camera.GetShutterCloseAttr().Get(&shutter_close, time_sample);
     shutter_range = GfInterval(shutter_open, shutter_close);
+
+    measure.setOffscreenQuality(SYSclamp01(offscreen_quality));
 
     return true;
 }
@@ -1347,6 +1384,7 @@ HUSDapplyCrowdProcedural(
         const UT_Vector2i &resolution,
         const HUSD_TimeCode &time_sample,
         fpreal lod_threshold,
+        fpreal offscreen_quality,
         bool optimize_identical_poses,
         bool bake_all_agents,
         const HUSD_Path &prototype_material,
@@ -1371,7 +1409,8 @@ HUSDapplyCrowdProcedural(
     GfInterval shutter_range;
     if (!husdReadCameraProperties(
                 stage, camera_path, HUSDgetUsdTimeCode(time_sample), resolution,
-                measure, world_to_camera_xform, shutter_range))
+                offscreen_quality, measure, world_to_camera_xform,
+                shutter_range))
     {
         return false;
     }

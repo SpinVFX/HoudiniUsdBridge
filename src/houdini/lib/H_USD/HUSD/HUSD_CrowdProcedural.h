@@ -37,6 +37,7 @@ HUSD_API bool HUSDapplyCrowdProcedural(
         const UT_Vector2i &resolution,
         const HUSD_TimeCode &time_sample,
         fpreal lod_threshold,
+        fpreal offscreen_quality,
         bool optimize_identical_poses,
         bool bake_all_agents,
         const HUSD_Path &prototype_material,

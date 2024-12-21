@@ -1515,7 +1515,7 @@ _StitchLayersRecursive(const SdfLayerRefPtr &src,
                 destlayer = HUSDcreateAnonymousLayer(
                     SdfLayerHandle(), srcsavelocation);
             destreferenceinfomap[destlayer->GetIdentifier()] =
-                { destlayer, srcreftype };
+                { destlayer, srcreftype, SdfLayerRefPtr() };
 	    newdestlayers.insert(destlayer->GetIdentifier());
 	}
 	else
