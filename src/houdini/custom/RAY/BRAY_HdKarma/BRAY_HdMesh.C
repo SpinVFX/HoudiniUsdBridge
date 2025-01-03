@@ -462,7 +462,7 @@ BRAY_HdMesh::Sync(HdSceneDelegate *sceneDelegate,
 
             fpreal64 minfacedim, maxfacedim;
             counts->getMinMax(&minfacedim, &maxfacedim);
-            myConvexing = maxfacedim > 4;
+            myConvexing = (maxfacedim >= 4);
 
             UT_ErrorLog::format(8,
                     "{} topology change: {} faces, {} vertices, {} points",
