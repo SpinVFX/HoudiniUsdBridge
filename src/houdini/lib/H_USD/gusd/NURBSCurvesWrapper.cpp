@@ -231,12 +231,12 @@ gusdBuildSegEndPointIndices(
     GT_Offset dst_idx = 0;
     for (const auto& c : counts)
     {
-        seg_end_point_indices->set(src_idx, dst_idx++);
+        ++src_idx;
 
         for (int i = 0; i < c; ++i)
             seg_end_point_indices->set(src_idx++, dst_idx++);
 
-        seg_end_point_indices->set(src_idx, dst_idx++);
+        ++src_idx;
     }
 
     return seg_end_point_indices;
