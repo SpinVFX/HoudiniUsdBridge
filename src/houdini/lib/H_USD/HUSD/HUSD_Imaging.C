@@ -2682,7 +2682,7 @@ HUSD_Imaging::launchBackgroundRender(const UT_Matrix4D &view_matrix,
     // When we run in the background, the handles are much more interactive.
     if (UT_Thread::getNumProcessors() > 1)
     {
-	myPrivate->myUpdateTask.run([this, view_matrix, proj_matrix,
+	myPrivate->myUpdateTask.run([this, renderer, view_matrix, proj_matrix,
                                      viewport_rect, cam_effects]()
             {
                 UT_PerfMonAutoViewportDrawEvent perfevent("LOP Viewer",
@@ -2713,7 +2713,9 @@ HUSD_Imaging::launchBackgroundRender(const UT_Matrix4D &view_matrix,
                 // again, and grab COP textures once (1) is done cooking.
                 // See Bug 137353.
                 bool do_resume_render = false;
-                if (!myIsPaused && canPause())
+                if (!myIsPaused &&
+                    theRendererInfoMap[renderer].pauseOnUpdate() &&
+                    canPause())
                 {
                     do_resume_render =
                         myPrivate->myImagingEngine->PauseRenderer();

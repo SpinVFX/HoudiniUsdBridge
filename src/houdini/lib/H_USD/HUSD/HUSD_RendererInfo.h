@@ -59,6 +59,7 @@ public:
         , myNeedsNativeDepthPass(false)
         , myNeedsNativeSelectionPass(false)
         , myAllowBackgroundUpdate(false)
+        , myPauseOnUpdate(false)
         , myAovSupport(false)
         , myViewportRenderer(false)
         , myDrawModeSupport(false)
@@ -86,6 +87,7 @@ public:
                 bool needsnativedepth,
                 bool needsnativeselection,
                 bool allowbackgroundupdate,
+                bool pauseonupdate,
                 bool aovsupport,
                 bool viewportrenderer,
                 bool drawmodesupport,
@@ -111,6 +113,7 @@ public:
          , myNeedsNativeDepthPass(needsnativedepth)
          , myNeedsNativeSelectionPass(needsnativeselection)
          , myAllowBackgroundUpdate(allowbackgroundupdate)
+         , myPauseOnUpdate(pauseonupdate)
          , myAovSupport(aovsupport)
          , myViewportRenderer(viewportrenderer)
          , myDrawModeSupport(drawmodesupport)
@@ -173,6 +176,10 @@ public:
     // on a background thread.
     bool		 allowBackgroundUpdate() const
 			 { return myAllowBackgroundUpdate; }
+    // True if this plugin should pause while processing update. Should be set
+    // if the renderer can read COP textures to avoid potential deadlocks.
+    bool		 pauseOnUpdate() const
+                         { return myPauseOnUpdate; }
     // True if this plugin is able to generate AOV buffers.
     bool		 aovSupport() const
 			 { return myAovSupport; }
@@ -311,6 +318,7 @@ private:
     bool		 myNeedsNativeDepthPass;
     bool		 myNeedsNativeSelectionPass;
     bool		 myAllowBackgroundUpdate;
+    bool                 myPauseOnUpdate;
     bool		 myAovSupport;
     bool		 myViewportRenderer;
     bool		 myDrawModeSupport;

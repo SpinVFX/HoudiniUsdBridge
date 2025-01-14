@@ -147,6 +147,7 @@ HUSD_RendererInfo::getRendererInfo(const UT_StringHolder &name,
     bool		 needsdepth = false;
     bool		 needsselection = false;
     bool		 allowbackgroundupdate = true;
+    bool		 pauseonupdate = true;
     bool		 aovsupport = true;
     bool		 viewportrenderer = false;
     bool		 drawmodesupport = false;
@@ -184,6 +185,8 @@ HUSD_RendererInfo::getRendererInfo(const UT_StringHolder &name,
 	    needsselection = options.getOptionI("needsselection");
 	if (options.hasOption("allowbackgroundupdate"))
 	    allowbackgroundupdate = options.getOptionI("allowbackgroundupdate");
+        if (options.hasOption("pauseonupdate"))
+            pauseonupdate = options.getOptionI("pauseonupdate");
 	if (options.hasOption("aovsupport"))
 	    aovsupport = options.getOptionI("aovsupport");
 	if (options.hasOption("viewportrenderer"))
@@ -235,6 +238,7 @@ HUSD_RendererInfo::getRendererInfo(const UT_StringHolder &name,
 	    needsdepth,
 	    needsselection,
 	    allowbackgroundupdate,
+            pauseonupdate,
             aovsupport,
             viewportrenderer,
             drawmodesupport,
