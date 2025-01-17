@@ -76,6 +76,9 @@
 #include <pxr/usd/sdf/assetPath.h>
 #include <pxr/usd/kind/registry.h>
 
+#include <openvdb/Grid.h>
+#include <openvdb/Types.h>
+
 #include "GEO_Boost.h"
 #include BOOST_HEADER(numeric/conversion/cast.hpp)
 
@@ -3827,6 +3830,88 @@ geoInitNurbsPatch(
 }
 
 static void
+geoInitTopologyProp(
+        GEO_FileProp &prop,
+        bool static_topology,
+        const GA_DataId &topology_id)
+{
+    prop.setValueIsDefault(static_topology);
+    prop.addCustomData(HUSDgetDataIdToken(), VtValue(topology_id));
+}
+
+/// Configure attributes specific to OpenVDBAsset prims.
+static void
+geoInitVDBAsset(
+        GEO_FilePrim &fileprim,
+        const GT_PrimitiveHandle &gtprim,
+        bool static_topology,
+        const GA_DataId &topology_id)
+{
+    auto gtvolume = UTverify_cast<const GT_PrimVDB *>(gtprim.get());
+    const openvdb::GridBase *grid = gtvolume->getGrid();
+
+    TfToken field_class;
+    switch (grid->getGridClass())
+    {
+        case openvdb::GridClass::GRID_UNKNOWN:
+            field_class = UsdVolTokens->unknown;
+            break;
+        case openvdb::GridClass::GRID_LEVEL_SET:
+            field_class = UsdVolTokens->levelSet;
+            break;
+        case openvdb::GridClass::GRID_FOG_VOLUME:
+            field_class = UsdVolTokens->fogVolume;
+            break;
+        case openvdb::GridClass::GRID_STAGGERED:
+            field_class = UsdVolTokens->staggered;
+            break;
+    }
+
+    GEO_FileProp *prop = fileprim.addProperty(
+            UsdVolTokens->fieldClass, SdfValueTypeNames->Token,
+            new GEO_FilePropConstantSource<TfToken>(field_class));
+    geoInitTopologyProp(*prop, static_topology, topology_id);
+
+    // Only author fieldDataType for the types listed in the documentation for
+    // UsdVolOpenVDBAsset::GetFieldDataTypeAttr().
+    // Some types are not listed, e.g. point grids.
+    using openvdb::typeNameAsString;
+    static const UT_Map<std::string, TfToken> theDataTypeMap = {
+        { typeNameAsString<openvdb::math::half>(), UsdVolTokens->half },
+        { typeNameAsString<float>(), UsdVolTokens->float_ },
+        { typeNameAsString<double>(), UsdVolTokens->double_ },
+        { typeNameAsString<int32_t>(), UsdVolTokens->int_ },
+        { typeNameAsString<uint32_t>(), UsdVolTokens->uint },
+        { typeNameAsString<int64_t>(), UsdVolTokens->int64 },
+        { typeNameAsString<openvdb::Vec2H>(), UsdVolTokens->half2 },
+        { typeNameAsString<openvdb::Vec2s>(), UsdVolTokens->float2 },
+        { typeNameAsString<openvdb::Vec2d>(), UsdVolTokens->double2 },
+        { typeNameAsString<openvdb::Vec2i>(), UsdVolTokens->int2 },
+        { typeNameAsString<openvdb::Vec3H>(), UsdVolTokens->half3 },
+        { typeNameAsString<openvdb::Vec3f>(), UsdVolTokens->float3 },
+        { typeNameAsString<openvdb::Vec3d>(), UsdVolTokens->double3 },
+        { typeNameAsString<openvdb::Vec3i>(), UsdVolTokens->int3 },
+        { typeNameAsString<openvdb::Mat3d>(), UsdVolTokens->matrix3d },
+        { typeNameAsString<openvdb::Mat4d>(), UsdVolTokens->matrix4d },
+        { typeNameAsString<openvdb::Quatd>(), UsdVolTokens->quatd },
+        { typeNameAsString<bool>(), UsdVolTokens->bool_ },
+        { typeNameAsString<openvdb::ValueMask>(), UsdVolTokens->mask },
+        { typeNameAsString<std::string>(), UsdVolTokens->string },
+    };
+
+    auto it = theDataTypeMap.find(grid->valueType());
+    if (it != theDataTypeMap.end())
+    {
+        const TfToken &field_data_type = it->second;
+
+        prop = fileprim.addProperty(
+                UsdVolTokens->fieldDataType, SdfValueTypeNames->Token,
+                new GEO_FilePropConstantSource<TfToken>(field_data_type));
+        geoInitTopologyProp(*prop, static_topology, topology_id);
+    }
+}
+
+static void
 geoInitFieldAsset(
         GEO_FilePrim &fileprim,
         UT_Array<GEO_FilePrim> &extra_prims,
@@ -3858,13 +3943,6 @@ geoInitFieldAsset(
     {
         const bool static_topology
                 = (options.myTopologyHandling == GEO_USD_TOPOLOGY_STATIC);
-        auto init_topology_property
-                = [](GEO_FileProp &prop, bool static_topology,
-                     const GA_DataId &topology_id)
-        {
-            prop.setValueIsDefault(static_topology);
-            prop.addCustomData(HUSDgetDataIdToken(), VtValue(topology_id));
-        };
 
         SdfAssetPath volume_path;
         {
@@ -3881,7 +3959,7 @@ geoInitFieldAsset(
         GEO_FileProp *prop = fileprim.addProperty(
                 UsdVolTokens->filePath, SdfValueTypeNames->Asset,
                 new GEO_FilePropConstantSource<SdfAssetPath>(volume_path));
-        init_topology_property(*prop, static_topology, topology_id);
+        geoInitTopologyProp(*prop, static_topology, topology_id);
 
         // Find the name attribute, and set it as the field name.
         GT_Owner nameowner;
@@ -3893,7 +3971,7 @@ geoInitFieldAsset(
                     UsdVolTokens->fieldName, SdfValueTypeNames->Token,
                     new GEO_FilePropConstantSource<TfToken>(
                             TfToken(namehandle->getS(0))));
-            init_topology_property(*prop, static_topology, topology_id);
+            geoInitTopologyProp(*prop, static_topology, topology_id);
         }
         // Houdini Native Volumes have a field index the is used as the
         // volume's primary identifier. Other volume types use the field index
@@ -3906,7 +3984,7 @@ geoInitFieldAsset(
                     UsdVolTokens->fieldIndex, SdfValueTypeNames->Int,
                     new GEO_FilePropConstantSource<int>(
                             (int)geoprim->getMapIndex()));
-            init_topology_property(*prop, static_topology, topology_id);
+            geoInitTopologyProp(*prop, static_topology, topology_id);
         }
         else
         {
@@ -3937,7 +4015,7 @@ geoInitFieldAsset(
             prop = fileprim.addProperty(
                     UsdVolTokens->fieldIndex, SdfValueTypeNames->Int,
                     new GEO_FilePropConstantSource<int>(index));
-            init_topology_property(*prop, static_topology, topology_id);
+            geoInitTopologyProp(*prop, static_topology, topology_id);
         }
 
         // If the volume save path was specified, record as custom data.
@@ -3952,8 +4030,11 @@ geoInitFieldAsset(
                     HUSDgetSavePathToken(), SdfValueTypeNames->String,
                     new GEO_FilePropConstantSource<std::string>(
                             save_path.toStdString()));
-            init_topology_property(*prop, static_topology, topology_id);
+            geoInitTopologyProp(*prop, static_topology, topology_id);
         }
+
+        if (gtprim->getPrimitiveType() == GT_PRIM_VDB_VOLUME)
+            geoInitVDBAsset(fileprim, gtprim, static_topology, topology_id);
     }
 
     // Always set extents for volume prims.
