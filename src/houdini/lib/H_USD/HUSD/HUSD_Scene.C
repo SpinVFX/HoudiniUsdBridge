@@ -903,10 +903,23 @@ HUSD_Scene::addGeometry(HUSD_HydraGeoPrim *geo, bool new_geo)
     {
         auto entry = myGeometry.find(geo->geoID());
         if(entry != myGeometry.end())
+        {
+            UT_ASSERT(entry->second != geo);
             myDuplicateGeo.append(entry->second);
+        }
         
         myGeometry[ geo->geoID() ] = geo;
         addHydraPrim(geo);
+    }
+    else
+    {
+        UT_ASSERT([&]() {
+            UT_AutoLock lock(myIdMapLock);
+            return myGeometry.find(geo->geoID()) != myGeometry.end() &&
+                myGeometry.find(geo->geoID())->second == geo &&
+                myIdToPrimMap.find(geo->id()) != myIdToPrimMap.end() &&
+                myIdToPrimMap.find(geo->id())->second == geo;
+        }());
     }
 }
 
@@ -996,15 +1009,31 @@ HUSD_Scene::removeField(HUSD_HydraField *field)
 void
 HUSD_Scene::addCamera(HUSD_HydraCamera *cam, bool new_cam)
 {
-    UT_AutoLock lock(myLightCamLock);
-    auto entry = myCameras.find(cam->path());
-    if(entry != myCameras.end())
-        myDuplicateCam.append(entry->second);
-    
-    myCameras[ cam->path() ] = cam;
-    addHydraPrim(cam);
-    if(new_cam)
+    if (new_cam)
+    {
+        UT_AutoLock lock(myLightCamLock);
+        auto entry = myCameras.find(cam->path());
+        if (entry != myCameras.end())
+        {
+            UT_ASSERT(entry->second != cam);
+            myDuplicateCam.append(entry->second);
+        }
+
+        myCameras[cam->path()] = cam;
+        addHydraPrim(cam);
         myCamSerial++;
+    }
+    else
+    {
+        UT_ASSERT([&]() {
+            UT_AutoLock lock1(myLightCamLock);
+            UT_AutoLock lock2(myIdMapLock);
+            return myCameras.find(cam->geoID()) != myCameras.end() &&
+                myCameras.find(cam->geoID())->second == cam &&
+                myIdToPrimMap.find(cam->id()) != myIdToPrimMap.end() &&
+                myIdToPrimMap.find(cam->id())->second == cam;
+        }());
+    }
 }
 
 void
@@ -1035,15 +1064,31 @@ HUSD_Scene::fillCameras(UT_Array<HUSD_HydraCameraPtr> &array, int64 &id)
 void
 HUSD_Scene::addLight(HUSD_HydraLight *light, bool new_light)
 {
-    UT_AutoLock lock(myLightCamLock);
-    auto entry = myLights.find(light->path());
-    if(entry != myLights.end())
-        myDuplicateLight.append(entry->second);
-        
-    myLights[ light->path() ] = light;
-    addHydraPrim(light);
-    if(new_light)
+    if (new_light)
+    {
+        UT_AutoLock lock(myLightCamLock);
+        auto entry = myLights.find(light->path());
+        if (entry != myLights.end())
+        {
+            UT_ASSERT(entry->second != light);
+            myDuplicateLight.append(entry->second);
+        }
+
+        myLights[light->path()] = light;
+        addHydraPrim(light);
         myLightSerial++;
+    }
+    else
+    {
+        UT_ASSERT([&]() {
+            UT_AutoLock lock1(myLightCamLock);
+            UT_AutoLock lock2(myIdMapLock);
+            return myLights.find(light->geoID()) != myLights.end() &&
+                   myLights.find(light->geoID())->second == light &&
+                   myIdToPrimMap.find(light->id()) != myIdToPrimMap.end() &&
+                   myIdToPrimMap.find(light->id())->second == light;
+        }());
+    }
 }
 
 void
@@ -1708,6 +1753,15 @@ HUSD_Scene::clearPendingRemovalPrims()
         delete inst.second;
     myPendingRemovalInstancer.clear();
 
+    // TODO: It really seems like there is no code path that should be able
+    //       to lead to these "duplicate" arrays containing anything at this
+    //       point. Basically, hydra would need to request the creation of a
+    //       prim that already exists without first deleting the old prim.
+    //       If this holds true, all code related to these arrays
+    //       should be deleted.
+    UT_ASSERT(myDuplicateGeo.isEmpty() &&
+              myDuplicateCam.isEmpty() &&
+              myDuplicateLight.isEmpty());
     for(auto gprim : myDuplicateGeo)
         removeHydraPrim(gprim.get());
     myDuplicateGeo.clear();
@@ -1777,7 +1831,7 @@ HUSD_Scene::fetchPendingRemovalLight(const HUSD_Path &path)
     {
         HUSD_HydraLightPtr light = entry->second;
         myPendingRemovalLight.erase(path);
-        light->setPendingDelete(true);
+        light->setPendingDelete(false);
         return light;
     }
     return nullptr;
