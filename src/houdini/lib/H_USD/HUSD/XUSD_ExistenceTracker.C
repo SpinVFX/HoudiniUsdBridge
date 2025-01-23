@@ -203,7 +203,15 @@ XUSD_ExistenceTracker::authorVisibility(const UsdStageRefPtr &combinedstage,
         if (!addedprims.empty() || !removedprims.empty())
         {
             if (!myVisibilityLayer)
+            {
                 myVisibilityLayer = HUSDcreateAnonymousLayer();
+                // Make sure our TCPS value matches the stage so the time
+                // samples we author don't stretch/squash when we combine
+                // this layer with the rest of the stage.
+                fpreal64 tcps = combinedstage->GetTimeCodesPerSecond();
+                if (tcps != 24.0)
+                    myVisibilityLayer->SetTimeCodesPerSecond(tcps);
+            }
 
             // We only need to set visibility on the topmost prim that has
             // been added or removed.
