@@ -783,18 +783,34 @@ husdSetParmScalar( PRM_Parm &parm,
         const UsdTimeCode &timecode )
 {
     T value(0);
+
     // In the case of an array of this type, set the first entry.
     if (attrib.GetTypeName().IsArray())
     {
         VtArray<T> valuearray;
         attrib.Get( &valuearray, timecode );
         if (valuearray.size() > 0)
+        {
+            // If the parm has a vector size more than one, and the attribute
+            // has more than one entry, copy as many entries as we can from
+            // the attrib to the parm.
+            if (parm.getVectorSize() > 1)
+            {
+                for (int i = 1; i < parm.getVectorSize(); i++)
+                {
+                    if (i < valuearray.size())
+                        parm.setValue(0, (ParmT)valuearray[i], false, i);
+                    else
+                        parm.setValue(0, (ParmT)0, false, i);
+                }
+            }
             value = valuearray[0];
+        }
     }
     else
-        attrib.Get( &value, timecode );
+        attrib.Get(&value, timecode);
 
-    parm.setValue( 0, (ParmT)value );
+    parm.setValue(0, (ParmT)value);
 }
 
 template<typename T>

@@ -52,6 +52,7 @@ public:
 
     static bool		 isArrayValueType(const UT_StringRef &valueType);
     static bool		 isTokenArrayValueType(const UT_StringRef &valueType);
+    static int		 valueTypeScalarSize(const UT_StringRef &valueType);
     static bool		 isPrimvarName(const UT_StringRef &name);
     static void		 getPrimitiveKinds(UT_StringArray &kinds);
     static void          getUsdVersionInfo(UT_StringMap<UT_StringHolder> &info);

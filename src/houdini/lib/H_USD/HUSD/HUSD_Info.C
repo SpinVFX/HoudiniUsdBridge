@@ -593,6 +593,18 @@ HUSD_Info::isTokenArrayValueType(const UT_StringRef &valueType)
         SdfValueTypeNames->TokenArray);
 }
 
+/* static */ int
+HUSD_Info::valueTypeScalarSize(const UT_StringRef &valueType)
+{
+    auto dim = SdfSchema::GetInstance().FindType(
+        valueType.toStdString()).GetScalarType().GetDimensions();
+    if (dim.size == 1)
+        return dim.d[0];
+    if (dim.size == 2)
+        return dim.d[0] * dim.d[1];
+    return 1;
+}
+
 /* static */ bool
 HUSD_Info::isPrimvarName(const UT_StringRef &name)
 {
