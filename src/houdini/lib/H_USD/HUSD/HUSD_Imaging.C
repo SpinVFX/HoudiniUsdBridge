@@ -2145,6 +2145,9 @@ HUSD_Imaging::runSlapcompIfNeeded(const SlapcompViewInfo* view_info)
         myAOVsStashed = false;
     }
 
+    // Used for checking that input size matches output size.
+    UT_Optional<UT_Vector2I> input_wh;
+
     // First rebuild the program.
     if (mySlapcompProgram && mySlapcompEnabled)
     {
@@ -2199,6 +2202,9 @@ HUSD_Imaging::runSlapcompIfNeeded(const SlapcompViewInfo* view_info)
 
                 return;
             }
+
+            if (!input_wh)
+                input_wh = buf_lay->wh();
         }
 
         // Run the program.
@@ -2222,6 +2228,22 @@ HUSD_Imaging::runSlapcompIfNeeded(const SlapcompViewInfo* view_info)
 #if UT_ASSERT_LEVEL > 0
             UTdebugPrintCd(blue, err.getErrorType(), err.getString());
 #endif
+        }
+
+        // Report output size erors.
+        for (const auto& [output_name, _] 
+                : mySlapcompProgram->getProgramOutputs())
+        {
+            const IMX_LayerConstPtr layer =
+                mySlapcompProgram->getOutputLayer(output_name);
+            if (layer && layer->wh() != input_wh)
+            {
+                UT_StringHolder err_msg;
+                err_msg.format("The resolution of output layer {} does not"
+                                " match the input resolution.",
+                                output_name);
+                reportSlapcompError(err_msg);
+            }
         }
     }
 }
