@@ -40,7 +40,6 @@
 #include <IMX/IMX_Layer.h>
 #include <TIL/TIL_CopResolver.h>
 #include <TIL/TIL_Raster.h>
-#include <LM/LM_Taint.h>
 #include <UT/UT_Map.h>
 #include <UT/UT_Assert.h>
 #include <UT/UT_Defines.h>
@@ -670,10 +669,7 @@ saveImage(const SdfPrimSpecHandle &primspec,
                 basepath.append(numstr);
             }
         }
-        if (LMisRunningAnyApprentice())
-            basepath.append(".rat");
-        else
-            basepath.append(".exr");
+        basepath.append(IMG_File::getAutoTextureSaveFileExtention());
     }
 
     // Run the new path through the asset processors.
