@@ -819,6 +819,20 @@ HUSD_HuskEngine::huskInteractive() const
             VtValue(HusdHuskTokens->husk_mplay));
 }
 
+void
+HUSD_HuskEngine::huskConvergedMetadata(const UT_JSONValue &base_dict) const
+{
+    IMG_FileParms tmpparms;
+    addMetadata(tmpparms, base_dict);
+    UT_JSONValue value;
+    {
+        UT_AutoJSONWriter w(value);
+        tmpparms.metadata().save(w);
+    }
+    myEngine->setRenderSetting(HusdHuskTokens->husk_productmetadata,
+        VtValue(value.toString()));
+}
+
 HUSD_RenderBuffer
 HUSD_HuskEngine::GetRenderOutput(const UT_StringRef &name) const
 {

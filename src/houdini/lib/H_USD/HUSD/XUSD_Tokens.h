@@ -224,6 +224,7 @@ ARCH_PRAGMA_POP
     ((houdini_interactive, "houdini:interactive")) \
     ((husk_mplay,       "husk:mplay")) \
     ((huskNullRaster,   "husk:null_raster")) \
+    ((husk_productmetadata, "husk:productmetadata")) \
     /* end macro */
 
 ARCH_PRAGMA_PUSH

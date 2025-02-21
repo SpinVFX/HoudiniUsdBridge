@@ -248,6 +248,10 @@ public:
     /// when husk renders to mplay.
     void huskInteractive() const;
 
+    /// Called at the end of each render to pass final metadata written to
+    /// output files by husk to the delegate.
+    void huskConvergedMetadata(const UT_JSONValue &base_dict) const;
+
     // ---------------------------------------------------------------------
     /// @name AOVs and Renderer Settings
     /// @{

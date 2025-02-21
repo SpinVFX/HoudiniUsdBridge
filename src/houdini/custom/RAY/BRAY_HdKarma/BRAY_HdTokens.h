@@ -126,6 +126,7 @@ PXR_NAMESPACE_OPEN_SCOPE
     ((houdini_frame, "houdini:frame"))                                  \
     ((houdini_interactive, "houdini:interactive"))                      \
     ((houdini_render_pause, "houdini:render_pause"))                    \
+    ((husk_productmetadata, "husk:productmetadata"))                    \
     ((husk_snapshot, "husk:snapshot"))                                  \
     \
     ((hydra_override_lighting, "karma:hydra:override_lighting"))        \

@@ -728,6 +728,13 @@ BRAY_HdDelegate::SetRenderSetting(const TfToken &key, const VtValue &value)
         updateFrame(myScene, value);
         return;
     }
+    if (key == BRAYHdTokens->husk_productmetadata)
+    {
+        UT_JSONValue map;
+        if (map.parseValue(valueAsString(value)))
+            myRenderer.setConvergedMetadata(map);
+        return;
+    }
     if (key == BRAYHdTokens->husk_snapshot)
     {
         myScene.saveCheckpointASAP();
