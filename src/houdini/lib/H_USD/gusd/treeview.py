@@ -23,6 +23,8 @@
 #
 import hou
 
+from hutil.PySide import QtCore
+
 from hutil.Qt.QtGui import *
 from hutil.Qt.QtCore import *
 from hutil.Qt.QtWidgets import *
@@ -839,7 +841,10 @@ class TreeView(QFrame):
             menu = QMenu(self)
             importAction = menu.addAction("Import")
             unimportAction = menu.addAction("Unimport")
-            action = menu.exec_(self.view.mapToGlobal(pos))
+            if QtCore.__version_info__[0] >= 6:
+                action = menu.exec(self.view.mapToGlobal(pos))
+            else:
+                action = menu.exec_(self.view.mapToGlobal(pos))
             if action is not None:
                 state = Qt.Checked if action == importAction else Qt.Unchecked
                 for index in self.view.selectedIndexes():

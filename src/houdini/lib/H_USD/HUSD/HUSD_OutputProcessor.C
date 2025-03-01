@@ -491,8 +491,8 @@ husd_RegistryHolder::husd_RegistryHolder()
     myPythonContextPtr = UTmakeUnique<PY_EvaluationContext>();
     husdInitPythonContext( *myPythonContextPtr );
 
-    // Register Python processors last, so they take precedence over C++ ones
-    // above, and so it's easier for users to override them.
+    // Register Python processors last. This means C++ ones will take precedence
+    // but, at least at present, the vast majority of processors are Python.
     UT_StringArray names;
     UT_Array<husd_PyProcessorHandle> handles;
     husd_PyOutputProcessor::getOutputProcessorHandlesAndNames(
@@ -590,7 +590,10 @@ HUSD_OutputProcessorRegistry::registerOutputProcessor(
         const UT_StringHolder &name,
         const HUSD_OutputProcessorFactory &factory)
 {
-    myProcessorFactories[name] = factory;
+    // We only want the first registration for a given name to actually create
+    // an entry in `myProcessorFactories` so that local plugins can block/mask
+    // (effectively override) ones from $HFS
+    myProcessorFactories.try_emplace(name, factory);
 }
 
 void
