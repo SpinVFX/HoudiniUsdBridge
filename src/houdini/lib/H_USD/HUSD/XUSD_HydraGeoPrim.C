@@ -2186,6 +2186,8 @@ XUSD_HydraGeoCurves::Sync(HdSceneDelegate *scene_delegate,
 	    top_id = top->getI64(0);
     }
     
+    bool pinned_curves = false;
+    
     if (!myCounts || !gt_prim || 
 	HdChangeTracker::IsTopologyDirty(*dirty_bits, id))
     {
@@ -2222,7 +2224,12 @@ XUSD_HydraGeoCurves::Sync(HdSceneDelegate *scene_delegate,
 	myWrap = (top.GetCurveWrap() == HdTokens->periodic);
 
 	if(top.GetCurveWrap() != HdTokens->segmented)
+        {
+            if (top.GetCurveWrap() == HdTokens->pinned)
+                pinned_curves = true;
+            
 	    myCounts=XUSD_HydraUtils::createGTArray(top.GetCurveVertexCounts());
+        }
 	else
 	{
 	    int num = top.CalculateNeededNumberOfControlPoints();
@@ -2315,6 +2322,12 @@ XUSD_HydraGeoCurves::Sync(HdSceneDelegate *scene_delegate,
     myBasisCurve = cmesh;
     if(myBasis != GT_BASIS_LINEAR)
     {
+        if(pinned_curves)
+        {
+            ph = cmesh->pinCurves();
+            cmesh = UTverify_cast<GT_PrimCurveMesh*>(ph.get());
+            myBasisCurve = cmesh;
+        }
  	ph = cmesh->refineToLinear();
 	if(!ph)
 	    ph = cmesh;
