@@ -431,9 +431,11 @@ husd_ConsolidatedPrims::add(const GT_PrimitiveHandle &mesh,
     }
 
     auto entry = myPrimBucketMap.find(bucket);
-    if(entry == myPrimBucketMap.end())
+    if(entry == myPrimBucketMap.end() ||
+       myBuckets.find(entry->second) != myBuckets.end())
+    {
         myBuckets[bucket].setBucketParms(mat_id, tag, left_hand, auto_nml);
-    
+    }
     myBuckets[bucket].addPrim(mesh, prim_id, bbox, dirty_bits,instance_bbox);
     myPrimBucketMap[prim_id] = bucket;
 }

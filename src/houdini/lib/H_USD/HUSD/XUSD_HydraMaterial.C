@@ -56,6 +56,7 @@ static UT_StringHolder theSwizzleR("r");
 static UT_StringHolder theSwizzleG("g");
 static UT_StringHolder theSwizzleB("b");
 static UT_StringHolder theSwizzleA("a");
+static UT_StringHolder theStName("st");
 
 PXR_NAMESPACE_OPEN_SCOPE
 
@@ -118,6 +119,8 @@ XUSD_HydraMaterial::resolveTransform(
                 {
                     // UV set
                     info.uv = uventry->second;
+                    if(!info.uv.isstring())
+                        info.uv = theStName;
                 }
                 else
                 {
@@ -146,7 +149,7 @@ XUSD_HydraMaterial::resolveMap(
     auto texentry = in_out_map.find(mapnode);
     if(texentry != in_out_map.end())
     {
-        auto stentry = texentry->second.find("st");
+        auto stentry = texentry->second.find(theStName);
         if(stentry != texentry->second.end())
         {
             auto uventry=primvar_node.find(stentry->second.first);
@@ -232,7 +235,7 @@ XUSD_HydraMaterial::Sync(HdSceneDelegate *scene_del,
     const SdfPath &id = GetId();
     UT_StringArray parms;
 
-    //UTdebugPrint("Sync", id.GetText(), srparm->scene().isDeferredUpdate());
+    //UTdebugPrint("Sync", id.GetText());
     myMaterial.setNeedsTangents(false);
     
     VtValue mapval = scene_del->GetMaterialResource(id);
