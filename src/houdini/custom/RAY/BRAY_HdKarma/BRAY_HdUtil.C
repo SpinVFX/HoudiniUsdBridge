@@ -2275,13 +2275,29 @@ namespace
 	// We need to have at least one array with correct samples
 	// But we only have to worry about items at the beginning of the array,
 	// since the correct size is copied to the items after it's found.
-	UT_ASSERT(correct >= 0 && correct < data.size());
-	if (correct == data.size())
+        if (correct == data.size())
         {
+            // Look for the first data array that's *larger* than the exepcted
+            // size and pick up all arrays that are larger.
+            for (int ts = 0, n = data.size(); ts < n; ++ts)
+            {
+                if (data[ts]->entries() >= expected_size)
+                {
+                    correct = SYSmin(ts, expected_size);
+                    prev_ok = true;
+                }
+            }
+            if (correct == data.size())
+            {
+                UT_ASSERT(correct >= 0 && correct < data.size());
+                UT_ErrorLog::warningOnce(
+                        "{}: primvar {} has size {} - expected {}",
+                        id, primvar, data[0]->entries(), expected_size);
+                return false;
+            }
             UT_ErrorLog::warningOnce(
-                    "{}: primvar {} has size {} - expected {}",
+                    "{}: primvar {} is larger than expected ({} vs. {})",
                     id, primvar, data[0]->entries(), expected_size);
-	    return false;
         }
 	if (correct > 0 && correct < data.size())
 	{
