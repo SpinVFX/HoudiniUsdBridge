@@ -2279,6 +2279,7 @@ namespace
         {
             // Look for the first data array that's *larger* than the exepcted
             // size and pick up all arrays that are larger.
+            UT_ASSERT(!prev_ok);
             for (int ts = 0, n = data.size(); ts < n; ++ts)
             {
                 if (data[ts]->entries() >= expected_size)
@@ -2286,6 +2287,8 @@ namespace
                     correct = SYSmin(ts, expected_size);
                     prev_ok = true;
                 }
+                else if (prev_ok)
+                    data[ts] = data[ts-1];
             }
             if (correct == data.size())
             {

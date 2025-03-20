@@ -267,27 +267,51 @@ void
 HUSD_DataHandle::createNewData(const HUSD_LoadMasksPtr &load_masks,
 	const HUSD_DataHandle *resolver_context_data)
 {
-    ArResolverContext	 resolver_context;
-
-    // We need to get the resolver context before resetting our data in case
-    // the resolver_context_data == this.
-    if (resolver_context_data && resolver_context_data->myData)
-	resolver_context = resolver_context_data->myData->resolverContext();
-
     UT_ASSERT(myMirroring == HUSD_NOT_FOR_MIRRORING);
-    if (!myData || myData->isStageValid())
-	myData.reset(new XUSD_Data(myMirroring));
 
-    // If we are passed an HUSD_DataHandle to provide our resolver context, we
-    // don't need for that data handle to be locked. It is always safe to ask
-    // for the resolver context from an XUSD_Data because the resolver context
-    // is immutable on the stage.
-    if (resolver_context_data && resolver_context_data->myData)
-	myData->createNewData(load_masks, myNodeId,
-	    UsdStageWeakPtr(), &resolver_context);
+    if (resolver_context_data && resolver_context_data != this)
+    {
+        HUSD_AutoReadLock lock(*resolver_context_data,
+            HUSD_AutoReadLock::OVERRIDES_UNCHANGED);
+
+        if (!myData || myData->isStageValid())
+            myData.reset(new XUSD_Data(myMirroring));
+
+        // If we are passed a "context stage", and that stage isn't "this",
+        // then we want to copy the resolver context and the root layer
+        // metadata from this source stage.
+        myData->createNewData(load_masks, myNodeId,
+            lock.isStageValid()
+                ? lock.constData()->stage()
+                : UsdStageRefPtr(),
+            nullptr);
+    }
+    else if (resolver_context_data && resolver_context_data->myData)
+    {
+        ArResolverContext resolver_context;
+
+        // We need to get the resolver context before resetting our data
+        // because the resolver_context_data == this.
+        resolver_context = resolver_context_data->myData->resolverContext();
+
+        if (!myData || myData->isStageValid())
+            myData.reset(new XUSD_Data(myMirroring));
+
+        // If we are passed an HUSD_DataHandle to provide our resolver context,
+        // we don't need for that data handle to be locked. It is always safe
+        // to ask for the resolver context from an XUSD_Data because the
+        // resolver context is immutable on the stage.
+        myData->createNewData(load_masks, myNodeId,
+            UsdStageWeakPtr(), &resolver_context);
+    }
     else
-	myData->createNewData(load_masks, myNodeId,
-	    UsdStageWeakPtr(), nullptr);
+    {
+        if (!myData || myData->isStageValid())
+            myData.reset(new XUSD_Data(myMirroring));
+
+        myData->createNewData(load_masks, myNodeId,
+            UsdStageWeakPtr(), nullptr);
+    }
     myDataLock = myData->myDataLock;
 }
 
