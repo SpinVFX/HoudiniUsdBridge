@@ -75,6 +75,10 @@ public:
     static bool          isStageVariableExpression(const UT_StringRef &expr,
                                 bool check_for_errors = true);
 
+    // Return true if a layer identifier indicates that this is an
+    // anonymous layer.
+    static bool          isAnonymousLayer(const UT_StringRef &identifier);
+
     // Get basic information from the auto lock used to construct this
     // info object.
     bool		 isStageValid() const;

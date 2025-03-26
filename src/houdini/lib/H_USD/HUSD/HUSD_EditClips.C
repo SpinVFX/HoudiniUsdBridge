@@ -24,8 +24,10 @@
 
 #include "HUSD_EditClips.h"
 #include "HUSD_Constants.h"
+#include "HUSD_EditLayers.h"
 #include "HUSD_EditReferences.h"
 #include "HUSD_ErrorScope.h"
+#include "HUSD_Info.h"
 #include "XUSD_Data.h"
 #include "XUSD_ExistenceTracker.h"
 #include "XUSD_Utils.h"
@@ -35,8 +37,10 @@
 #include <UT/UT_ParallelUtil.h>
 #include <UT/UT_StdUtil.h>
 #include <pxr/base/gf/vec2d.h>
+#include <pxr/usd/sdf/copyUtils.h>
 #include <pxr/usd/sdf/layerUtils.h>
 #include <pxr/usd/sdf/path.h>
+#include <pxr/usd/sdf/copyUtils.h>
 #include <pxr/usd/usd/clipsAPI.h>
 #include <pxr/usd/usdUtils/stitchClips.h>
 
@@ -246,7 +250,8 @@ bool
 HUSD_EditClips::createClipManifestFile(const UT_StringRef &primpath,
         const UT_StringRef &clipsetname,
         const UT_StringRef &manifestfile,
-        bool use_single_file) const
+        bool use_single_file,
+        bool allow_missing_clip_files) const
 {
     auto clipsapi = husdGetClipsAPI(myWriteLock, primpath);
     if (clipsapi)
@@ -299,7 +304,7 @@ HUSD_EditClips::createClipManifestFile(const UT_StringRef &primpath,
             HUSDsetSavePath(manifest, manifestfile, false);
             HUSDsetCreatorNode(manifest, myWriteLock.dataHandle().nodeId());
             clipsapi.SetClipManifestAssetPath(
-                SdfAssetPath(manifest->GetIdentifier()));
+                SdfAssetPath(manifest->GetIdentifier()), stdclipsetname);
             myWriteLock.data()->addHeldLayer(manifest);
             return true;
         }
@@ -314,7 +319,9 @@ bool
 HUSD_EditClips::createClipTopologyFile(const UT_StringRef &primpath,
         const UT_StringRef &clipsetname,
         const UT_StringRef &topologyfile,
-        bool use_single_file) const
+        bool use_single_file,
+        bool reference_topology,
+        bool allow_missing_clip_files) const
 {
     auto clipsapi = husdGetClipsAPI(myWriteLock, primpath);
     if (clipsapi)
@@ -337,8 +344,14 @@ HUSD_EditClips::createClipTopologyFile(const UT_StringRef &primpath,
         if (use_single_file && clipfiles.size() > 1)
             clipfiles.resize(1);
 
+        HUSD_Info info(myWriteLock);
         for (auto &&clipfile : clipfiles)
+        {
+            if (allow_missing_clip_files &&
+                !info.getLayerExists(clipfile.GetAssetPath()))
+                continue;
             stdclipfiles.push_back(clipfile.GetAssetPath());
+        }
 
         // Create a block for an error scope. The function to create a
         // topology file calls "Save" on the resulting layer, which is
@@ -353,13 +366,56 @@ HUSD_EditClips::createClipTopologyFile(const UT_StringRef &primpath,
         // about any USD errors that may have been generated.
         if (madetopology)
         {
-            HUSD_EditReferences editrefs(myWriteLock);
+            SdfPath topology_root;
 
             HUSDsetSavePath(topology, topologyfile, false);
             HUSDsetCreatorNode(topology, myWriteLock.dataHandle().nodeId());
-            editrefs.addReference(primpath,
-                topology->GetIdentifier().c_str(), clipprimpath);
+            if (reference_topology)
+            {
+                HUSD_EditReferences editrefs(myWriteLock);
+                editrefs.addReference(primpath,
+                    topology->GetIdentifier().c_str(), clipprimpath);
+                topology_root = SdfPath(clipprimpath);
+            }
+            else
+            {
+                // If we want to sublayer the topology, we need to move the
+                // topology prims under the clip primitive.
+                SdfCreatePrimInLayer(topology,
+                    SdfPath(primpath.toStdString()));
+                SdfCopySpec(topology, SdfPath(clipprimpath),
+                    topology, SdfPath(primpath.toStdString()));
+                auto prim = topology->GetPrimAtPath(SdfPath(clipprimpath));
+                if (prim)
+                {
+                    if (prim->GetNameParent())
+                        prim->GetNameParent()->RemoveNameChild(prim);
+                    else
+                        topology->RemoveRootPrim(prim);
+                }
+                HUSD_EditLayers editlayers(myWriteLock);
+                editlayers.setEditRootLayer(false);
+                editlayers.addLayer(topology->GetIdentifier().c_str());
+                topology_root = SdfPath(primpath.toStdString());
+            }
             myWriteLock.data()->addHeldLayer(topology);
+            // Check if the topology file has any composition arcs under the
+            // prim that defines the clip topology.
+            topology->Traverse(topology_root,
+                [&topology] (const SdfPath &path) {
+                    SdfPrimSpecHandle prim = topology->GetPrimAtPath(path);
+                    if (prim)
+                    {
+                        if (!prim->GetRelocates().empty() ||
+                            prim->GetReferenceList().HasKeys() ||
+                            prim->GetPayloadList().HasKeys() ||
+                            prim->GetSpecializesList().HasKeys() ||
+                            prim->GetInheritPathList().HasKeys())
+                            HUSD_ErrorScope::addWarning(
+                                HUSD_ERR_CLIP_TOPOLOGY_HAS_COMPOSITION,
+                                path.GetAsString().c_str());
+                    }
+                });
             return true;
         }
         else
@@ -505,7 +561,8 @@ HUSD_EditClips::compactFlattenedClipFiles(const UT_StringRef &primpath,
 bool
 HUSD_EditClips::authorExistenceTrackingVisibility(
         const UT_StringRef &primpath,
-        const UT_StringRef &clipsetname) const
+        const UT_StringRef &clipsetname,
+        bool allow_missing_clip_files) const
 {
     auto clipsapi = husdGetClipsAPI(myWriteLock, primpath);
     if (clipsapi)
@@ -530,19 +587,23 @@ HUSD_EditClips::authorExistenceTrackingVisibility(
             auto deststage = myWriteLock.data()->stage();
             SdfPath sdfprimpath(primpath.toStdString());
             SdfPath sdfclipprimpath(clipprimpath);
+            HUSD_Info info(myWriteLock);
             XUSD_ExistenceTracker existence_tracker;
 
             for (int i = 0, n = clipactive.size(); i < n; i++)
             {
                 auto clipfile = clipfiles[clipactive[i][1]];
+                auto clippath = clipfile.GetResolvedPath().empty()
+                    ? clipfile.GetAssetPath()
+                    : clipfile.GetResolvedPath();
+                if (allow_missing_clip_files &&
+                    !info.getLayerExists(clippath))
+                    continue;
                 auto clipstage = UsdStage::CreateInMemory();
                 auto prim = clipstage->DefinePrim(sdfprimpath,
                     TfToken(HUSD_Constants::getXformPrimType()));
                 prim.GetReferences().AddReference(
-                    SdfReference(clipfile.GetResolvedPath().empty()
-                        ? clipfile.GetAssetPath()
-                        : clipfile.GetResolvedPath(),
-                    sdfclipprimpath));
+                    SdfReference(clippath, sdfclipprimpath));
                 existence_tracker.collectNewStageData(clipstage);
                 existence_tracker.authorVisibility(deststage, clipactive[i][0]);
             }

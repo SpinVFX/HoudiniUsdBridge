@@ -1214,9 +1214,16 @@ _ClipReferencesRecursive(const SdfPrimSpecHandle &primspec,
         }
     }
 
-    // Recurse on nameChildren
+    // Recurse on named children.
     for (const SdfPrimSpecHandle &child : primspec->GetNameChildren()) {
         _ClipReferencesRecursive(child, refs);
+    }
+    // Recurse on variant sets and variants, which may contain clips.
+    for (auto &&vsetit : primspec->GetVariantSets()) {
+        const SdfVariantSetSpecHandle &vset = vsetit.second;
+        for (const SdfVariantSpecHandle &v : vset->GetVariants()) {
+            _ClipReferencesRecursive(v->GetPrimSpec(), refs);
+        }
     }
 }
 

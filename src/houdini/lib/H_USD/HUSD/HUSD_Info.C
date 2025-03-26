@@ -677,6 +677,12 @@ HUSD_Info::isStageVariableExpression(const UT_StringRef &expr,
     return HUSDisStageVariableExpression(expr, check_for_errors);
 }
 
+/* static */ bool
+HUSD_Info::isAnonymousLayer(const UT_StringRef &identifier)
+{
+    return SdfLayer::IsAnonymousLayerIdentifier(identifier.toStdString());
+}
+
 /* static */ void
 HUSD_Info::getUsdVersionInfo(UT_StringMap<UT_StringHolder> &info)
 {

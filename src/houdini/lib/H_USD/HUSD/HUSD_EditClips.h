@@ -116,18 +116,22 @@ public:
     bool                 createClipTopologyFile(const UT_StringRef &primpath,
                                 const UT_StringRef &clipsetname,
                                 const UT_StringRef &topologyfile,
-                                bool use_single_file = false) const;
+                                bool use_single_file,
+                                bool reference_topology,
+                                bool allow_missing_clip_files) const;
     bool                 getMissingClipManifests(const UT_StringRef &primpath,
                                 UT_Map<UT_StringHolder, UT_StringHolder> &clipSets);
     bool                 createClipManifestFile(const UT_StringRef &primpath,
                                 const UT_StringRef &clipsetname,
                                 const UT_StringRef &manifestfile,
-                                bool use_single_file = false) const;
+                                bool use_single_file,
+                                bool allow_missing_clip_files) const;
     bool                 compactFlattenedClipFiles(const UT_StringRef &primpath,
                                 const UT_StringRef &clipsetname) const;
     bool                 authorExistenceTrackingVisibility(
                                 const UT_StringRef &primpath,
-                                const UT_StringRef &clipsetname) const;
+                                const UT_StringRef &clipsetname,
+                                bool allow_missing_clip_files) const;
 
 private:
     HUSD_AutoWriteLock	&myWriteLock;
