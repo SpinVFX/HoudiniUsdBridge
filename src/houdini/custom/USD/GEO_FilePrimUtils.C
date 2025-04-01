@@ -415,7 +415,6 @@ static void
 initPartition(GEO_FilePrim &fileprim,
 	UT_Array<GEO_FilePrim> &extra_prims,
         const GT_PrimitiveHandle &gtprim,
-	UT_ArrayStringSet &processed_attribs,
 	const GT_DataArrayHandle &hou_attr,
 	const std::string &attr_name,
         const TfToken &element_type,
@@ -530,9 +529,6 @@ initPartition(GEO_FilePrim &fileprim,
                     material_path_name, owner, 0);
             if (owner != GT_OWNER_PRIMITIVE)
                 material_path_attr.reset();
-
-            if (material_path_attr)
-                processed_attribs.insert(material_path_name);
         }
     }
 
@@ -2356,6 +2352,12 @@ initExtraAttribs(GEO_FilePrim &fileprim,
 	const GT_DataArrayHandle &vertex_indirect = GT_DataArrayHandle(),
         bool override_is_constant = false)
 {
+    static const UT_StringHolder theMaterialBindName
+            = GusdUSD_Utils::TokenToStringHolder(UsdShadeTokens->materialBind);
+    static const UT_StringHolder theUsdMaterialPathName
+            = GusdUSD_Utils::TokenToStringHolder(
+                    GEO_FilePrimTokens->usdmaterialpath);
+
     for (int i = 0; owners[i] != GT_OWNER_INVALID; i++)
     {
 	GT_Owner	 attr_owner = owners[i];
@@ -2366,6 +2368,18 @@ initExtraAttribs(GEO_FilePrim &fileprim,
 
         const UT_Optional<TfToken> partition_type = geoGetPartitionElementType(
                 fileprim.getTypeName(), attr_owner, prim_is_curve);
+
+        // If there is a materialBind subset, we don't want to import
+        // usdmaterialpath on the prim. Instead, it will be authored on the
+        // subsets via initPartition().
+        if (partition_type
+            && theMaterialBindName.multiMatch(options.myPartitionAttribs)
+            && theUsdMaterialPathName.multiMatch(options.myCustomAttribs)
+            && attr_list->hasName(theMaterialBindName)
+            && attr_list->hasName(theUsdMaterialPathName))
+        {
+            processed_attribs.insert(theUsdMaterialPathName);
+        }
 
 	for (exint i = 0, n = attr_list->entries(); i < n; ++i)
 	{
@@ -2386,8 +2400,7 @@ initExtraAttribs(GEO_FilePrim &fileprim,
 		    if (!hou_attr->hasArrayEntries())
                     {
                         initPartition(
-                                fileprim, extra_prims, gtprim,
-                                processed_attribs, hou_attr,
+                                fileprim, extra_prims, gtprim, hou_attr,
                                 attr_name.toStdString(), *partition_type,
                                 options);
                     }
