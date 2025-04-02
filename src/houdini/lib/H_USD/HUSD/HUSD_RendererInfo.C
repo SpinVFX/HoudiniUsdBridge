@@ -147,6 +147,7 @@ HUSD_RendererInfo::getRendererInfo(const UT_StringHolder &name,
     bool		 needsdepth = false;
     bool		 needsselection = false;
     bool		 allowbackgroundupdate = true;
+    bool                 destroyifdeactivated = false;
     bool		 pauseonupdate = true;
     bool		 aovsupport = true;
     bool		 viewportrenderer = false;
@@ -185,6 +186,8 @@ HUSD_RendererInfo::getRendererInfo(const UT_StringHolder &name,
 	    needsselection = options.getOptionI("needsselection");
 	if (options.hasOption("allowbackgroundupdate"))
 	    allowbackgroundupdate = options.getOptionI("allowbackgroundupdate");
+        if (options.hasOption("destroyifdeactivated"))
+            destroyifdeactivated = options.getOptionI("destroyifdeactivated");
         if (options.hasOption("pauseonupdate"))
             pauseonupdate = options.getOptionI("pauseonupdate");
 	if (options.hasOption("aovsupport"))
@@ -238,6 +241,7 @@ HUSD_RendererInfo::getRendererInfo(const UT_StringHolder &name,
 	    needsdepth,
 	    needsselection,
 	    allowbackgroundupdate,
+            destroyifdeactivated,
             pauseonupdate,
             aovsupport,
             viewportrenderer,

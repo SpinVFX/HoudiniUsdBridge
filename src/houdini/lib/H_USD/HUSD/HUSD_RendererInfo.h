@@ -59,6 +59,7 @@ public:
         , myNeedsNativeDepthPass(false)
         , myNeedsNativeSelectionPass(false)
         , myAllowBackgroundUpdate(false)
+        , myDestroyIfDeactivated(false)
         , myPauseOnUpdate(false)
         , myAovSupport(false)
         , myViewportRenderer(false)
@@ -87,6 +88,7 @@ public:
                 bool needsnativedepth,
                 bool needsnativeselection,
                 bool allowbackgroundupdate,
+                bool destroyifdeactivated,
                 bool pauseonupdate,
                 bool aovsupport,
                 bool viewportrenderer,
@@ -113,6 +115,7 @@ public:
          , myNeedsNativeDepthPass(needsnativedepth)
          , myNeedsNativeSelectionPass(needsnativeselection)
          , myAllowBackgroundUpdate(allowbackgroundupdate)
+         , myDestroyIfDeactivated(destroyifdeactivated)
          , myPauseOnUpdate(pauseonupdate)
          , myAovSupport(aovsupport)
          , myViewportRenderer(viewportrenderer)
@@ -176,6 +179,10 @@ public:
     // on a background thread.
     bool		 allowBackgroundUpdate() const
 			 { return myAllowBackgroundUpdate; }
+    // True if this plugin requires Houdini to tear it down if the viewport
+    // switches to a different active renderer.
+    bool		 destroyIfDeactivated() const
+                         { return myDestroyIfDeactivated; }
     // True if this plugin should pause while processing update. Should be set
     // if the renderer can read COP textures to avoid potential deadlocks.
     bool		 pauseOnUpdate() const
@@ -318,6 +325,7 @@ private:
     bool		 myNeedsNativeDepthPass;
     bool		 myNeedsNativeSelectionPass;
     bool		 myAllowBackgroundUpdate;
+    bool                 myDestroyIfDeactivated;
     bool                 myPauseOnUpdate;
     bool		 myAovSupport;
     bool		 myViewportRenderer;
