@@ -1222,7 +1222,9 @@ BRAY_HdInstancer::computeTransforms(UT_Array<GfMatrix4d> &transforms,
     // any thread reaches this point, it is guaranteed that no other threads
     // will be modifying myPrimvarMap.
 
-    if (myAttributes)
+    if (myAttributes
+            && myAttributes->entries()
+            && myAttributes->get(0)->entries() >= instanceIndices.size())
     {
         // TODO: Revisit this in v24.05 when the transitional environment variable
         //       ($HD_USE_DEPRECATED_INSTANCER_PRIMVAR_NAMES) is due to be removed.
