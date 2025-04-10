@@ -2089,6 +2089,7 @@ GEO_HAPIPart::setupPrimType(
                     else
                     {
                         fixCurveEndInterpolation();
+                        curveCounts = curve->curveCounts;
                     }
                 }
                 else
