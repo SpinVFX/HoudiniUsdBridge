@@ -969,7 +969,28 @@ HUSD_Info::getLayersAboveLayerBreak(UT_StringArray &identifiers) const
 bool
 HUSD_Info::getLayerExists(const UT_StringRef &filepath) const
 {
-    SdfLayerRefPtr	 layer;
+    auto find_layer_fn = [](const std::string &filepathstr)
+        {
+            // This code mimics what SdfLayer::FindOrOpen does (see
+            // SdfLayer::_ComputeInfoToFindOrOpenLayer). Critically, it
+            // avoids actually opening the file as a layer, which would
+            // trigger a lot of work if the file is a .bgeo on disk.
+            if (SdfLayer::IsAnonymousLayerIdentifier(filepathstr))
+                return (bool)SdfLayer::Find(filepathstr);
+
+            SdfLayer::FileFormatArguments args;
+            std::string layerpathstr;
+
+            if (filepathstr.empty())
+                return false;
+            SdfLayer::SplitIdentifier(filepathstr, &layerpathstr, &args);
+            if (layerpathstr.empty())
+                return false;
+
+            layerpathstr = ArGetResolver().CreateIdentifier(layerpathstr);
+            ArResolvedPath resolvedpath = ArGetResolver().Resolve(layerpathstr);
+            return !resolvedpath.IsEmpty();
+        };
 
     if (myAnyLock.constData() &&
 	myAnyLock.constData()->isStageValid())
@@ -977,12 +998,10 @@ HUSD_Info::getLayerExists(const UT_StringRef &filepath) const
 	ArResolverContextBinder binder(
 	    myAnyLock.constData()->stage()->GetPathResolverContext());
 
-	layer = SdfLayer::FindOrOpen(filepath.toStdString());
+        return find_layer_fn(filepath.toStdString());
     }
-    else
-	layer = SdfLayer::FindOrOpen(filepath.toStdString());
 
-    return layer;
+    return find_layer_fn(filepath.toStdString());
 }
 
 bool

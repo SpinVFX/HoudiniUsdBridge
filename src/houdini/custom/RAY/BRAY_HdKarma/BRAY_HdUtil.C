@@ -1276,7 +1276,7 @@ namespace
         // with "auto-added" width attributes on curves.  The
         // GetIndexedPrimvar() method works, but the SampleIndexedPrimvar()
         // doesn't work.
-        if (usegs == 1 && samples.values()[0].IsEmpty())
+        if (samples.values()[0].IsEmpty())
         {
             return getPrimvar<STYLE>(sd, id, name, samples);
         }
