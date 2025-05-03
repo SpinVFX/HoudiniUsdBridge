@@ -899,6 +899,14 @@ husdCreateParmVop( OP_Network &net, const TfToken &tf_name,
     VOP_TypeInfo type_info( husdGetParmTypeInfo( sdf_type, render_type, name ));
     parm_vop->setParmTypeInfo( type_info );
 
+    // USD does not have uniform version of data types. We always get varying.
+    // However, MaterialX strings are uniform, so at least we can set that.
+    if( type_info.getType() == VOP_TYPE_STRING
+        && parm_vop->getLanguage()->supportsUniformVarying() )
+    {
+        parm_vop->setPARMSTORAGE(/*uniform=*/true);
+    }
+
     UT_StringMap<UT_StringHolder> tags;
     tags[ PRM_SPARE_SHADER_PARM_TYPE_TOKEN ] =sdf_type.GetAsToken().GetString();
     parm_vop->setTAGS( tags );
@@ -1090,8 +1098,9 @@ husdGetMaterialLanguage(  const UsdPrim &usd_prim )
 
     // Remap some known render context/languages.
     static constexpr UT_StringLit mtlx_ctx("mtlx");
+    static constexpr UT_StringLit kma_ctx("kma");
     static constexpr UT_StringLit mtlx_lang("MaterialX");
-    if( lang_name == mtlx_ctx )
+    if( lang_name == mtlx_ctx || lang_name == kma_ctx)
         lang_name = mtlx_lang.asHolder();
 
     return lang_name;
