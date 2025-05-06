@@ -821,9 +821,9 @@ HUSD_Constants::getBlockVariantValue()
 }
 
 const UT_StringHolder &
-HUSD_Constants::getVolumeSopSuffix()
+HUSD_Constants::getInlineUsdaStringPrefix()
 {
-    static constexpr UT_StringLit s(".volumes");
+    static constexpr UT_StringLit s("#sdf 1.4.32\n");
 
     return s.asHolder();
 }
@@ -836,3 +836,10 @@ HUSD_Constants::getRenderStatsDelegateKey()
     return s.asHolder();
 }
 
+const UT_StringHolder &
+HUSD_Constants::getVolumeSopSuffix()
+{
+    static constexpr UT_StringLit s(".volumes");
+
+    return s.asHolder();
+}
