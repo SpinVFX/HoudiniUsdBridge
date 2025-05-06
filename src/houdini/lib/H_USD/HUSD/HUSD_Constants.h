@@ -146,14 +146,12 @@ public:
     static const UT_StringHolder	&getUpAxisZ();
 
     static const UT_StringHolder	&getInvisible();
+    static const UT_StringHolder	&getBlockVariantValue();
+    static const UT_StringHolder	&getInlineUsdaStringPrefix();
 
     static const UT_StringHolder	&getIconCustomDataName();
-
-    static const UT_StringHolder	&getBlockVariantValue();
-
-    static const UT_StringHolder        &getVolumeSopSuffix();
-
     static const UT_StringHolder        &getRenderStatsDelegateKey();
+    static const UT_StringHolder        &getVolumeSopSuffix();
 };
 
 #endif
