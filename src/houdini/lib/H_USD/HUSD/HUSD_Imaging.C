@@ -573,6 +573,8 @@ husd_convertBufferToLayer(HUSD_RenderBuffer &buf,
         return IMX_LayerPtr();
 
     const void *mapped_buffer = buf.map();
+    if (!mapped_buffer)
+        return IMX_LayerPtr();
 
     IMX_LayerPtr layer_ptr(new IMX_Layer);
 
