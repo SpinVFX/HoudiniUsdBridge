@@ -331,6 +331,16 @@ GusdCurvesWrapper::refine(
     VtVec3fArray usdPoints;
     pointsAttr.Get(&usdPoints, m_time);
 
+    const size_t numPoints = usdCurves.ComputeVertexDataSize(m_time);
+    if (usdPoints.size() != numPoints)
+    {
+        TF_WARN("Incorrect number of points specified for curve %s. Expected "
+                "%zd, got %zd",
+                usdCurves.GetPrim().GetPath().GetText(), numPoints,
+                usdPoints.size());
+        return false;
+    }
+
     UT_IntrusivePtr<GT_Int32Array> segEndPointIndicies;
     GT_Size numSegmentEndPoints = usdPoints.size();
     if( !refineForViewport ) {

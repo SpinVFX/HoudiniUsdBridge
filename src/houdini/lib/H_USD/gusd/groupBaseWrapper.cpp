@@ -69,34 +69,21 @@ GusdGroupBaseWrapper::GusdGroupBaseWrapper( const GusdGroupBaseWrapper &in )
 GusdGroupBaseWrapper::~GusdGroupBaseWrapper()
 {}
 
-namespace {
-bool
-containsBoundable( const UsdPrim& p, GusdPurposeSet purposes )
+/// The prim can be unpacked to a child prim that is imageable and matches the
+/// purpose filter.
+static bool
+gusdShouldUnpackChild(const UsdPrim& p, GusdPurposeSet purposes)
 {
-    // Return true if this prim has a boundable geom descendant.
-    // Boundables are gprims and the point instancers.
-    // Used when unpacking so we don't create empty GU prims.
-
-    UsdGeomImageable ip( p );
-    if(!ip)
+    UsdGeomImageable ip(p);
+    if (!ip)
         return false;
 
     TfToken purpose;
     ip.GetPurposeAttr().Get(&purpose);
-    if( !GusdPurposeInSet( purpose, purposes ) && !p.IsPrototype() )
+    if (!GusdPurposeInSet(purpose, purposes) && !p.IsPrototype())
         return false;
-    
-    if( p.IsA<UsdGeomBoundable>() )
-        return true;
 
-    for( const auto& child : p.GetFilteredChildren(
-                        UsdTraverseInstanceProxies(UsdPrimDefaultPredicate)) )
-    {
-        if( containsBoundable( child, purposes ))
-            return true;
-    }
-    return false;
-}
+    return true;
 }
 
 bool
@@ -121,9 +108,12 @@ GusdGroupBaseWrapper::unpack(UT_Array<GU_DetailHandle> &details,
     for( const auto& child : usdPrim.GetFilteredChildren(
                         UsdTraverseInstanceProxies(UsdPrimDefaultPredicate)) )
     {
-        if( containsBoundable( child, purposes ))
-            usefulChildren.append( child );
+        if (gusdShouldUnpackChild(child, purposes))
+            usefulChildren.append(child);
     }
+
+    if (usefulChildren.isEmpty())
+        return true;
 
     // Sort the children to maintain consistency in unpacking.
     GusdUSD_Utils::SortPrims(usefulChildren);
@@ -164,12 +154,13 @@ GusdGroupBaseWrapper::refineGroup(
     GT_Refine& refiner,
     const GT_RefineParms* parms ) const
 {
-    UsdPrimSiblingRange children =  prim.GetFilteredChildren(
-                        UsdTraverseInstanceProxies(UsdPrimDefaultPredicate));
-
     UT_IntrusivePtr<GT_PrimCollect> collection;
-    for( const UsdPrim& child : children )
+    for (const UsdPrim& child : prim.GetFilteredChildren(
+                 UsdTraverseInstanceProxies(UsdPrimDefaultPredicate)))
     {
+        if (!gusdShouldUnpackChild(child, m_purposes))
+            continue;
+
         GT_PrimitiveHandle gtPrim = 
             GusdPrimWrapper::defineForRead( 
                     UsdGeomImageable(child), 
