@@ -32,6 +32,7 @@
 
 #include <VOP/VOP_GenericShader.h>
 #include <VOP/VOP_LanguageManager.h>
+#include <VOP/VOP_NodeParmManager.h>
 #include <VOP/VOP_Operator.h>
 #include <VOP/VOP_Parameter.h>
 #include <PI/PI_EditScriptedParms.h>
@@ -873,6 +874,8 @@ husdCreateParmVop( OP_Network &net, const TfToken &tf_name,
 	const SdfValueTypeName &sdf_type, 
 	const UT_StringRef &render_type,
 	const UT_StringRef &label,
+        bool is_subnet_input,
+        const UsdAttribute &usd_attrib,
 	const UT_StringMap<VOP_Node *> &old_vops,
 	UT_StringMap<VOP_Node *> &processed_vops,
 	const UT_StringRef &vop_key )
@@ -891,21 +894,37 @@ husdCreateParmVop( OP_Network &net, const TfToken &tf_name,
 
     vop = CAST_VOPNODE( net.createNode( "parameter", parm_name ));
     VOP_Parameter *parm_vop = UTverify_cast<VOP_Parameter*>( vop );
+    auto *lang = parm_vop->getLanguage();
+    auto &parm_mgr = lang->getParmManager();
     
-    parm_vop->setPARMSCOPE( VOP_ParmGenerator::SCOPE_SUBNET ); 
+    parm_vop->setPARMSCOPE( is_subnet_input
+            ? VOP_ParmGenerator::SCOPE_SUBNET 
+            : VOP_ParmGenerator::SCOPE_SHADER); 
     parm_vop->setPARMNAME( parm_name.c_str() );
     parm_vop->setPARMLABEL( label.c_str() );
 
     VOP_TypeInfo type_info( husdGetParmTypeInfo( sdf_type, render_type, name ));
     parm_vop->setParmTypeInfo( type_info );
+    if( type_info.getType() == VOP_TYPE_STRING 
+        && sdf_type == SdfValueTypeNames->Asset )
+    {
+        // Assets are files, so adjust the string type to file.
+        parm_vop->setPARMTYPEINDEX(
+                parm_mgr.guessParmIndex( VOP_TYPE_STRING , PRM_FILE, 1 ));
+    }
 
     // USD does not have uniform version of data types. We always get varying.
     // However, MaterialX strings are uniform, so at least we can set that.
     if( type_info.getType() == VOP_TYPE_STRING
-        && parm_vop->getLanguage()->supportsUniformVarying() )
+        && lang->supportsUniformVarying() )
     {
         parm_vop->setPARMSTORAGE(/*uniform=*/true);
     }
+
+    auto def_parm_name = parm_mgr.getParmName( parm_vop->PARMTYPEINDEX() );
+    PRM_Parm *def_parm = parm_vop->getParmPtr( def_parm_name );
+    if( def_parm )
+	HUSDsetNodeParm( *def_parm, usd_attrib, UsdTimeCode::Default() );
 
     UT_StringMap<UT_StringHolder> tags;
     tags[ PRM_SPARE_SHADER_PARM_TYPE_TOKEN ] =sdf_type.GetAsToken().GetString();
@@ -916,7 +935,8 @@ husdCreateParmVop( OP_Network &net, const TfToken &tf_name,
 }
 
 static inline VOP_Node *
-husdCreateSubnetInputVop( OP_Network &net, const UsdShadeInput &input,
+husdCreateInputVop( OP_Network &net, const UsdShadeInput &input,
+        bool is_subnet_input,
 	const UT_StringMap<VOP_Node *> &old_vops,
 	UT_StringMap<VOP_Node *> &processed_vops )
 {
@@ -924,7 +944,8 @@ husdCreateSubnetInputVop( OP_Network &net, const UsdShadeInput &input,
     UT_StringHolder render_type( input.GetRenderType().GetString() );
     VOP_ParmGenerator *parm_vop = husdCreateParmVop( net, 
 	    input.GetBaseName(), input.GetTypeName(), render_type,
-	    input.GetAttr().GetDisplayName(),
+	    input.GetAttr().GetDisplayName(), 
+            is_subnet_input, input.GetAttr(),
 	    old_vops, processed_vops, vop_key );
 
     // Hide VOP to clean up the network, potentially full of such VOPs.
@@ -942,7 +963,8 @@ husdCreateSubnetOutputVop( OP_Network &net, const UsdShadeOutput &output,
     UT_StringHolder render_type( output.GetRenderType().GetString() );
     VOP_ParmGenerator *parm_vop = husdCreateParmVop( net, 
 	    output.GetBaseName(), output.GetTypeName(), render_type,
-	    output.GetAttr().GetDisplayName(),
+	    output.GetAttr().GetDisplayName(), 
+            /*is_subnet_input=*/ true, output.GetAttr(),
 	    old_vops, processed_vops, vop_key );
 
     // Usd token outputs may signify a shder type (eg, surface).
@@ -1224,7 +1246,8 @@ husdCreateShaderNodeChain( const HUSD_DataHandle &handle,
 	{
 	    UsdShadeInput src_input = 
 		src_info.source.GetInput( src_info.sourceName );
-	    in_vop  = husdCreateSubnetInputVop( net, src_input,
+            bool to_parent = (src_input.GetPrim() == usd_prim.GetParent());
+	    in_vop  = husdCreateInputVop( net, src_input, to_parent,
 		    old_inputs, processed_vops);
 	    out_idx = 0;
 	}
