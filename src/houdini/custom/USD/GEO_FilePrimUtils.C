@@ -72,6 +72,9 @@
 #include <pxr/usd/sdf/assetPath.h>
 #include <pxr/usd/kind/registry.h>
 
+#include "GEO_Boost.h"
+#include BOOST_HEADER(numeric/conversion/cast.hpp)
+
 using namespace UT::Literal;
 
 PXR_NAMESPACE_OPEN_SCOPE
@@ -459,19 +462,26 @@ initPartition(GEO_FilePrim &fileprim,
 
 /// Creates the index array when building indexed primvars (for
 /// GEOcreateIndexedAttr()).
-template <typename GtT, typename GtComponentT>
+template <typename UsdT, typename GtComponentT>
 static void
 GEObuildIndex(
         UT_Array<int> &indices,
-        UT_Array<GtT> &values,
+        UT_Array<UsdT> &values,
         const GT_DataArrayHandle &src_hou_attr,
         int entries_per_elem)
 {
-    GT_DataArrayHandle buffer;
-    const GtT *data = reinterpret_cast<const GtT *>(
-        src_hou_attr->getArray<GtComponentT>(buffer));
+    // Utilize GEO_FilePropAttribSource to safely cast or convert to the USD
+    // data type (e.g. when UsdT=uint32 and GtComponentT=int64)
+    using FilePropAttribSource = GEO_FilePropAttribSource<UsdT, GtComponentT>;
+    auto converter = UTmakeIntrusive<FilePropAttribSource>(src_hou_attr);
+    VtValue value;
+    converter->copyData(GEO_FileFieldValue(&value));
 
-    UT_Map<GtT, int> attr_map;
+    UT_ASSERT(value.IsHolding<VtArray<UsdT>>());
+    const VtArray<UsdT> &array = value.UncheckedGet<VtArray<UsdT>>();
+    const UsdT *data = array.data();
+
+    UT_Map<UsdT, int> attr_map;
     int maxidx = 0;
 
     // We have been asked to author an indices attribute for this
@@ -482,7 +492,7 @@ GEObuildIndex(
     indices.setSizeNoInit(n);
     for (exint i = 0; i < n; i++)
     {
-        const GtT &value = data[i];
+        const UsdT &value = data[i];
         auto it = attr_map.find(value);
 
         if (it == attr_map.end())
@@ -619,7 +629,7 @@ GEOcreateIndexedAttr(GEO_FilePrim &fileprim,
 
 /// Convert the data array to a single element array (used when converting to
 /// constant interpolation / detail attribute).
-template <typename T, typename ComponentT>
+template <typename ComponentT>
 GT_DataArrayHandle
 geoConvertToConstant(const GT_DataArrayHandle &src)
 {
@@ -690,15 +700,39 @@ geoConvertToScalar(
 
     GT_DataArrayHandle storage;
     const ComponentT *component_data = attr->getArray<ComponentT>(storage);
-    const T *data = reinterpret_cast<const T *>(component_data);
 
-    // Allow integer values to be converted to bool.
-    // TODO - in C++17, if constexpr could be used here. For now, reading from
-    // the ComponentT array ensures that this compiles for all types T.
-    if (SYS_IsIntegral<T>::value && attr_type == SdfValueTypeNames->Bool)
+    // Handle integer conversions to bool / unsigned.
+    if constexpr (SYSisSame<T, bool>())
+    {
         return new GEO_FilePropConstantSource<bool>(component_data[0] != 0);
+    }
+    else if constexpr (SYSisSame<T, uint32>() || SYSisSame<T, uint64>())
+    {
+        T value = 0;
+        try
+        {
+            value = BOOST_NS::numeric_cast<T>(component_data[0]);
+        }
+        catch (const BOOST_NS::bad_numeric_cast &)
+        {
+        }
 
-    return new GEO_FilePropConstantSource<T>(data[0]);
+        return new GEO_FilePropConstantSource<T>(value);
+    }
+    else
+    {
+        // Otherwise, make sure we can safely cast to the USD data type.
+        static_assert(
+                SYSisSame<
+                        ComponentT, typename GusdPodTupleTraits<T>::ValueType>()
+                || (SYSisSame<
+                            typename GusdPodTupleTraits<T>::ValueType, GfHalf>()
+                    && SYSisSame<ComponentT, fpreal16>()));
+
+        const T *data = reinterpret_cast<const T *>(component_data);
+        return new GEO_FilePropConstantSource<T>(data[0]);
+    }
+
 }
 
 template <>
@@ -829,7 +863,7 @@ GEOinitProperty(GEO_FilePrim &fileprim,
             // detail attribute. Note we can ignore the vertex indirection in
             // this situation, since all element attribute values are the same.
             attr_owner = GT_OWNER_DETAIL;
-            src_hou_attr = geoConvertToConstant<GtT, GtComponentT>(hou_attr);
+            src_hou_attr = geoConvertToConstant<GtComponentT>(hou_attr);
         }
         else if (attr_owner == GT_OWNER_VERTEX && vertex_indirect)
         {
@@ -854,7 +888,7 @@ GEOinitProperty(GEO_FilePrim &fileprim,
             usd_attr_type = usd_attr_type.GetScalarType();
         }
 
-        constexpr int entry_tuple_size = sizeof(GtT) / sizeof(GtComponentT);
+        constexpr int entry_tuple_size = GusdGetTupleSize<GtT>();
         const int entries_per_elem = src_hou_attr->getTupleSize() / entry_tuple_size;
 
         GEO_FilePropSource *prop_source = nullptr;
@@ -2063,6 +2097,20 @@ initExtraAttrib(GEO_FilePrim &fileprim,
     {
         SYS_STATIC_ASSERT(sizeof(bool) == sizeof(uint8));
         INIT_ATTRIB(bool, uint8, SdfValueTypeNames->BoolArray);
+    }
+    else if (
+            GTisInteger(storage)
+            && geoMultiMatch(
+                    options.myUIntAttribs, attr_name, decoded_attr_name))
+    {
+        INIT_ATTRIB(uint32, int64, SdfValueTypeNames->UIntArray);
+    }
+    else if (
+            GTisInteger(storage)
+            && geoMultiMatch(
+                    options.myUInt64Attribs, attr_name, decoded_attr_name))
+    {
+        INIT_ATTRIB(uint64, int64, SdfValueTypeNames->UInt64Array);
     }
     else if (storage == GT_STORE_UINT8)
     {

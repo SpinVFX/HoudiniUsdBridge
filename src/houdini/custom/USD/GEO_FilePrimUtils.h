@@ -69,6 +69,8 @@ public:
     UT_StringMMPattern		 myConstantAttribs;
     UT_StringMMPattern		 myScalarConstantAttribs;
     UT_StringMMPattern		 myBoolAttribs;
+    UT_StringMMPattern		 myUIntAttribs;
+    UT_StringMMPattern		 myUInt64Attribs;
     UT_StringMMPattern		 myStaticAttribs;
     UT_StringMMPattern		 myPartitionAttribs;
     bool			 myPrefixPartitionSubsetNames = true;

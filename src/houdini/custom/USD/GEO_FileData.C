@@ -542,6 +542,14 @@ GEO_FileData::Open(const std::string& filePath)
 		!cook_option.empty())
 		options.myBoolAttribs.compile(cook_option.c_str());
 
+	    if (getCookOption(&myCookArgs, "uintattribs", gdp, cook_option) &&
+		!cook_option.empty())
+		options.myUIntAttribs.compile(cook_option.c_str());
+
+	    if (getCookOption(&myCookArgs, "uint64attribs", gdp, cook_option) &&
+		!cook_option.empty())
+		options.myUInt64Attribs.compile(cook_option.c_str());
+
 	    if (getCookOption(&myCookArgs, "indexattribs",
 		    gdp, cook_option) &&
 		!cook_option.empty())

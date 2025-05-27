@@ -51,6 +51,8 @@
 
 #include <iostream>
 
+#include BOOST_HEADER(numeric/conversion/cast.hpp)
+
 PXR_NAMESPACE_OPEN_SCOPE
 
 using std::cout;
@@ -926,9 +928,12 @@ Gusd_GetCStr(const SdfAssetPath& o) { return o.GetAssetPath().c_str(); }
 
 /// Convert a value to a GT_DataArray.
 /// The value is either a POD type or a tuple of PODs.
-template <class ELEMTYPE, class GTARRAY, GT_Type GT_TYPE=GT_TYPE_NONE>
+template <class ELEMTYPE, class GTARRAY>
 GT_DataArrayHandle
-Gusd_ConvertTupleToGt(const UsdAttribute& attr, const VtValue& val)
+Gusd_ConvertTupleToGt(
+        const UsdAttribute& attr,
+        const VtValue& val,
+        GT_Type type = GT_TYPE_NONE)
 {
     TF_DEV_AXIOM(val.IsHolding<ELEMTYPE>());
 
@@ -937,7 +942,6 @@ Gusd_ConvertTupleToGt(const UsdAttribute& attr, const VtValue& val)
 
     // Like Gusd_ConvertTupleArrayToGt(), look up the primvar role if this is
     // not a scalar and no explicit type was specified.
-    GT_Type type = GT_TYPE;
     if (type == GT_TYPE_NONE && tuple_size > 1)
         type = GusdGT_Utils::getType(attr.GetTypeName());
 
@@ -955,9 +959,12 @@ Gusd_GetElementSize(const UsdAttribute &attr)
 
 /// Convert a VtArray to a GT_DataArray.
 /// The elements of the array are either PODs, or tuples of PODs (eg., vectors).
-template <class ELEMTYPE, class GTARRAY, GT_Type GT_TYPE=GT_TYPE_NONE>
-GT_DataArray*    
-Gusd_ConvertTupleArrayToGt(const UsdAttribute& attr, const VtValue& val)
+template <class ELEMTYPE, class GTARRAY>
+GT_DataArray*
+Gusd_ConvertTupleArrayToGt(
+        const UsdAttribute& attr,
+        const VtValue& val,
+        GT_Type type = GT_TYPE_NONE)
 {
     TF_DEV_AXIOM(val.IsHolding<VtArray<ELEMTYPE> >());
 
@@ -970,8 +977,7 @@ Gusd_ConvertTupleArrayToGt(const UsdAttribute& attr, const VtValue& val)
 
             // Only lookup primvar role for non POD types
             // (vectors, matrices, etc.), and only if it has not
-            // been specified via template argument.
-            GT_Type type = GT_TYPE;
+            // been specified via the parameter.
             if (type == GT_TYPE_NONE) {
                 // A GT_Type has not been specified using template args.
                 // We can try to derive a type from the role on the primvar's 
@@ -1023,6 +1029,43 @@ Gusd_ConvertStringToGt(const VtValue& val)
     return gtString;
 }
 
+/// Convert a uint or uint64 array to an int64 array.
+template <typename UnsignedArray>
+VtValue
+Gusd_ConvertUnsignedArray(
+        const UsdAttribute& attr,
+        const UnsignedArray& src_array)
+{
+    VtInt64Array dst_array;
+    dst_array.reserve(src_array.size());
+
+    bool reported_warning = false;
+    for (size_t i = 0, n = src_array.size(); i < n; ++i)
+    {
+        int64 value = 0;
+        try
+        {
+            value = BOOST_NS::numeric_cast<int64>(src_array[i]);
+        }
+        catch (const BOOST_NS::bad_numeric_cast&)
+        {
+            if (!reported_warning)
+            {
+                UT_WorkBuffer msg;
+                msg.format(
+                        "{0}: Cannot convert element {1} (value {2}) to int64",
+                        attr.GetName().GetString(), i, src_array[i]);
+                GUSD_WARN().Msg(msg.buffer());
+
+                reported_warning = true;
+            }
+        }
+
+        dst_array.push_back(value);
+    }
+
+    return VtValue(dst_array);
+}
 
 /// Convert a VtArray of string-like values to a GT_DataArray.
 template <typename ELEMTYPE>
@@ -1113,7 +1156,9 @@ Gusd_AddAttribute(const UsdAttribute &attr,
                   GT_AttributeListHandle *constant,
                   UT_StringArray &constant_attribs,
                   UT_StringArray &scalar_constant_attribs,
-                  UT_StringArray &bool_attribs)
+                  UT_StringArray &bool_attribs,
+                  UT_StringArray &uint_attribs,
+                  UT_StringArray &uint64_attribs)
 {
     if (interpolation == UsdGeomTokens->vertex ||
         interpolation == UsdGeomTokens->varying)
@@ -1203,8 +1248,13 @@ Gusd_AddAttribute(const UsdAttribute &attr,
         }
     }
 
-    if (attr.GetTypeName().GetScalarType() == SdfValueTypeNames->Bool)
+    const SdfValueTypeName scalar_type = attr.GetTypeName().GetScalarType();
+    if (scalar_type == SdfValueTypeNames->Bool)
         bool_attribs.append(attrname);
+    else if (scalar_type == SdfValueTypeNames->UInt)
+        uint_attribs.append(attrname);
+    else if (scalar_type == SdfValueTypeNames->UInt64)
+        uint64_attribs.append(attrname);
 }
 
 static void
@@ -1248,15 +1298,15 @@ GT_DataArrayHandle
 GusdPrimWrapper::convertAttributeData(const UsdAttribute &attr,
                                       const VtValue &val)
 {
-#define _CONVERT_TUPLE(elemType, gtArray, gtType)                              \
+#define _CONVERT_TUPLE(elemType, gtArray, gt_type)                             \
     if (val.IsHolding<elemType>())                                             \
     {                                                                          \
-        return Gusd_ConvertTupleToGt<elemType, gtArray, gtType>(attr, val);    \
+        return Gusd_ConvertTupleToGt<elemType, gtArray>(attr, val, gt_type);   \
     }                                                                          \
     else if (val.IsHolding<VtArray<elemType>>())                               \
     {                                                                          \
-        return Gusd_ConvertTupleArrayToGt<elemType, gtArray, gtType>(          \
-            attr, val);                                                        \
+        return Gusd_ConvertTupleArrayToGt<elemType, gtArray>(                  \
+                attr, val, gt_type);                                           \
     }
 
     // Check for most common value types first.
@@ -1271,8 +1321,6 @@ GusdPrimWrapper::convertAttributeData(const UsdAttribute &attr,
     _CONVERT_TUPLE(int64,   GT_Int64Array,  GT_TYPE_NONE);
     _CONVERT_TUPLE(unsigned char, GT_UInt8Array, GT_TYPE_NONE);
     _CONVERT_TUPLE(bool,    GT_UInt8Array,  GT_TYPE_NONE);
-
-    // TODO: UInt, UInt64 (convert to int32/int64?)
     
     // Vec2
     _CONVERT_TUPLE(GfVec2d, GT_Real64Array, GT_TYPE_NONE);
@@ -1300,6 +1348,43 @@ GusdPrimWrapper::convertAttributeData(const UsdAttribute &attr,
     _CONVERT_TUPLE(GfMatrix4d, GT_Real64Array, GT_TYPE_MATRIX);
     // TODO: Correct GT_Type for GfMatrix2d?
     _CONVERT_TUPLE(GfMatrix2d, GT_Real64Array, GT_TYPE_NONE);
+
+    // Convert uint and uint64 to int64 (matching the Alembic importer)
+    if (val.IsHolding<uint32>() || val.IsHolding<uint64>())
+    {
+        VtValue converted_val = VtValue::Cast<int64>(val);
+        if (converted_val.IsEmpty())
+        {
+            UT_WorkBuffer msg;
+            msg.format(
+                    "{0}: Cannot convert value {1} to int64",
+                    attr.GetName().GetString(), val.Get<uint64>());
+            GUSD_WARN().Msg(msg.buffer());
+
+            converted_val = VtValue(int64(0));
+        }
+
+        return Gusd_ConvertTupleToGt<int64, GT_Int64Array>(
+                attr, converted_val, GT_TYPE_NONE);
+    }
+    else if (val.IsHolding<VtUIntArray>() || val.IsHolding<VtUInt64Array>())
+    {
+        VtValue converted_val;
+        if (val.IsHolding<VtUIntArray>())
+        {
+            converted_val = Gusd_ConvertUnsignedArray(
+                    attr, val.UncheckedGet<VtUIntArray>());
+        }
+        else
+        {
+            converted_val = Gusd_ConvertUnsignedArray(
+                    attr, val.UncheckedGet<VtUInt64Array>());
+        }
+
+        UT_ASSERT(!converted_val.IsEmpty());
+        return Gusd_ConvertTupleArrayToGt<int64, GT_Int64Array>(
+                attr, converted_val, GT_TYPE_NONE);
+    }
 
 #undef _CONVERT_TUPLE
 
@@ -1543,6 +1628,8 @@ GusdPrimWrapper::loadPrimvars(
     UT_StringArray constant_attribs;
     UT_StringArray scalar_attribs;
     UT_StringArray bool_attribs;
+    UT_StringArray uint_attribs;
+    UT_StringArray uint64_attribs;
     UT_StringArray index_attribs;
     for( const UsdGeomPrimvar &primvar : primvars )
     {
@@ -1633,7 +1720,7 @@ GusdPrimWrapper::loadPrimvars(
 
         if( !gtData )
         {
-            GUSD_WARN().Msg( "Failed to convert primvar %s:%s %s.",
+            GUSD_WARN().Msg( "Failed to convert primvar %s:%s (type: %s).",
                         primPath.c_str(),
                         primvar.GetPrimvarName().GetText(),
                         primvar.GetTypeName().GetAsToken().GetText() );
@@ -1663,7 +1750,8 @@ GusdPrimWrapper::loadPrimvars(
         Gusd_AddAttribute(
                 primvar, gtData, attrname, interpolation, minUniform, minPoint,
                 minVertex, primPath, remapIndicies, vertex, point, primitive,
-                constant, constant_attribs, scalar_attribs, bool_attribs);
+                constant, constant_attribs, scalar_attribs, bool_attribs,
+                uint_attribs, uint64_attribs);
 
         if (primvar.IsIndexed())
             index_attribs.append(attrname);
@@ -1735,8 +1823,8 @@ GusdPrimWrapper::loadPrimvars(
             Gusd_AddAttribute(
                     attr, data, attrname, interpolation, minUniform, minPoint,
                     minVertex, primPath, remapIndicies, vertex, point,
-                    primitive, constant, constant_attribs,
-                    scalar_attribs, bool_attribs);
+                    primitive, constant, constant_attribs, scalar_attribs,
+                    bool_attribs, uint_attribs, uint64_attribs);
         }
     }
 
@@ -1758,6 +1846,10 @@ GusdPrimWrapper::loadPrimvars(
                 scalar_attribs, *constant, "usdconfigscalarconstantattribs"_sh);
         Gusd_RecordAttribPattern(
                 bool_attribs, *constant, "usdconfigboolattribs"_sh);
+        Gusd_RecordAttribPattern(
+                uint_attribs, *constant, "usdconfiguintattribs"_sh);
+        Gusd_RecordAttribPattern(
+                uint64_attribs, *constant, "usdconfiguint64attribs"_sh);
         Gusd_RecordAttribPattern(
                 index_attribs, *constant, "usdconfigindexattribs"_sh);
     }
