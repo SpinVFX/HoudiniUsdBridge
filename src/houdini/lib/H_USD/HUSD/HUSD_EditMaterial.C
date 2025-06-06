@@ -1032,6 +1032,43 @@ husdCreateShaderNodeChain( const HUSD_DataHandle &handle,
 	UT_StringMap<VOP_Node *> &processed_vops,
         bool strip_shader_type_from_name );
 
+
+static void
+husdCreateSubnetTerminalChildChain( const HUSD_DataHandle &handle, 
+	OP_Network &net, bool is_material,
+        const UsdPrim &usd_prim, const UT_StringRef &usd_output_name,
+        const UT_String &usd_connection_src_name, 
+        VOP_Node *sub_out_vop,
+	UT_StringMap<VOP_Node *> &processed_vops,
+        bool strip_shader_type_from_name )
+{
+    // See if anything was connected to the output vop.
+    UT_StringMap<VOP_Node *> old_inputs =husdGetInputShaderMap(sub_out_vop);
+
+    // Only VEX shader translator apends shader type to prim name.
+    // We can tell VEX in a Material prim, otherwise do as for NodeGraph.
+    bool strip_shader_type_from_child_name = is_material
+        ? husdIsVexTerminalName( usd_output_name )
+        : strip_shader_type_from_name;
+
+    // Create a VOP that feeds into the subnet output.
+    VOP_Node *shader_vop = husdCreateShaderNodeChain( handle, 
+            net, usd_prim, old_inputs, processed_vops,
+            strip_shader_type_from_child_name );
+    if( !shader_vop )
+        return;
+
+    // Wire the connections between the VOP nodes.
+    int out_idx = shader_vop->getOutputFromName( usd_connection_src_name );
+    if( out_idx < 0 )
+        out_idx = husdGetOutputIdxFromType( shader_vop, 
+                sub_out_vop->getInputType(0));
+    if( out_idx < 0 )
+        out_idx = 0; 
+
+    husdConnectVopNodes( sub_out_vop, 0, shader_vop, out_idx );
+}
+
 static void
 husdCreateSubnetChildren( const HUSD_DataHandle &handle, 
 	OP_Network &net, const UsdShadeNodeGraph &usd_graph,
@@ -1051,43 +1088,34 @@ husdCreateSubnetChildren( const HUSD_DataHandle &handle,
 	UsdShadeConnectionSourceInfo src_info;
 	if( !husdGetFirstConnectedSrc( output, src_info ))
 	    continue;
-	
-	UT_StringHolder out_name( output.GetBaseName().GetString() );
-
-        // Only VEX shader translator apends shader type to prim name.
-        // We can tell VEX in a Material prim, otherwise do as for NodeGraph.
-        bool strip_shader_type_from_child_name = is_material
-            ? husdIsVexTerminalName( out_name )
-            : strip_shader_type_from_name;
 
 	// Look up or create a VOP node that represents subnet output terminal.
+	UT_StringHolder out_name( output.GetBaseName().GetString() );
 	VOP_Node *sub_out_vop = CAST_VOPNODE(
 		net.getChild( out_name.forceValidVariableName() ));
 	if( !sub_out_vop )
 	    sub_out_vop = husdCreateSubnetOutputVop( net, output,
 		    empty_vops, processed_vops);
 
-	// See if anything was connected to the output vop.
-	UT_StringMap<VOP_Node *> old_inputs=husdGetInputShaderMap(sub_out_vop);
-
-	// Create a VOP that feeds into the subnet output.
-	UsdPrim usd_shader_prim = src_info.source.GetPrim();
-	VOP_Node *shader_vop = husdCreateShaderNodeChain( handle, 
-		net, usd_shader_prim, old_inputs, processed_vops,
-                strip_shader_type_from_child_name );
-	if( !shader_vop )
-	    continue;
-
-	// Wire the connections between the VOP nodes.
-	UT_String output_name( src_info.sourceName );
-	int out_idx = shader_vop->getOutputFromName( output_name );
-	if( out_idx < 0 )
-	    out_idx = husdGetOutputIdxFromType( shader_vop, 
-		    sub_out_vop->getInputType(0));
-	if( out_idx < 0 )
-	    out_idx = 0; 
-
-	husdConnectVopNodes( sub_out_vop, 0, shader_vop, out_idx );
+	UsdPrim usd_src_prim = src_info.source.GetPrim();
+        if( usd_src_prim == usd_graph.GetPrim() )
+        {
+            // Graph output connected to an input of the same graph.
+	    UT_ASSERT( src_info.sourceType == UsdShadeAttributeType::Input );
+	    UsdShadeInput src_input = 
+		src_info.source.GetInput( src_info.sourceName );
+	    VOP_Node *sub_in_vop = husdCreateInputVop( net, src_input, 
+                    /*to_parent=*/ true, empty_vops, processed_vops );
+	    husdConnectVopNodes( sub_out_vop, 0, sub_in_vop, 0 );
+        }
+        else
+        {
+            // Graph output connected to a child shader primitive's output.
+            UT_String usd_connection_src_name( src_info.sourceName );
+            husdCreateSubnetTerminalChildChain( handle, net, is_material,
+                    usd_src_prim, out_name, usd_connection_src_name, 
+                    sub_out_vop, processed_vops, strip_shader_type_from_name );
+        }
     }
 
     // TODO: layout only newly created nodes
