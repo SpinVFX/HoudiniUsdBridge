@@ -2639,8 +2639,11 @@ XUSD_HydraGeoCurves::Sync(HdSceneDelegate *scene_delegate,
         if(pinned_curves)
         {
             ph = cmesh->pinCurves();
-            cmesh = UTverify_cast<GT_PrimCurveMesh*>(ph.get());
-            myBasisCurve = cmesh;
+            if(ph)
+            {
+                cmesh = UTverify_cast<GT_PrimCurveMesh*>(ph.get());
+                myBasisCurve = cmesh;
+            }
         }
  	ph = cmesh->refineToLinear();
 	if(!ph)
