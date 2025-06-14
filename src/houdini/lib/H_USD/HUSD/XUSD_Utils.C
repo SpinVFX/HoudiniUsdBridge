@@ -319,6 +319,9 @@ _MergeClipSet(VtDictionary *strong, const VtDictionary &weak)
         UT_Set<double> strong_active_times;
         for (auto &&vec : strongActive)
             strong_active_times.insert(vec[0]);
+        UT_Set<double> strong_times_start_times;
+        for (auto &&vec : strongTimes)
+            strong_times_start_times.insert(vec[0]);
 
         UT_StringMap<int> asset_paths;
         for (int i = 0; i < strongPaths.size(); ++i)
@@ -343,11 +346,12 @@ _MergeClipSet(VtDictionary *strong, const VtDictionary &weak)
             strongActive.push_back(GfVec2d(active[0], (double)it->second));
         }
 
-        // Don't add "times" entries that start at the same time as weak
-        // "active" entries that we didn't copy into the strong array.
+        // Don't add weak "times" entries that start at the same time as
+        // existing strong "times" entries (avoids adding duplicates when the
+        // clip data is the same in the weak and strong layers).
         for (auto &&time : weakTimes)
         {
-            if (!strong_active_times.contains(time[0]))
+            if (!strong_times_start_times.contains(time[0]))
                 strongTimes.push_back(time);
         }
 
