@@ -157,7 +157,7 @@ public:
 
     GT_PrimitiveHandle doSoftCopy() const override
     {
-        return new GT_PrimPointInstancer(*this);
+        return UTmakeIntrusive<GT_PrimPointInstancer>(*this);
     }
 
 private:
@@ -253,7 +253,7 @@ public:
 
     GT_PrimitiveHandle doSoftCopy() const override
     {
-        return new GT_PrimPackedInstance(*this);
+        return UTmakeIntrusive<GT_PrimPackedInstance>(*this);
     }
 
 private:

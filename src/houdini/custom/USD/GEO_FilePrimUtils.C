@@ -273,8 +273,7 @@ GT_DataArrayHandle
 GEOreverseWindingOrder(const GT_DataArrayHandle &faceCounts,
                        const GT_DataArrayHandle &vertices)
 {
-    UT_IntrusivePtr<GT_Int32Array> indirect = new GT_Int32Array(
-        vertices->entries(), 1);
+    auto indirect = UTmakeIntrusive<GT_Int32Array>(vertices->entries(), 1);
 
     for (GT_Size i = 0, n = vertices->entries(); i < n; i++)
         indirect->set(i, i);
@@ -1050,7 +1049,8 @@ GEOinitProperty(GEO_FilePrim &fileprim,
             // If this is a vertex attribute, and we are changing the
             // handedness or the geometry, and so have a vertex indirection
             // array, create the reversed attribute array here.
-            src_hou_attr = new GT_DAIndirect(vertex_indirect, src_hou_attr);
+            src_hou_attr = UTmakeIntrusive<GT_DAIndirect>(
+                    vertex_indirect, src_hou_attr);
         }
 
         // If there is constant interpolation, prefer importing it as a scalar
@@ -1520,8 +1520,8 @@ template <typename T>
 static GT_DataArrayHandle
 GEOconvertToTexCoord2(const GT_DataArrayHandle &uv3_data)
 {
-    UT_IntrusivePtr<GT_DANumeric<T>> uv2_data =
-        new GT_DANumeric<T>(uv3_data->entries(), 2, GT_TYPE_TEXTURE);
+    auto uv2_data = UTmakeIntrusive<GT_DANumeric<T>>(
+            uv3_data->entries(), 2, GT_TYPE_TEXTURE);
     uv2_data->setDataId(uv3_data->getDataId());
 
     UT_ASSERT(uv3_data->getTupleSize() == 3);
@@ -1640,8 +1640,9 @@ initAccelerationAttrib(
 GT_DataArrayHandle
 GEOconvertRadToDeg(const GT_DataArrayHandle &rad_attr)
 {
-    UT_IntrusivePtr<GT_DANumeric<float>> deg_attr = new GT_DANumeric<float>(
-        rad_attr->entries(), rad_attr->getTupleSize(), rad_attr->getTypeInfo());
+    auto deg_attr = UTmakeIntrusive<GT_DANumeric<float>>(
+            rad_attr->entries(), rad_attr->getTupleSize(),
+            rad_attr->getTypeInfo());
     deg_attr->setDataId(rad_attr->getDataId());
 
     GT_DataArrayHandle buffer;
@@ -1759,8 +1760,7 @@ GEOscaleWidthsAttrib(const GT_DataArrayHandle &width_attr, const fpreal scale)
     if (SYSisEqual(scale, 1.0) && tuple_sz == 1)
         return width_attr;
 
-    UT_IntrusivePtr<GT_DANumeric<float>> scaled_widths =
-        new GT_DANumeric<float>(
+    auto scaled_widths = UTmakeIntrusive<GT_DANumeric<float>>(
             width_attr->entries(), 1, width_attr->getTypeInfo());
     scaled_widths->setDataId(width_attr->getDataId());
 
@@ -1813,7 +1813,9 @@ initPointSizeAttribs(GEO_FilePrim &fileprim,
     {
         if (options.myDefaultWidth < 0)
             return false;
-        width_attr.reset(new GT_DAConstantValue<float>(1, options.myDefaultWidth));
+
+        width_attr = UTmakeIntrusive<GT_DAConstantValue<float>>(
+                1, options.myDefaultWidth);
         scale = 1.f;
         width_name = "!!DEFAULT_WIDTH!!"; // Arbitrary name that won't clash
                                           // with user-generated attributes.
@@ -3505,19 +3507,17 @@ GEOfixEndInterpolation(const UT_IntrusivePtr<GT_PrimCurveMesh> &src_curves)
     }
 
     const GT_CountArray &src_counts = src_curves->getCurveCountArray();
-    UT_IntrusivePtr<GT_Int32Array> count_data = new GT_Int32Array(
-        src_counts.entries(), 1);
+    auto count_data = UTmakeIntrusive<GT_Int32Array>(src_counts.entries(), 1);
 
     // Add copies of the end vertices.
     // TODO - this could be replaced by setting 'wrap' to 'pinned' once Hydra
     // supports that.
-    static constexpr exint num_copies = 2;
+    static constexpr exint theNumCopies = 2;
     for (GT_Size i = 0, n = src_counts.entries(); i < n; ++i)
-        count_data->set(src_counts.getCount(i) + num_copies * 2, i);
+        count_data->set(src_counts.getCount(i) + theNumCopies * 2, i);
 
     GT_CountArray counts(count_data);
-    UT_IntrusivePtr<GT_Int64Array> indirect = new GT_Int64Array(
-        counts.sumCounts(), 1);
+    auto indirect = UTmakeIntrusive<GT_Int64Array>(counts.sumCounts(), 1);
 
     // Generate an indirect array of point indices to duplicate the attribute
     // values for the new vertices.
@@ -3526,7 +3526,7 @@ GEOfixEndInterpolation(const UT_IntrusivePtr<GT_PrimCurveMesh> &src_curves)
     for (GT_Size i = 0, n = src_counts.entries(); i < n; ++i)
     {
         // Add the start point and its copies.
-        for (exint j = 0; j <= num_copies; ++j)
+        for (exint j = 0; j <= theNumCopies; ++j)
             indirect->set(src_idx, dst_idx++);
 
         ++src_idx;
@@ -3535,7 +3535,7 @@ GEOfixEndInterpolation(const UT_IntrusivePtr<GT_PrimCurveMesh> &src_curves)
             indirect->set(src_idx++, dst_idx++);
 
         // Add the end point and its copies.
-        for (exint j = 0; j <= num_copies; ++j)
+        for (exint j = 0; j <= theNumCopies; ++j)
             indirect->set(src_idx, dst_idx++);
 
         ++src_idx;
@@ -3551,10 +3551,11 @@ GEOfixEndInterpolation(const UT_IntrusivePtr<GT_PrimCurveMesh> &src_curves)
     for (exint i = 0, n = vattribs->entries(); i < n; ++i)
         vattribs->get(i)->setDataId(src_vattribs->get(i)->getDataId());
 
-    return new GT_PrimCurveMesh(
-        *src_curves, GT_BASIS_BSPLINE, counts, vattribs,
-        src_curves->getUniformAttributes(), src_curves->getDetailAttributes(),
-        src_curves->getWrap(), src_curves->faceSetMap());
+    return UTmakeIntrusive<GT_PrimCurveMesh>(
+            *src_curves, GT_BASIS_BSPLINE, counts, vattribs,
+            src_curves->getUniformAttributes(),
+            src_curves->getDetailAttributes(), src_curves->getWrap(),
+            src_curves->faceSetMap());
 }
 
 static void
@@ -4138,7 +4139,8 @@ GEOinitGTPrim(GEO_FilePrim &fileprim,
             {
                 vertex_indirect = GEOreverseWindingOrder(
                         gtmesh->getFaceCounts(), gtmesh->getVertexList());
-                hou_attr = new GT_DAIndirect(vertex_indirect, hou_attr);
+                hou_attr = UTmakeIntrusive<GT_DAIndirect>(
+                        vertex_indirect, hou_attr);
             }
             prop = GEOinitProperty<int>(
                     fileprim, hou_attr, UT_StringHolder::theEmptyString,
@@ -4424,8 +4426,8 @@ GEOinitGTPrim(GEO_FilePrim &fileprim,
                         // extra point.
                         if (order == 4 && wrap)
                         {
-                            auto modcounts =
-                                new GT_Real32Array(curve_counts->entries(), 1);
+                            auto modcounts = UTmakeIntrusive<GT_Real32Array>(
+                                    curve_counts->entries(), 1);
 
                             for (GT_Size i = 0, n = curve_counts->entries();
                                  i < n; ++i)
@@ -5108,8 +5110,8 @@ geoUpdateTupleData(const GT_DataArrayHandle &src,
 {
     const GT_Size entries = src->entries();
 
-    auto newDataContainer = new GT_DANumeric<DT>(
-        entries, newSize, src->getTypeInfo());
+    auto newDataContainer = UTmakeIntrusive<GT_DANumeric<DT>>(
+            entries, newSize, src->getTypeInfo());
     DT *newData = newDataContainer->data();
 
     GT_DataArrayHandle buffer;

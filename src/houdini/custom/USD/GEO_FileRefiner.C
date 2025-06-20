@@ -696,7 +696,7 @@ GEO_FileRefiner::addPointInstancer(const UT_StringHolder &orig_instancer_path,
         m_pointInstancers[instancer_path];
     if (!instancer)
     {
-        instancer.reset(new GT_PrimPointInstancer());
+        instancer = UTmakeIntrusive<GT_PrimPointInstancer>();
         GEO_PathHandle path = m_collector.add(
                 instancer_path,
                 /* addNumericSuffix */ false, instancer,
@@ -778,37 +778,44 @@ GEO_FileRefiner::addPointInstancerPrototype(GT_PrimPointInstancer &instancer,
     else
         init_prototype_path = prim_path;
 
-    GT_PackedInstanceKey key = GTpackedInstanceKey(gtpacked);
+    // If the prototype is not a child of the instancer, we can share it with
+    // other point instancers.
+    const GT_PackedInstanceKey prototype_key = GTpackedInstanceKey(gtpacked);
+    GEO_PathHandle prototype_path;
+    if (!make_relative_path && m_knownInstancedGeos.contains(prototype_key))
+    {
+        prototype_path = m_knownInstancedGeos.at(prototype_key);
+    }
+    else
+    {
+        auto prototype_prim = UTmakeIntrusive<GT_PrimPackedInstance>(&gtpacked);
+        prototype_prim->setIsPrototype(true);
+        // If the prototype is a child of the point instancer, it doesn't
+        // need to be explicitly set as invisible since it will be pruned
+        // out regardless.
+        prototype_prim->setIsVisible(make_relative_path);
 
-    // Add or re-use an existing prototype for the instanced geometry.
-    GEO_PathHandle prototype_path = UTfindOrInsert(
-        m_knownInstancedGeos, key, [&]() {
-            auto prototype_prim = new GT_PrimPackedInstance(&gtpacked);
-            prototype_prim->setIsPrototype(true);
-            // If the prototype is a child of the point instancer, it doesn't
-            // need to be explicitly set as invisible since it will be pruned
-            // out regardless.
-            prototype_prim->setIsVisible(make_relative_path);
+        GEO_PathHandle path = m_collector.add(
+                init_prototype_path, add_numeric_suffix, prototype_prim,
+                UT_Matrix4D::getIdentityMatrix(), m_topologyId, purpose,
+                m_agentShapeInfo);
 
-            GEO_PathHandle path = m_collector.add(
-                    init_prototype_path, add_numeric_suffix, prototype_prim,
-                    UT_Matrix4D::getIdentityMatrix(), m_topologyId, purpose,
-                    m_agentShapeInfo);
+        // Refine the embedded geometry, unless it is a file reference.
+        GA_PrimitiveTypeId packed_type = gtpacked.getPrim()->getTypeId();
+        if (packed_type != GU_PackedDisk::typeId())
+        {
+            GEO_FileRefiner sub_refiner = createSubRefiner(
+                    *path, m_pathAttrNames);
 
-            // Refine the embedded geometry, unless it is a file reference.
-            GA_PrimitiveTypeId packed_type = gtpacked.getPrim()->getTypeId();
-            if (packed_type != GU_PackedDisk::typeId())
-            {
-                GEO_FileRefiner sub_refiner = createSubRefiner(
-                        *path, m_pathAttrNames);
+            GU_ConstDetailHandle embedded_geo = geoGetPackedGeometry(gtpacked);
+            sub_refiner.refineDetail(embedded_geo, m_refineParms);
+        }
 
-                GU_ConstDetailHandle embedded_geo
-                        = geoGetPackedGeometry(gtpacked);
-                sub_refiner.refineDetail(embedded_geo, m_refineParms);
-            }
+        prototype_path = path;
 
-            return path;
-        });
+        if (!make_relative_path)
+            m_knownInstancedGeos.emplace(prototype_key, prototype_path);
+    }
 
     return instancer.addPrototype(gtpacked, prototype_path);
 }
@@ -827,7 +834,7 @@ GEO_FileRefiner::addNativePrototype(GT_GEOPrimPacked &gtpacked,
         path = path.ReplaceName(GEO_PointInstancerPrimTokens->Prototypes);
         path = path.AppendChild(name);
 
-        auto prototype_prim = new GT_PrimPackedInstance(&gtpacked);
+        auto prototype_prim = UTmakeIntrusive<GT_PrimPackedInstance>(&gtpacked);
         prototype_prim->setIsPrototype(true);
         prototype_prim->setIsVisible(false);
 
@@ -870,7 +877,7 @@ GEO_FileRefiner::addVolumeCollection(const GT_Primitive &field_prim,
 
     if (!volume)
     {
-        volume.reset(new GT_PrimVolumeCollection());
+        volume = UTmakeIntrusive<GT_PrimVolumeCollection>();
         GEO_PathHandle volume_path = m_collector.add(
                 target_volume_path, /* addNumericSuffix */ !custom_path, volume,
                 UT_Matrix4D::getIdentityMatrix(), m_topologyId, purpose,
@@ -945,7 +952,7 @@ GEO_FileRefiner::refineAgentShapes(
         // Otherwise, set up the top-level primitive for the shape.
         GEO_PathHandle path = m_collector.add(
                 root_path.AppendPath(shape_path), false,
-                new GT_PrimPackedInstance(
+                UTmakeIntrusive<GT_PrimPackedInstance>(
                         gtpacked, GT_Transform::identity(),
                         detail_attribs->mergeNewAttributes(
                                 gtpacked->getPointAttributes())),
@@ -1015,11 +1022,10 @@ GEOconvertMeshToSubd(GT_PrimitiveHandle &prim, bool force_subd)
         // Convert the mesh into a GT_PrimSubdivisionMesh.
         auto mesh = UTverify_cast<const GT_PrimPolygonMesh *>(prim.get());
 
-        auto subd_mesh = new GT_PrimSubdivisionMesh(*mesh, scheme);
+        auto subd_mesh = UTmakeIntrusive<GT_PrimSubdivisionMesh>(*mesh, scheme);
         GT_Util::addStandardSubdTagsFromAttribs(*subd_mesh,
                                                 /* allow_uniform_parms */ true);
-
-        prim.reset(subd_mesh);
+        prim = subd_mesh;
     }
 }
 
@@ -1368,7 +1374,7 @@ GEO_FileRefiner::addPrimitive( const GT_PrimitiveHandle& gtPrimIn )
             UT_Matrix4D agent_xform;
             packed_prim->getFullTransform4(agent_xform);
             agent_instance->setPrimitiveTransform(
-                new GT_Transform(&agent_xform, 1));
+                    UTmakeIntrusive<GT_Transform>(&agent_xform, 1));
 
             addPrimitive(agent_instance);
         }
@@ -1468,11 +1474,11 @@ GEO_FileRefiner::addPrimitive( const GT_PrimitiveHandle& gtPrimIn )
                     {
                         const UT_Array<exint> &indices = instancer_indices[i];
 
-                        GT_DataArrayHandle indirect = new GT_DANumeric<exint>(
-                            indices.data(), indices.entries(), 1);
+                        auto indirect = UTmakeIntrusive<GT_DANumeric<exint>>(
+                                indices.data(), indices.entries(), 1);
                         uniform = uniform->createIndirect(indirect);
 
-                        xforms = new GT_TransformArray();
+                        xforms = UTmakeIntrusive<GT_TransformArray>();
                         xforms->setEntries(indices.entries());
                         for (exint j = 0; j < indices.entries(); ++j)
                         {
@@ -1557,9 +1563,10 @@ GEO_FileRefiner::addPrimitive( const GT_PrimitiveHandle& gtPrimIn )
                     const bool visible = GEOisVisible(
                         *gtpacked, inst->uniform(), i);
                     const bool draw_bounds = GEOdrawBounds(*gtpacked, i);
-                    UT_IntrusivePtr<GT_PrimPackedInstance> packed_instance =
-                        new GT_PrimPackedInstance(gtpacked, xform_h, attribs,
-                                                  visible, draw_bounds);
+                    auto packed_instance
+                            = UTmakeIntrusive<GT_PrimPackedInstance>(
+                                    gtpacked, xform_h, attribs, visible,
+                                    draw_bounds);
 
                     GEO_PathHandle newPath = m_collector.add(
                             primPath, addNumericSuffix, packed_instance, xform,

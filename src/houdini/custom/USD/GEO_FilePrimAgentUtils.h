@@ -139,7 +139,7 @@ public:
 
     GT_PrimitiveHandle doSoftCopy() const override
     {
-        return new GT_PrimSkeleton(*this);
+        return UTmakeIntrusive<GT_PrimSkeleton>(*this);
     }
 
 private:
@@ -183,7 +183,7 @@ public:
 
     GT_PrimitiveHandle doSoftCopy() const override
     {
-        return new GT_PrimSkelAnimation(*this);
+        return UTmakeIntrusive<GT_PrimSkelAnimation>(*this);
     }
 
 private:
@@ -257,7 +257,7 @@ public:
 
     GT_PrimitiveHandle doSoftCopy() const override
     {
-        return new GT_PrimAgentDefinition(*this);
+        return UTmakeIntrusive<GT_PrimAgentDefinition>(*this);
     }
 
 private:
@@ -327,7 +327,7 @@ public:
 
     GT_PrimitiveHandle doSoftCopy() const override
     {
-        return new GT_PrimAgentInstance(*this);
+        return UTmakeIntrusive<GT_PrimAgentInstance>(*this);
     }
 
 private:

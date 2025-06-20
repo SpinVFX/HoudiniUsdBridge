@@ -87,7 +87,7 @@ public:
 
     GT_PrimitiveHandle doSoftCopy() const override
     {
-        return new GT_PrimVolumeCollection(*this);
+        return UTmakeIntrusive<GT_PrimVolumeCollection>(*this);
     }
 
 private:
