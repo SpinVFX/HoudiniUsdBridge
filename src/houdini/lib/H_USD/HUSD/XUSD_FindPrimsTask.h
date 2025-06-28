@@ -22,18 +22,22 @@
  *
  */
 
+#ifndef __XUSD_FindPrimsTask_h__
+#define __XUSD_FindPrimsTask_h__
+
 #include "HUSD_API.h"
 #include "XUSD_PathSet.h"
 #include "XUSD_Utils.h"
 #include <UT/UT_PathPattern.h>
-#include <UT/UT_Task.h>
 #include <UT/UT_ThreadSpecificValue.h>
+#include <SYS/SYS_Deprecated.h>
 #include <pxr/usd/usd/stage.h>
 #include <pxr/usd/usd/primRange.h>
 #include <pxr/usd/sdf/path.h>
 #include <pxr/base/tf/token.h>
 
 PXR_NAMESPACE_OPEN_SCOPE
+SYS_DEPRECATED_PUSH_DISABLE()
 
 class XUSD_SimpleAutoCollection;
 
@@ -43,7 +47,18 @@ class HUSD_API XUSD_FindPrimsTaskData
 {
 public:
     virtual ~XUSD_FindPrimsTaskData();
-    virtual void addToThreadData(UsdPrim &prim) = 0;
+    virtual void addToThreadData(const UsdPrim &prim, bool *prune) = 0;
+
+    /// Generally speaking, HUSD_FindPrims will never return the
+    /// HoudiniLayerInfo prim. But there are some circumstances where we
+    /// may wish to allow it.
+    void                 setAllowHoudiniLayerInfo(bool allow)
+                         { myAllowHoudiniLayerInfo = allow; }
+    bool                 allowHoudiniLayerInfo() const
+                         { return myAllowHoudiniLayerInfo; }
+
+private:
+    bool                 myAllowHoudiniLayerInfo = false;
 };
 
 // Subclass of XUSD_FindPrimsTaskData that specifically collects the SdfPaths
@@ -51,8 +66,14 @@ public:
 class HUSD_API XUSD_FindPrimPathsTaskData : public XUSD_FindPrimsTaskData
 {
 public:
+    XUSD_FindPrimPathsTaskData() = default;
     ~XUSD_FindPrimPathsTaskData() override;
-    void addToThreadData(UsdPrim &prim) override;
+
+    XUSD_FindPrimPathsTaskData(const XUSD_FindPrimPathsTaskData &) = delete;
+    XUSD_FindPrimPathsTaskData &operator=(const XUSD_FindPrimPathsTaskData &)
+            = delete;
+
+    void addToThreadData(const UsdPrim &prim, bool *prune) override;
 
     void gatherPathsFromThreads(XUSD_PathSet &paths);
 
@@ -73,10 +94,17 @@ private:
 class HUSD_API XUSD_FindUsdPrimsTaskData : public XUSD_FindPrimsTaskData
 {
 public:
+    XUSD_FindUsdPrimsTaskData() = default;
     ~XUSD_FindUsdPrimsTaskData() override;
-    void addToThreadData(UsdPrim &prim) override;
+
+    XUSD_FindUsdPrimsTaskData(const XUSD_FindUsdPrimsTaskData &) = delete;
+    XUSD_FindUsdPrimsTaskData &operator=(const XUSD_FindUsdPrimsTaskData &)
+            = delete;
+
+    void addToThreadData(const UsdPrim &prim, bool *prune) override;
 
     void gatherPrimsFromThreads(UT_Array<UsdPrim> &prims);
+    void gatherPrimsFromThreads(std::vector<UsdPrim> &prims);
 
 private:
     class FindUsdPrimsTaskThreadData
@@ -90,28 +118,29 @@ private:
     FindUsdPrimsTaskThreadDataTLS    myThreadData;
 };
 
-// Class for performing a multithreaded traversal of a stage guided by a
-// UT_PathPattern. Data is collected into an XUSD_FindPrimsTaskData object
-// by calling its addToThreadData method with all matching prims.
-class HUSD_API XUSD_FindPrimsTask : public UT_Task
-{
-public:
-    XUSD_FindPrimsTask(const UsdPrim& prim,
-            XUSD_FindPrimsTaskData &data,
-            const Usd_PrimFlagsPredicate &predicate,
-            const UT_PathPattern *pattern,
-            const XUSD_SimpleAutoCollection *autocollection);
+// Perform a multithreaded traversal of a stage guided by a UT_PathPattern.
+// Data is collected into an XUSD_FindPrimsTaskData object by calling its
+// addToThreadData method with all matching prims.
+HUSD_API void
+XUSDfindPrims(
+        const UsdPrim& prim,
+        XUSD_FindPrimsTaskData &data,
+        const Usd_PrimFlagsPredicate &predicate);
+HUSD_API void
+XUSDfindPrims(
+        const UsdPrim& prim,
+        XUSD_FindPrimsTaskData &data,
+        const Usd_PrimFlagsPredicate &predicate,
+        const UT_PathPattern *pattern);
+HUSD_API void
+XUSDfindPrims(
+        const UsdPrim& prim,
+        XUSD_FindPrimsTaskData &data,
+        const Usd_PrimFlagsPredicate &predicate,
+        const XUSD_SimpleAutoCollection *autocollection);
 
-    UT_Task *run() override;
-
-private:
-    UsdPrim                          myPrim;
-    XUSD_FindPrimsTaskData          &myData;
-    const Usd_PrimFlagsPredicate    &myPredicate;
-    const UT_PathPattern            *myPattern;
-    const XUSD_SimpleAutoCollection *myAutoCollection;
-    bool                             myVisited;
-};
-
+SYS_DEPRECATED_POP_DISABLE()
 PXR_NAMESPACE_CLOSE_SCOPE
+
+#endif
 

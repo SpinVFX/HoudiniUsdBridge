@@ -36,11 +36,11 @@ public:
 
     static const UT_StringHolder	&getHoudiniRendererPluginName();
     static const UT_StringHolder	&getKarmaRendererPluginName();
-    static const UT_StringHolder	&getHydraRendererPluginName();
+    static const UT_StringHolder	&getKarmaXpuRendererPluginName();
 
     static const UT_StringHolder	&getXformPrimType();
     static const UT_StringHolder	&getScopePrimType();
-    static const UT_StringHolder	&getLuxLightPrimType();
+    static const UT_StringHolder	&getGeomCameraPrimType();
     static const UT_StringHolder	&getGeomGprimPrimType();
     static const UT_StringHolder	&getGeomBoundablePrimType();
     static const UT_StringHolder	&getGeomImageablePrimType();
@@ -48,6 +48,16 @@ public:
     static const UT_StringHolder	&getOpenVDBAssetPrimType();
     static const UT_StringHolder	&getHoudiniFieldAssetPrimType();
     static const UT_StringHolder	&getPointInstancerPrimType();
+
+    static const UT_StringHolder	&getMaterialPrimType();
+    static const UT_StringHolder	&getMaterialPrimTypeName();
+    static const UT_StringHolder	&getShaderPrimType();
+    static const UT_StringHolder	&getShaderPrimTypeName();
+    static const UT_StringHolder	&getShadeNodeGraphPrimType();
+    static const UT_StringHolder	&getShadeNodeGraphPrimTypeName();
+
+    static const UT_StringHolder	&getLuxLightAPIName();
+    static const UT_StringHolder	&getGeomModelAPIName();
 
     static const UT_StringHolder	&getAutomaticPrimIdentifier();
     static const UT_StringHolder	&getDefaultPrimIdentifier();
@@ -71,6 +81,7 @@ public:
     static const UT_StringHolder	&getAttributePointOrientations();
     static const UT_StringHolder	&getAttributePointScales();
     static const UT_StringHolder	&getAttributePointVelocities();
+    static const UT_StringHolder	&getAttributePointAccelerations();
     static const UT_StringHolder	&getAttributePointAngularVelocities();
     static const UT_StringHolder	&getAttributePoints();
 
@@ -79,6 +90,10 @@ public:
     static const UT_StringHolder	&getAttributeVolumeFieldIndex();
 
     static const UT_StringHolder	&getAttributeExtentsHint();
+    static const UT_StringHolder	&getAttributeApplyDrawMode();
+    static const UT_StringHolder	&getAttributeCardGeometry();
+    static const UT_StringHolder	&getAttributeCardTexture(int);
+    static const UT_StringHolder	&getAttributeDrawMode();
     static const UT_StringHolder	&getAttributeDrawModeColor();
 
     static const UT_StringHolder	&getRelationshipPrototypes();
@@ -93,10 +108,10 @@ public:
     static const UT_StringHolder	&getReferenceTypeInherit();
     static const UT_StringHolder	&getReferenceTypeSpecialize();
 
-    static const UT_StringHolder	&getReferenceEditOpAppendFront();
-    static const UT_StringHolder	&getReferenceEditOpAppendBack();
-    static const UT_StringHolder	&getReferenceEditOpPrependFront();
-    static const UT_StringHolder	&getReferenceEditOpPrependBack();
+    static const UT_StringHolder	&getEditOpAppendFront();
+    static const UT_StringHolder	&getEditOpAppendBack();
+    static const UT_StringHolder	&getEditOpPrependFront();
+    static const UT_StringHolder	&getEditOpPrependBack();
 
     static const UT_StringHolder	&getPurposeDefault();
     static const UT_StringHolder	&getPurposeProxy();
@@ -108,6 +123,7 @@ public:
     static const UT_StringHolder	&getKindGroup();
     static const UT_StringHolder	&getKindAssembly();
     static const UT_StringHolder	&getKindAutomatic();
+    static const UT_StringHolder	&getFakeKindXform();
 
     static const UT_StringHolder	&getDrawModeDefault();
     static const UT_StringHolder	&getDrawModeOrigin();
@@ -121,6 +137,7 @@ public:
 
     static const UT_StringHolder	&getDefaultBgeoPathAttr();
     static const UT_StringHolder	&getDefaultBgeoAttribPattern();
+    static const UT_StringHolder	&getDefaultBgeoIndexAttribPattern();
     static const UT_StringHolder	&getDefaultBgeoPathPrefix();
 
     static const UT_StringHolder	&getMatPurposeAll();
@@ -129,11 +146,20 @@ public:
 
     static const UT_StringHolder	&getInterpolationConstant();
     static const UT_StringHolder	&getInterpolationVarying();
+    static const UT_StringHolder	&getInterpolationVertex();
 
     static const UT_StringHolder	&getUpAxisY();
     static const UT_StringHolder	&getUpAxisZ();
 
+    static const UT_StringHolder	&getInvisible();
+    static const UT_StringHolder	&getBlockVariantValue();
+    static const UT_StringHolder	&getInlineUsdaStringPrefix();
+
     static const UT_StringHolder	&getIconCustomDataName();
+    static const UT_StringHolder	&getCatalogParentPathCustomDataName();
+    static const UT_StringHolder	&getResolverContextStringsCustomDataName();
+    static const UT_StringHolder        &getRenderStatsDelegateKey();
+    static const UT_StringHolder        &getVolumeSopSuffix();
 };
 
 #endif

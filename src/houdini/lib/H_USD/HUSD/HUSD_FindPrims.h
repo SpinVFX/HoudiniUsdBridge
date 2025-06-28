@@ -34,8 +34,8 @@
 #include <UT/UT_StringArray.h>
 #include <UT/UT_UniquePtr.h>
 #include <UT/UT_VectorTypes.h>
+#include <SYS/SYS_Types.h>
 #include <pxr/pxr.h>
-#include <vector>
 
 PXR_NAMESPACE_OPEN_SCOPE
 class XUSD_PathPattern;
@@ -43,6 +43,7 @@ PXR_NAMESPACE_CLOSE_SCOPE
 
 class HUSD_PathSet;
 class HUSD_TimeCode;
+template <typename T> class UT_Array;
 
 class HUSD_API HUSD_FindPrims : public UT_NonCopyable
 {
@@ -78,11 +79,17 @@ public:
     const HUSD_PathSet	&getExpandedPathSet() const;
     const HUSD_PathSet	&getCollectionAwarePathSet() const;
     const HUSD_PathSet	&getExcludedPathSet(bool skipdescendants) const;
+    const HUSD_PathSet	&getMissingExplicitPathSet() const;
+    const HUSD_PathSet	&getExpandedOrMissingExplicitPathSet() const;
 
     void		 setTraversalDemands(HUSD_PrimTraversalDemands demands);
     HUSD_PrimTraversalDemands traversalDemands() const;
     void                 setAssumeWildcardsAroundPlainTokens(bool assume);
     bool                 assumeWildcardsAroundPlainTokens() const;
+    void                 setTrackMissingExplicitPrimitives(bool track_missing);
+    bool                 trackMissingExplicitPrimitives() const;
+    void                 setWarnMissingExplicitPrimitives(bool warn_missing);
+    bool                 warnMissingExplicitPrimitives() const;
     void                 setCaseSensitive(bool casesensitive);
     bool                 caseSensitive() const;
 
@@ -93,6 +100,13 @@ public:
     bool		 addPattern(const UT_StringRef &pattern,
 				int nodeid,
 				const HUSD_TimeCode &timecode);
+    // Evaluate the supplied USD path expression and add the resulting
+    // primitives to our data.
+    bool		 addPathExpression(const UT_StringRef &path_expr);
+
+    // These functions exist for use by the Prune node and Collection::1.0
+    // LOPs which used a multiparm for determining prim membership instead
+    // of the single path pattern used everywhere else.
     bool		 addPrimitiveType(const UT_StringRef &primtype);
     bool		 addPrimitiveKind(const UT_StringRef &primkind);
     bool		 addPrimitivePurpose(const UT_StringRef &primpurpose);
@@ -106,15 +120,22 @@ public:
     bool		 addDescendants();
     bool		 addAncestors();
 
-    const UT_StringMap<UT_Int64Array>	&getPointInstancerIds() const;
+    const UT_StringMap<UT_Array<int64>>
+                        &getPointInstancerIds() const;
     bool		 getExcludedPointInstancerIds(
-				UT_StringMap<UT_Int64Array> &excludedids,
+				UT_StringMap<UT_Array<int64>> &excludedids,
 				const HUSD_TimeCode &timecode) const;
 
     bool		 getIsEmpty() const;
     bool		 getFindPointInstancerIds() const;
     bool		 getIsTimeVarying() const;
     bool		 allowInstanceProxies() const;
+
+    /// Generally speaking, HUSD_FindPrims will never return the
+    /// HoudiniLayerInfo prim. But there are some circumstances where we
+    /// may wish to allow it.
+    void                 setAllowHoudiniLayerInfo(bool allow);
+    bool                 allowHoudiniLayerInfo() const;
 
     /// Returns a collection path, if only a single collection was added.
     /// Returns an empty string, if primitive target consists of more than 
@@ -131,6 +152,18 @@ public:
     const UT_StringHolder &getLastError() const
 			 { return myLastError; }
 
+    // Creates a prim pattern that executes the supplied path expression.
+    // It is safe to use the same string for th input and output parameters.
+    static bool          primPatternFromPathExpression(
+                                 const UT_StringRef &path_expr,
+                                 UT_StringHolder &pattern);
+    // Creates a path expression if the prim pattern contains only an
+    // invocatino of a path expression auto collection.
+    // It is safe to use the same string for th input and output parameters.
+    static bool          pathExpressionFromPrimPattern(
+                                 const UT_StringRef &pattern,
+                                 UT_StringHolder &path_expr);
+
 private:
     bool		 addPattern(const PXR_NS::XUSD_PathPattern &pattern,
                                 int nodeid);
@@ -143,6 +176,8 @@ private:
     UT_StringHolder			 myLastError;
     bool				 myFindPointInstancerIds;
     bool				 myAssumeWildcardsAroundPlainTokens;
+    bool                                 myTrackMissingExplicitPrimitives;
+    bool                                 myWarnMissingExplicitPrimitives;
     bool				 myCaseSensitive;
 };
 

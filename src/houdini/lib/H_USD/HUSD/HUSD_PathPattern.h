@@ -31,6 +31,7 @@
 #include <UT/UT_PathPattern.h>
 
 class HUSD_TimeCode;
+class UT_AutoInterrupt;
 
 class HUSD_API HUSD_PathPattern : public UT_PathPattern
 {
@@ -43,6 +44,8 @@ public:
 				int nodeid,
 				const HUSD_TimeCode &timecode);
 			~HUSD_PathPattern() override;
+
+    bool                 getMayBeTimeVarying() const;
 
 protected:
                          HUSD_PathPattern(bool case_sensitive,
@@ -58,7 +61,8 @@ private:
     void		 initializeSpecialTokens(HUSD_AutoAnyLock &lock,
 				HUSD_PrimTraversalDemands demands,
 				int nodeid,
-				const HUSD_TimeCode &timecode);
+				const HUSD_TimeCode &timecode,
+                                UT_AutoInterrupt &boss);
 };
 
 #endif

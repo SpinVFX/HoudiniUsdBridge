@@ -260,7 +260,7 @@ HUSD_FindInstanceIds::getInstanceIds(const HUSD_TimeCode &tc) const
 		{
 		    std::set<int>	 matchedids;
 		    husd_IdHolder	 ids = { availableids, matchedids };
-		    UT_String		 pattern(myInstanceIdPattern.c_str(),1);
+		    UT_String		 pattern(myInstanceIdPattern.c_str(),true);
                     UT_String            error;
 
 		    parsePattern(myAnyLock, tc, myPrimPath,

@@ -41,7 +41,7 @@ PXR_NAMESPACE_OPEN_SCOPE
 /// prims (which translate scene data into drawable representations) and hydra
 /// renderpasses (which draw the scene to the framebuffer).
 ///
-class BRAY_HdKarma final : public HdRendererPlugin
+class BRAY_HdKarma : public HdRendererPlugin
 {
 public:
     BRAY_HdKarma() = default;
@@ -65,7 +65,10 @@ public:
 
     /// Checks to see if the embree plugin is supported on the running system
     ///
-    bool IsSupported() const override;
+    bool IsSupported(bool gpuEnabled = true) const override;
+
+    /// XPU or CPU
+    virtual bool isXPU() const { return false; }
 
 private:
     // This class does not support copying.

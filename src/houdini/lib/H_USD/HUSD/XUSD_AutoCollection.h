@@ -29,7 +29,6 @@
 #include "HUSD_TimeCode.h"
 #include "HUSD_Utils.h"
 #include "XUSD_PathSet.h"
-#include "XUSD_PerfMonAutoCookEvent.h"
 #include <UT/UT_StringHolder.h>
 #include <pxr/usd/sdf/path.h>
 #include <pxr/usd/usd/stage.h>
@@ -52,49 +51,58 @@ public:
                          { }
 
     virtual bool         canCreateAutoCollection(const char *token) const = 0;
-    virtual XUSD_AutoCollection *create(const char *token,
-                                HUSD_AutoAnyLock &lock,
-                                HUSD_PrimTraversalDemands demands,
-                                int nodeid,
-                                const HUSD_TimeCode &timecode) const = 0;
+    virtual XUSD_AutoCollection *create(
+            const UT_StringHolder &collectionname,
+            const UT_StringArray &orderedargs,
+            const UT_StringMap<UT_StringHolder> &namedargs,
+            HUSD_AutoAnyLock &lock,
+            HUSD_PrimTraversalDemands demands,
+            int nodeid,
+            const HUSD_TimeCode &timecode) const = 0;
 };
 
 template <class AutoCollection>
 class XUSD_SimpleAutoCollectionFactory : public XUSD_AutoCollectionFactory
 {
 public:
-                         XUSD_SimpleAutoCollectionFactory(const char *prefix)
-                             : myPrefix(prefix)
+                         XUSD_SimpleAutoCollectionFactory(const char *cname)
+                             : myCollectionName(cname)
                          { }
                         ~XUSD_SimpleAutoCollectionFactory() override
                          { }
 
     bool                 canCreateAutoCollection(
-                                const char *token) const override
+                                const char *cname) const override
     {
-        return (strncmp(token, myPrefix.c_str(), myPrefix.length()) == 0);
+        return (myCollectionName == cname);
     }
-    XUSD_AutoCollection *create(const char *token,
-                                HUSD_AutoAnyLock &lock,
-                                HUSD_PrimTraversalDemands demands,
-                                int nodeid,
-                                const HUSD_TimeCode &timecode) const override
+    XUSD_AutoCollection *create(
+            const UT_StringHolder &collectionname,
+            const UT_StringArray &orderedargs,
+            const UT_StringMap<UT_StringHolder> &namedargs,
+            HUSD_AutoAnyLock &lock,
+            HUSD_PrimTraversalDemands demands,
+            int nodeid,
+            const HUSD_TimeCode &timecode) const override
     {
-        if (strncmp(token, myPrefix.c_str(), myPrefix.length()) == 0)
-            return new AutoCollection(token + myPrefix.length(),
+        if (collectionname == myCollectionName)
+            return new AutoCollection(collectionname, orderedargs, namedargs,
                 lock, demands, nodeid, timecode);
 
         return nullptr;
     }
 
 private:
-    UT_StringHolder      myPrefix;
+    UT_StringHolder      myCollectionName;
 };
 
 class HUSD_API XUSD_AutoCollection
 {
 public:
-                         XUSD_AutoCollection(const char *token,
+                         XUSD_AutoCollection(
+                                const UT_StringHolder &collectionname,
+                                const UT_StringArray &orderedargs,
+                                const UT_StringMap<UT_StringHolder> &namedargs,
                                 HUSD_AutoAnyLock &lock,
                                 HUSD_PrimTraversalDemands demands,
                                 int nodeid,
@@ -117,8 +125,47 @@ public:
                                 bool *prune_branch) const
                          { UT_ASSERT(false); return false; }
 
+    virtual bool         getMayBeTimeVarying() const
+                         { return myMayBeTimeVaryingSubPattern; }
+
     const UT_StringHolder &getTokenParsingError() const
                          { return myTokenParsingError; }
+
+    // Static functions for common argument parsing tasks.
+    static bool          parseBool(const UT_StringRef &str);
+    static bool          parseInt(const UT_StringRef &str,
+                                exint &i);
+    static bool          parseFloat(const UT_StringRef &str,
+                                fpreal64 &flt);
+    static bool          parseVector2(const UT_StringRef &str,
+                                UT_Vector2D &vec);
+    static bool          parseVector3(const UT_StringRef &str,
+                                UT_Vector3D &vec);
+    static bool          parseVector4(const UT_StringRef &str,
+                                UT_Vector4D &vec);
+    static bool          parseTimeRange(const UT_StringRef &str,
+                                fpreal64 &tstart,
+                                fpreal64 &tend,
+                                fpreal64 &tstep);
+
+    // Parse a source pattern string.
+    // Note that `timevaryingflag` will only ever be *set* (to `true`),
+    // (if the pattern is timevarying of course), but never *unset* (to `false`) 
+    static bool          parsePattern(const UT_StringRef &str,
+                                HUSD_AutoAnyLock &lock,
+                                HUSD_PrimTraversalDemands demands,
+                                int nodeid,
+                                const HUSD_TimeCode &timecode,
+                                XUSD_PathSet &paths,
+                                bool *timevaryingflag);
+    // Parse a source pattern string, but only return the first result.
+    static bool          parsePatternSingleResult(const UT_StringRef &str,
+                                HUSD_AutoAnyLock &lock,
+                                HUSD_PrimTraversalDemands demands,
+                                int nodeid,
+                                const HUSD_TimeCode &timecode,
+                                SdfPath &path,
+                                bool *timevaryingflag);
 
     static bool          canCreateAutoCollection(const char *token);
     static XUSD_AutoCollection *create(const char *token,
@@ -130,7 +177,9 @@ public:
     static void          registerPlugin(XUSD_AutoCollectionFactory *factory);
 
 protected:
-    UT_StringHolder              myToken;
+    UT_StringArray               myOrderedArgs;
+    UT_StringMap<UT_StringHolder>myNamedArgs;
+    bool                         myMayBeTimeVaryingSubPattern;
     HUSD_AutoAnyLock            &myLock;
     HUSD_PrimTraversalDemands    myDemands;
     int                          myNodeId;
@@ -139,13 +188,21 @@ protected:
     UT_StringHolder              myTokenParsingError;
 
 private:
+    // Proeprty related plugins were broken out into a separate file just to
+    // keep file size under control, but this meant having a separate plugin
+    // registration function for collections in XUSD_PropertAutoCollection.C.
+    static void registerPropertyPlugins();
+
     static UT_Array<XUSD_AutoCollectionFactory *> theFactories;
 };
 
 class HUSD_API XUSD_SimpleAutoCollection : public XUSD_AutoCollection
 {
 public:
-                         XUSD_SimpleAutoCollection(const char *token,
+                         XUSD_SimpleAutoCollection(
+                                const UT_StringHolder &collectionname,
+                                const UT_StringArray &orderedargs,
+                                const UT_StringMap<UT_StringHolder> &namedargs,
                                 HUSD_AutoAnyLock &lock,
                                 HUSD_PrimTraversalDemands demands,
                                 int nodeid,
@@ -162,7 +219,10 @@ public:
 class HUSD_API XUSD_RandomAccessAutoCollection : public XUSD_AutoCollection
 {
 public:
-                         XUSD_RandomAccessAutoCollection(const char *token,
+                         XUSD_RandomAccessAutoCollection(
+                                const UT_StringHolder &collectionname,
+                                const UT_StringArray &orderedargs,
+                                const UT_StringMap<UT_StringHolder> &namedargs,
                                 HUSD_AutoAnyLock &lock,
                                 HUSD_PrimTraversalDemands demands,
                                 int nodeid,

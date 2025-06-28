@@ -43,8 +43,9 @@ class XUSD_OverridesData;
 
 PXR_NAMESPACE_CLOSE_SCOPE
 
-class HUSD_TimeCode;
+class HUSD_ExpansionState;
 class HUSD_PathSet;
+class HUSD_TimeCode;
 
 class HUSD_API HUSD_Overrides : public UT_IntrusiveRefCounter<HUSD_Overrides>,
 				public UT_NonCopyable
@@ -53,17 +54,19 @@ public:
                  HUSD_Overrides();
                 ~HUSD_Overrides();
 
-    void         save(std::ostream &os) const;
+    void         save(std::ostream &os,
+                        const UT_Array<HUSD_OverridesLayerId> &layerids) const;
     bool         load(UT_IStream &is);
     void         copy(const HUSD_Overrides &src);
-    bool         isEmpty() const;
+    bool         isEmpty(const UT_Array<HUSD_OverridesLayerId> &layerids) const;
     bool         isEmpty(HUSD_OverridesLayerId layer_id) const;
 
-    void         clear(const UT_StringRef &fromprim =
-                         UT_StringHolder::theEmptyString);
+    void         clear(const UT_Array<HUSD_OverridesLayerId> &layerids,
+                        const UT_StringRef &fromprim =
+                            UT_StringHolder::theEmptyString);
     void         clear(HUSD_OverridesLayerId layer_id,
-                         const UT_StringRef &fromprim =
-                             UT_StringHolder::theEmptyString);
+                        const UT_StringRef &fromprim =
+                            UT_StringHolder::theEmptyString);
 
     bool         getDrawModeOverrides(const UT_StringRef &primpath,
                         UT_StringMap<UT_StringHolder> &overrides) const;
@@ -81,6 +84,12 @@ public:
                         const HUSD_FindPrims &prims,
                         const HUSD_TimeCode &timecode,
                         bool visible);
+    bool         getSelectableOverrides(const UT_StringRef &primpath,
+                        UT_StringMap<bool> &overrides) const;
+    bool         setSelectable(HUSD_AutoWriteOverridesLock &lock,
+                        const HUSD_FindPrims &prims,
+                        bool active, bool solo);
+    bool         clearSelectable(HUSD_AutoWriteOverridesLock &lock);
 
     bool         setSoloLights(HUSD_AutoWriteOverridesLock &lock,
                         const HUSD_FindPrims &prims);
@@ -96,10 +105,21 @@ public:
     bool         removeSoloGeometry(HUSD_AutoWriteOverridesLock &lock,
                         const HUSD_FindPrims &prims);
     bool         getSoloGeometry(HUSD_PathSet &paths) const;
+    bool         showPurpose(HUSD_AutoWriteOverridesLock &lock,
+                        const HUSD_FindPrims &prims,
+                        const UT_StringRef &purpose);
     bool         setDisplayOpacity(HUSD_AutoWriteOverridesLock &lock,
                         const HUSD_FindPrims &prims,
                         const HUSD_TimeCode &timecode,
                         fpreal opacity);
+
+    // Handle the expansion state auto-reveal. This may be implemented
+    // through various means, so the method names are being left
+    // intentionally vague.
+    bool         setExpansionStateDrawMode(HUSD_AutoAnyLock &lock,
+                        const HUSD_ExpansionState &expansionstate);
+    bool         setExpansionStateVisibility(HUSD_AutoAnyLock &lock,
+                        const HUSD_ExpansionState &expansionstate);
 
     // Indicate that this override's data is being authored on a stage.
     // We should only be locked to one XUSD_Data at a time, and we
