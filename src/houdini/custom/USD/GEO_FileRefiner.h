@@ -151,9 +151,10 @@ private:
     /// Create a new refiner and copy any settings that should be propagated to
     /// a sub-refiner.
     GEO_FileRefiner createSubRefiner(
-            const SdfPath& pathPrefix,
-            const UT_StringArray& pathAttrNames,
-            const GEO_AgentShapeInfoPtr& agentShapeInfo = nullptr);
+            const SdfPath& path_prefix,
+            const UT_StringArray& path_attr_names,
+            bool prefix_absolute_paths,
+            const GEO_AgentShapeInfoPtr& agent_shape_info = nullptr);
 
     /// Creates or returns the point instancer for the given primitive path.
     UT_IntrusivePtr<GT_PrimPointInstancer>

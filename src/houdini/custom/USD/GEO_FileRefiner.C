@@ -91,19 +91,20 @@ GEO_FileRefiner::~GEO_FileRefiner()
 
 GEO_FileRefiner
 GEO_FileRefiner::createSubRefiner(
-        const SdfPath &pathPrefix,
-        const UT_StringArray &pathAttrNames,
-        const GEO_AgentShapeInfoPtr &agentShapeInfo)
+        const SdfPath &path_prefix,
+        const UT_StringArray &path_attr_names,
+        bool prefix_absolute_paths,
+        const GEO_AgentShapeInfoPtr &agent_shape_info)
 {
-    GEO_FileRefiner subrefiner(m_collector, pathPrefix, pathAttrNames,
-                               m_prefixAbsolutePaths);
+    GEO_FileRefiner subrefiner(m_collector, path_prefix, path_attr_names,
+                               prefix_absolute_paths);
     subrefiner.m_overridePath = m_overridePath;
     subrefiner.m_handleUsdPackedPrims = m_handleUsdPackedPrims;
     subrefiner.m_handlePackedPrims = m_handlePackedPrims;
     subrefiner.m_handleAgents = m_handleAgents;
     subrefiner.m_handleNurbsSurfs = m_handleNurbsSurfs;
     subrefiner.m_agentShapeInfo =
-        agentShapeInfo ? agentShapeInfo : m_agentShapeInfo;
+        agent_shape_info ? agent_shape_info : m_agentShapeInfo;
 
     return subrefiner;
 }
@@ -805,7 +806,7 @@ GEO_FileRefiner::addPointInstancerPrototype(GT_PrimPointInstancer &instancer,
         if (packed_type != GU_PackedDisk::typeId())
         {
             GEO_FileRefiner sub_refiner = createSubRefiner(
-                    *path, m_pathAttrNames);
+                    *path, m_pathAttrNames, /*prefix_absolute_paths=*/true);
 
             GU_ConstDetailHandle embedded_geo = geoGetPackedGeometry(gtpacked);
             sub_refiner.refineDetail(embedded_geo, m_refineParms);
@@ -844,7 +845,8 @@ GEO_FileRefiner::addNativePrototype(GT_GEOPrimPacked &gtpacked,
                 m_agentShapeInfo);
 
         GEO_FileRefiner sub_refiner = createSubRefiner(
-                *prototype_path, m_pathAttrNames);
+                *prototype_path, m_pathAttrNames,
+                /*prefix_absolute_paths=*/true);
 
         GU_ConstDetailHandle embedded_geo = geoGetPackedGeometry(gtpacked);
         sub_refiner.refineDetail(embedded_geo, m_refineParms);
@@ -941,7 +943,8 @@ GEO_FileRefiner::refineAgentShapes(
                 || shape_gdp.countPrimitiveType(GA_PRIMSPHERE) == 1)
             {
                 GEO_FileRefiner sub_refiner = createSubRefiner(
-                        root_path, {}, shape_info);
+                        root_path, {}, /*prefix_absolute_paths=*/true,
+                        shape_info);
                 sub_refiner.m_overridePath = shape_path;
                 sub_refiner.refineDetail(
                         shape->shapeGeometry(*shapelib), m_refineParms);
@@ -960,7 +963,8 @@ GEO_FileRefiner::refineAgentShapes(
                 m_overridePurpose, m_agentShapeInfo);
 
         // Refine the shape's geometry underneath.
-        GEO_FileRefiner sub_refiner = createSubRefiner(*path, {}, shape_info);
+        GEO_FileRefiner sub_refiner = createSubRefiner(
+                *path, {}, /*prefix_absolute_paths=*/true, shape_info);
         sub_refiner.refineDetail(
                 shape->shapeGeometry(*shapelib), m_refineParms);
     }
@@ -1553,7 +1557,7 @@ GEO_FileRefiner::addPrimitive( const GT_PrimitiveHandle& gtPrimIn )
 
                         GEO_FileRefiner subRefiner = createSubRefiner(
                                 m_pathPrefix, m_pathAttrNames,
-                                m_agentShapeInfo);
+                                m_prefixAbsolutePaths, m_agentShapeInfo);
                         subRefiner.refineDetail(
                                 unpacked_detail, m_refineParms, xform_h);
 
@@ -1584,7 +1588,8 @@ GEO_FileRefiner::addPrimitive( const GT_PrimitiveHandle& gtPrimIn )
                         {
                             // Refine the embedded geometry underneath.
                             GEO_FileRefiner subRefiner = createSubRefiner(
-                                    *newPath, m_pathAttrNames);
+                                    *newPath, m_pathAttrNames,
+                                    /*prefix_absolute_paths=*/true);
                             subRefiner.refineDetail(gdh, m_refineParms);
                         }
                     }
@@ -1613,7 +1618,8 @@ GEO_FileRefiner::addPrimitive( const GT_PrimitiveHandle& gtPrimIn )
                     *gt_packed, instance_attribs, m_refineParms);
 
             GEO_FileRefiner subRefiner = createSubRefiner(
-                    m_pathPrefix, m_pathAttrNames, m_agentShapeInfo);
+                    m_pathPrefix, m_pathAttrNames, m_prefixAbsolutePaths,
+                    m_agentShapeInfo);
             subRefiner.refineDetail(unpacked_detail, m_refineParms, gt_xform);
         }
         else if (m_handlePackedPrims == GEO_PACKED_POINTINSTANCER)
@@ -1662,7 +1668,8 @@ GEO_FileRefiner::addPrimitive( const GT_PrimitiveHandle& gtPrimIn )
                         = geoGetPackedGeometry(*gt_packed);
 
                 GEO_FileRefiner sub_refiner = createSubRefiner(
-                        *path, m_pathAttrNames, m_agentShapeInfo);
+                        *path, m_pathAttrNames, /*prefix_absolute_paths=*/true,
+                        m_agentShapeInfo);
                 sub_refiner.refineDetail(embedded_geo, m_refineParms);
             }
         }
