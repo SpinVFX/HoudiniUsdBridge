@@ -1315,9 +1315,9 @@ XUSD_HydraGeoMesh::Sync(HdSceneDelegate *scene_delegate,
     }
 
     bool need_gt_update = (!myVertex || !gt_prim || myCounts.entries()==0);
+    bool top_update = HdChangeTracker::IsTopologyDirty(*dirty_bits, id);
 
-    if (need_gt_update || dirty_materials ||
-	HdChangeTracker::IsTopologyDirty(*dirty_bits, id))
+    if (need_gt_update || dirty_materials || top_update)
     {
         TF_DEBUG(USDIMAGING_CHANGES).Msg(
             "[HUSD Updating Topology] Mesh path: <%s>\n",
@@ -1418,7 +1418,7 @@ XUSD_HydraGeoMesh::Sync(HdSceneDelegate *scene_delegate,
 	    }
 	}
 	
-	if(dirty_materials)
+	if(dirty_materials || top_update)
 	{
 	    auto &subsets = top.GetGeomSubsets();
 	    if(subsets.size() > 0)
@@ -1433,7 +1433,7 @@ XUSD_HydraGeoMesh::Sync(HdSceneDelegate *scene_delegate,
                     HUSD_Path matname(subset.materialId);
 
 		    // UTdebugPrint("Subset name", subset.id.GetText());
-		    // UTdebugPrint("Material =", mapname);
+		    // UTdebugPrint("Material =", matname.pathStr());
 		    // UTdebugPrint("# faces =", subset.indices.size());
 		    auto entry = myHydraPrim.scene().materials().find(matname);
 		    if(entry != myHydraPrim.scene().materials().end())
