@@ -25,6 +25,7 @@
 #include <PXL/PXL_Common.h>
 #include <UT/UT_Assert.h>
 #include <UT/UT_Debug.h>
+#include <UT/UT_EnvControl.h>
 #include <UT/UT_ErrorLog.h>
 #include <UT/UT_JSONWriter.h>
 #include <UT/UT_Options.h>
@@ -57,7 +58,6 @@
 #include <tuple>
 #include <utility>
 #include <string.h>
-
 
 #if defined(WIN32)
 // Define hashing functions to store an HdAovSettingsMap in a VtValue.
@@ -2061,7 +2061,16 @@ XUSD_RenderSettings::collectAovs(TfTokenVector &aovs,
         HUSD_CustomProductAction custom_product_action,
         HdAovDescriptorList &descs) const
 {
+    static UT_StringArray theHideProductTypes = []()
+    {
+        UT_String product_types_str =
+            UT_EnvControl::getString(ENV_HOUDINI_HIDE_PRODUCT_TYPES);
+        UT_StringArray product_types;
+        product_types_str.tokenize(product_types, " \t\n;");
+        return product_types;
+    }();
     int         num_raster = 0;
+
     for (auto &&p : myProducts)
     {
         // If the product isn't a raster product, we will likely skip the AOVs
@@ -2079,6 +2088,14 @@ XUSD_RenderSettings::collectAovs(TfTokenVector &aovs,
                 continue;
             if (!requireAovs)
                 continue;
+        }
+        else if (custom_product_action == CUSTOM_PRODUCT_ADD_AOVS &&
+                 theHideProductTypes.find(p->productType().GetText()) >= 0)
+        {
+            // If the product type matches the env var listing product types
+            // that renderers want to hide, then don't return the associated
+            // AOVs.
+            continue;
         }
         else
         {
