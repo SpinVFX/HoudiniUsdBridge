@@ -99,6 +99,22 @@ namespace
         }
     }
 
+    SdfAttributeSpecHandle
+    getOrCreateAttributeSpec(const SdfPrimSpecHandle &primspec,
+        const TfToken &attributename,
+        const SdfValueTypeName &attributetype)
+    {
+        SdfAttributeSpecHandle attributespec =
+            primspec->GetAttributeAtPath(
+                SdfPath::ReflexiveRelativePath().AppendProperty(
+                    attributename));
+        if (!attributespec)
+            attributespec = SdfAttributeSpec::New(primspec,
+                attributename, attributetype);
+
+        return attributespec;
+    }
+
     bool
     getLocalPrimVisibility(const SdfLayerRefPtr &layer,
             const UsdGeomImageable &imageable,
@@ -107,11 +123,11 @@ namespace
         auto primspec = layer->GetPrimAtPath(imageable.GetPath());
         if (primspec)
         {
-            const SdfPath visspecpath =
-                imageable.GetPath().AppendProperty(UsdGeomTokens->visibility);
             SdfAttributeSpecHandle visspec;
 
-            visspec = primspec->GetAttributeAtPath(visspecpath);
+            visspec = primspec->GetAttributeAtPath(
+                SdfPath::ReflexiveRelativePath().AppendProperty(
+                    UsdGeomTokens->visibility));
             if (visspec && visspec->HasDefaultValue())
             {
                 VtValue value = visspec->GetDefaultValue();
@@ -136,13 +152,8 @@ namespace
         primspec = SdfCreatePrimInLayer(layer, path);
         if (primspec)
         {
-            const SdfPath visspecpath =
-                path.AppendProperty(UsdGeomTokens->visibility);
-            SdfAttributeSpecHandle visspec;
-
-            visspec = primspec->GetAttributeAtPath(visspecpath);
-            if (!visspec)
-                visspec = SdfAttributeSpec::New(primspec,
+            SdfAttributeSpecHandle visspec =
+                getOrCreateAttributeSpec(primspec,
                     UsdGeomTokens->visibility,
                     SdfValueTypeNames->Token);
             if (visspec)
@@ -162,8 +173,8 @@ namespace
             SdfAttributeSpecHandle	 visspec;
 
             visspec = primspec->GetAttributeAtPath(
-                SdfPath::ReflexiveRelativePath().
-                AppendProperty(UsdGeomTokens->visibility));
+                SdfPath::ReflexiveRelativePath().AppendProperty(
+                    UsdGeomTokens->visibility));
             if (visspec)
             {
                 primspec->RemoveProperty(visspec);
@@ -472,10 +483,10 @@ namespace
                         addApiSchema(primspec,
                             UsdSchemaRegistry::GetSchemaTypeName(
                                 TfType::Find<UsdGeomModelAPI>()));
-                        drawmodespec = SdfAttributeSpec::New(primspec,
+                        drawmodespec = getOrCreateAttributeSpec(primspec,
                             UsdGeomTokens->modelDrawMode,
                             SdfValueTypeNames->Token);
-                        applydrawmodespec = SdfAttributeSpec::New(primspec,
+                        applydrawmodespec = getOrCreateAttributeSpec(primspec,
                             UsdGeomTokens->modelApplyDrawMode,
                             SdfValueTypeNames->Bool);
                         drawmodespec->SetDefaultValue(
@@ -567,7 +578,7 @@ namespace
                         addApiSchema(primspec,
                             UsdSchemaRegistry::GetSchemaTypeName(
                                 TfType::Find<UsdGeomModelAPI>()));
-                        visibilityspec = SdfAttributeSpec::New(primspec,
+                        visibilityspec = getOrCreateAttributeSpec(primspec,
                             UsdGeomTokens->visibility,
                             SdfValueTypeNames->Token);
                         visibilityspec->SetDefaultValue(
@@ -624,8 +635,8 @@ HUSD_Overrides::getDrawModeOverrides(const UT_StringRef &primpath,
             SdfAttributeSpecHandle   drawmodespec;
 
             drawmodespec = primspec->GetAttributeAtPath(
-                SdfPath::ReflexiveRelativePath().
-                AppendProperty(UsdGeomTokens->modelDrawMode));
+                SdfPath::ReflexiveRelativePath().AppendProperty(
+                    UsdGeomTokens->modelDrawMode));
             if (drawmodespec)
             {
                 VtValue              value = drawmodespec->GetDefaultValue();
@@ -679,8 +690,8 @@ HUSD_Overrides::setDrawMode(HUSD_AutoWriteOverridesLock &lock,
 		    SdfAttributeSpecHandle	 drawmodespec;
 
 		    drawmodespec = primspec->GetAttributeAtPath(
-			SdfPath::ReflexiveRelativePath().
-			AppendProperty(UsdGeomTokens->modelDrawMode));
+			SdfPath::ReflexiveRelativePath().AppendProperty(
+			    UsdGeomTokens->modelDrawMode));
 		    if (drawmodespec)
 		    {
                         removeApiSchema(primspec,
@@ -716,7 +727,7 @@ HUSD_Overrides::setDrawMode(HUSD_AutoWriteOverridesLock &lock,
 			{
 			    SdfAttributeSpecHandle	 drawmodespec;
 
-			    drawmodespec = SdfAttributeSpec::New(primspec,
+			    drawmodespec = getOrCreateAttributeSpec(primspec,
 				UsdGeomTokens->modelDrawMode,
 				SdfValueTypeNames->Token);
 			    if (drawmodespec)
@@ -837,8 +848,8 @@ HUSD_Overrides::getVisibleOverrides(const UT_StringRef &primpath,
             SdfAttributeSpecHandle   visspec;
 
             visspec = primspec->GetAttributeAtPath(
-                SdfPath::ReflexiveRelativePath().
-                AppendProperty(UsdGeomTokens->visibility));
+                SdfPath::ReflexiveRelativePath().AppendProperty(
+                    UsdGeomTokens->visibility));
             if (visspec)
             {
                 VtValue              value = visspec->GetDefaultValue();
@@ -962,8 +973,8 @@ HUSD_Overrides::getSelectableOverrides(const UT_StringRef &primpath,
             SdfAttributeSpecHandle   selspec;
 
             selspec = primspec->GetAttributeAtPath(
-                SdfPath::ReflexiveRelativePath().
-                AppendProperty(UsdHoudiniTokens->houdiniSelectable));
+                SdfPath::ReflexiveRelativePath().AppendProperty(
+                    UsdHoudiniTokens->houdiniSelectable));
             if (selspec)
             {
                 VtValue              value = selspec->GetDefaultValue();
@@ -1024,8 +1035,8 @@ HUSD_Overrides::setSelectable(HUSD_AutoWriteOverridesLock &lock,
                     SdfAttributeSpecHandle	 selspec;
 
                     selspec = primspec->GetAttributeAtPath(
-                        SdfPath::ReflexiveRelativePath().
-                        AppendProperty(UsdHoudiniTokens->houdiniSelectable));
+                        SdfPath::ReflexiveRelativePath().AppendProperty(
+                            UsdHoudiniTokens->houdiniSelectable));
                     if (selspec)
                     {
                         removeApiSchema(primspec,
@@ -1050,7 +1061,7 @@ HUSD_Overrides::setSelectable(HUSD_AutoWriteOverridesLock &lock,
                 {
                     SdfAttributeSpecHandle	 selspec;
 
-                    selspec = SdfAttributeSpec::New(primspec,
+                    selspec = getOrCreateAttributeSpec(primspec,
                         UsdHoudiniTokens->houdiniSelectable,
                         SdfValueTypeNames->Bool);
                     if (selspec)
@@ -1200,7 +1211,7 @@ HUSD_Overrides::setSoloGeometry(HUSD_AutoWriteOverridesLock &lock,
 
     myVersionId++;
     layer->Clear();
-    // Preserve the expanded list of soloed paths, without any modifiction.
+    // Preserve the expanded list of soloed paths, without any modification.
     // Just the exact paths specified by the user.
     HUSDsetSoloGeometryPaths(layer, prims.getExpandedPathSet());
 
@@ -1245,7 +1256,7 @@ HUSD_Overrides::setSoloGeometry(HUSD_AutoWriteOverridesLock &lock,
                 {
                     SdfAttributeSpecHandle	 visspec;
 
-                    visspec = SdfAttributeSpec::New(primspec,
+                    visspec = getOrCreateAttributeSpec(primspec,
                         UsdGeomTokens->visibility,
                         SdfValueTypeNames->Token);
                     if (visspec)
@@ -1271,7 +1282,7 @@ HUSD_Overrides::setSoloGeometry(HUSD_AutoWriteOverridesLock &lock,
             {
                 SdfAttributeSpecHandle	 visspec;
 
-                visspec = SdfAttributeSpec::New(primspec,
+                visspec = getOrCreateAttributeSpec(primspec,
                     UsdGeomTokens->visibility,
                     SdfValueTypeNames->Token);
                 if (visspec)
@@ -1345,7 +1356,7 @@ HUSD_Overrides::setDisplayOpacity(HUSD_AutoWriteOverridesLock &lock,
 		    {
 			SdfAttributeSpecHandle	 opacspec;
 
-			opacspec = SdfAttributeSpec::New(primspec,
+			opacspec = getOrCreateAttributeSpec(primspec,
 			    UsdGeomTokens->primvarsDisplayOpacity,
 			    SdfValueTypeNames->FloatArray);
 
@@ -1450,7 +1461,7 @@ HUSD_Overrides::showPurpose(HUSD_AutoWriteOverridesLock &lock,
                         if (primspec)
                         {
                             SdfAttributeSpecHandle purposespec
-                                = SdfAttributeSpec::New(
+                                = getOrCreateAttributeSpec(
                                     primspec, UsdGeomTokens->purpose,
                                     SdfValueTypeNames->Token);
 
@@ -1467,7 +1478,7 @@ HUSD_Overrides::showPurpose(HUSD_AutoWriteOverridesLock &lock,
                         if (primspec)
                         {
                             SdfAttributeSpecHandle visspec
-                                = SdfAttributeSpec::New(
+                                = getOrCreateAttributeSpec(
                                     primspec, UsdGeomTokens->visibility,
                                     SdfValueTypeNames->Token);
 

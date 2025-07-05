@@ -1192,6 +1192,24 @@ husdBindMaterial(
             UsdShadeTokens->strongerThanDescendants);
 }
 
+void
+husdClearAnimSource(const SdfPrimSpecHandle &prim_spec)
+{
+    // Apply the SkelBindingAPI since we're authoring skel:animationSource.
+    VtValue listopval = prim_spec->GetInfo(UsdTokens->apiSchemas);
+    SdfTokenListOp listop = listopval.Get<SdfTokenListOp>();
+    auto items = listop.GetPrependedItems();
+    items.push_back(UsdSkelTokens->SkelBindingAPI);
+    listop.SetPrependedItems(items);
+    prim_spec->SetInfo(UsdTokens->apiSchemas, VtValue::Take(listop));
+
+    // Author an empty skel:animationSource relationship.
+    SdfRelationshipSpecHandle rel_spec = SdfRelationshipSpec::New(
+            prim_spec, UsdSkelTokens->skelAnimationSource,
+            /*custom=*/false);
+    rel_spec->GetTargetPathList().ClearEditsAndMakeExplicit();
+}
+
 /// Author the instancing-related overlays for the exemplars to be baked, and
 /// the instances of those exemplars.
 void
@@ -1239,6 +1257,16 @@ husdCreateInstances(
         prim_spec->GetReferenceList().ClearEditsAndMakeExplicit();
         prim_spec->GetReferenceList().Append(
                 SdfReference(std::string(), target_path.sdfPath()));
+
+        // In Hydra 2, the skel binding data (in particular,
+        // skel:animationSource) participates in instance aggregation,
+        // regardless of whether there are actually SkelRoot prims underneath.
+        // There is typically a unique SkelAnimation bound to each SkelRoot for
+        // the agent's pose.
+        // Since we're baking skinning for the prototype, we need to author an
+        // empty skel:animationSource (overriding the inherited animation
+        // binding) so Hydra can actually aggregate these instances together.
+        husdClearAnimSource(prim_spec);
 
         SdfAttributeSpecHandle vis_spec = SdfAttributeSpec::New(
                 prim_spec, UsdGeomTokens->visibility, SdfValueTypeNames->Token);
