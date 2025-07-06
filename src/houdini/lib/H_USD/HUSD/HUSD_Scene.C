@@ -1834,7 +1834,8 @@ HUSD_Scene::clearPendingRemovalPrims()
             std::cout << "Testing rprims in scene..." << std::endl;
         for (auto &&it : myIdToPrimMap)
         {
-            dynamic_cast<XUSD_HydraGeoPrim *>(it.second);
+            SYS_MAYBE_UNUSED XUSD_HydraGeoPrim *gprim =
+		dynamic_cast<XUSD_HydraGeoPrim *>(it.second);
             if (theDebugSceneLevel > 2)
                 std::cout << "    " << it.second->path().pathStr() << std::endl;
         }
