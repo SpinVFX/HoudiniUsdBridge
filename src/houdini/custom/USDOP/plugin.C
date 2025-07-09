@@ -26,7 +26,6 @@
 #include "SOP_LOP-2.0.h"
 #include "SOP_UnpackUSD.h"
 #include "SOP_UnpackUSD-2.0.h"
-#include "SOP_UsdPointInstancer.h"
 #include <OP/OP_OperatorTable.h>
 #include <UT/UT_DSOVersion.h>
 #include <SYS/SYS_Version.h>
@@ -50,7 +49,6 @@ newSopOperator(OP_OperatorTable* operators)
 
     operators->addOperator(PXR_NS::SOP_LOP2::createOperator());
     operators->addOperator(PXR_NS::SOP_UnpackUSD2::createOperator());
-    operators->addOperator(PXR_NS::SOP_UsdPointInstancer::createOperator());
 }
 
 ARCH_EXPORT

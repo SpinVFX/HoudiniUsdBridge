@@ -10,12 +10,10 @@ set( sources
     SOP_LOP-2.0.C
     SOP_UnpackUSD.C
     SOP_UnpackUSD-2.0.C
-    SOP_UsdPointInstancer.C
     XUSD_SelectionRuleAutoCollection.C
 )
 
 set( protoc_sources
     SOP_LOP-2.0.C
     SOP_UnpackUSD-2.0.C
-    SOP_UsdPointInstancer.C
 )
