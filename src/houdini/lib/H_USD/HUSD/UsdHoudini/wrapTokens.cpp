@@ -41,16 +41,6 @@ void wrapUsdHoudiniTokens()
 {
     pxr_boost::python::class_<UsdHoudiniTokensType, pxr_boost::python::noncopyable>
         cls("Tokens", pxr_boost::python::no_init);
-    _AddToken(cls, "character", UsdHoudiniTokens->character);
-    _AddToken(cls, "character_MultipleApplyTemplate_Binding", UsdHoudiniTokens->character_MultipleApplyTemplate_Binding);
-    _AddToken(cls, "character_MultipleApplyTemplate_Rig", UsdHoudiniTokens->character_MultipleApplyTemplate_Rig);
-    _AddToken(cls, "houdiniApexCharacterFiles", UsdHoudiniTokens->houdiniApexCharacterFiles);
-    _AddToken(cls, "houdiniApexCharacterRig", UsdHoudiniTokens->houdiniApexCharacterRig);
-    _AddToken(cls, "houdiniApexDeformJoints", UsdHoudiniTokens->houdiniApexDeformJoints);
-    _AddToken(cls, "houdiniApexShape", UsdHoudiniTokens->houdiniApexShape);
-    _AddToken(cls, "houdiniApexShape_MultipleApplyTemplate_Binding", UsdHoudiniTokens->houdiniApexShape_MultipleApplyTemplate_Binding);
-    _AddToken(cls, "houdiniApexShape_MultipleApplyTemplate_Input", UsdHoudiniTokens->houdiniApexShape_MultipleApplyTemplate_Input);
-    _AddToken(cls, "houdiniApexShape_MultipleApplyTemplate_Output", UsdHoudiniTokens->houdiniApexShape_MultipleApplyTemplate_Output);
     _AddToken(cls, "houdiniBackgroundimage", UsdHoudiniTokens->houdiniBackgroundimage);
     _AddToken(cls, "houdiniClippingRange", UsdHoudiniTokens->houdiniClippingRange);
     _AddToken(cls, "houdiniEditable", UsdHoudiniTokens->houdiniEditable);
@@ -65,15 +55,6 @@ void wrapUsdHoudiniTokens()
     _AddToken(cls, "houdiniProcedural_MultipleApplyTemplate_HoudiniProceduralPath", UsdHoudiniTokens->houdiniProcedural_MultipleApplyTemplate_HoudiniProceduralPath);
     _AddToken(cls, "houdiniProcedural_MultipleApplyTemplate_HoudiniProceduralType", UsdHoudiniTokens->houdiniProcedural_MultipleApplyTemplate_HoudiniProceduralType);
     _AddToken(cls, "houdiniSelectable", UsdHoudiniTokens->houdiniSelectable);
-    _AddToken(cls, "inheritAnimationLayers", UsdHoudiniTokens->inheritAnimationLayers);
-    _AddToken(cls, "primvarsHoudiniApexDeformJointIndices", UsdHoudiniTokens->primvarsHoudiniApexDeformJointIndices);
-    _AddToken(cls, "primvarsHoudiniApexDeformJointWeights", UsdHoudiniTokens->primvarsHoudiniApexDeformJointWeights);
-    _AddToken(cls, "sceneFiles", UsdHoudiniTokens->sceneFiles);
-    _AddToken(cls, "HoudiniApexCharacterAPI", UsdHoudiniTokens->HoudiniApexCharacterAPI);
-    _AddToken(cls, "HoudiniApexCharacterBindingAPI", UsdHoudiniTokens->HoudiniApexCharacterBindingAPI);
-    _AddToken(cls, "HoudiniApexScene", UsdHoudiniTokens->HoudiniApexScene);
-    _AddToken(cls, "HoudiniApexShapeBindingAPI", UsdHoudiniTokens->HoudiniApexShapeBindingAPI);
-    _AddToken(cls, "HoudiniApexShapeDeformAPI", UsdHoudiniTokens->HoudiniApexShapeDeformAPI);
     _AddToken(cls, "HoudiniCameraPlateAPI", UsdHoudiniTokens->HoudiniCameraPlateAPI);
     _AddToken(cls, "HoudiniEditableAPI", UsdHoudiniTokens->HoudiniEditableAPI);
     _AddToken(cls, "HoudiniFieldAsset", UsdHoudiniTokens->HoudiniFieldAsset);

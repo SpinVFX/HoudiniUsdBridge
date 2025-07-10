@@ -1305,45 +1305,6 @@ initSkelJointInfluenceAttribs(
     initSkelBindingAPI(fileprim);
 }
 
-/// Add the APEX joint influence attributes. The interpolation type must be
-/// either constant (for rigid deformation) or vertex.
-static void
-initApexJointInfluenceAttribs(
-        GEO_FilePrim &fileprim,
-        const VtIntArray &joint_indices,
-        const VtFloatArray &joint_weights,
-        int influences_per_pt,
-        const TfToken &interp_type,
-        const VtTokenArray &joints)
-{
-    GEO_FileProp *prop = fileprim.addProperty(
-            UsdHoudiniTokens->primvarsHoudiniApexDeformJointIndices,
-            SdfValueTypeNames->IntArray,
-            new GEO_FilePropConstantSource<VtIntArray>(joint_indices));
-    prop->addMetadata(UsdGeomTokens->interpolation, VtValue(interp_type));
-    prop->addMetadata(UsdGeomTokens->elementSize, VtValue(influences_per_pt));
-    prop->setValueIsDefault(true);
-    prop->setValueIsUniform(true);
-
-    prop = fileprim.addProperty(
-            UsdHoudiniTokens->primvarsHoudiniApexDeformJointWeights,
-            SdfValueTypeNames->FloatArray,
-            new GEO_FilePropConstantSource<VtFloatArray>(joint_weights));
-    prop->addMetadata(UsdGeomTokens->interpolation, VtValue(interp_type));
-    prop->addMetadata(UsdGeomTokens->elementSize, VtValue(influences_per_pt));
-    prop->setValueIsDefault(true);
-    prop->setValueIsUniform(true);
-
-    prop = fileprim.addProperty(
-            UsdHoudiniTokens->houdiniApexDeformJoints,
-            SdfValueTypeNames->TokenArray,
-            new GEO_FilePropConstantSource<VtTokenArray>(joints));
-    prop->setValueIsDefault(true);
-    prop->setValueIsUniform(true);
-
-    initAPISchemas(fileprim, {UsdHoudiniTokens->HoudiniApexShapeDeformAPI});
-}
-
 static VtTokenArray
 geoBuildJointOrder(
         const GT_DataArray &capture_attrib,
@@ -1487,7 +1448,7 @@ initCommonBoneCaptureAttrib(
             = prim_is_curve ? GEOgetInterpTokenFromCurveOwner(attr_owner) :
                               GEOgetInterpTokenFromMeshOwner(attr_owner);
     // When importing boneCapture from an agent, translate into the UsdSkel
-    // skinning attributes. Otherwise, use the APEX deformer schema.
+    // skinning attributes.
     if (agent_shape_info)
     {
         UT_Matrix4D geom_bind_xform(1.0);
@@ -1500,12 +1461,6 @@ initCommonBoneCaptureAttrib(
                 new GEO_FilePropConstantSource<VtTokenArray>(joints));
         prop->setValueIsDefault(true);
         prop->setValueIsUniform(true);
-    }
-    else
-    {
-        initApexJointInfluenceAttribs(
-                fileprim, indices, weights, influences_per_pt, interp,
-                joints);
     }
 }
 

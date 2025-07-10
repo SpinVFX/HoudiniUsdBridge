@@ -41,50 +41,10 @@ PXR_NAMESPACE_OPEN_SCOPE
 /// Use UsdHoudiniTokens like so:
 ///
 /// \code
-///     gprim.GetMyTokenValuedAttr().Set(UsdHoudiniTokens->character);
+///     gprim.GetMyTokenValuedAttr().Set(UsdHoudiniTokens->houdiniBackgroundimage);
 /// \endcode
 struct UsdHoudiniTokensType {
     USDHOUDINI_API UsdHoudiniTokensType();
-    /// \brief "character"
-    /// 
-    /// Property namespace prefix for the UsdHoudiniHoudiniApexCharacterBindingAPI schema.
-    const TfToken character;
-    /// \brief "character:__INSTANCE_NAME__:binding"
-    /// 
-    /// UsdHoudiniHoudiniApexCharacterBindingAPI
-    const TfToken character_MultipleApplyTemplate_Binding;
-    /// \brief "character:__INSTANCE_NAME__:rig"
-    /// 
-    /// UsdHoudiniHoudiniApexCharacterBindingAPI
-    const TfToken character_MultipleApplyTemplate_Rig;
-    /// \brief "houdini:apex:character:files"
-    /// 
-    /// UsdHoudiniHoudiniApexCharacterAPI
-    const TfToken houdiniApexCharacterFiles;
-    /// \brief "houdini:apex:character:rig"
-    /// 
-    /// UsdHoudiniHoudiniApexCharacterAPI
-    const TfToken houdiniApexCharacterRig;
-    /// \brief "houdini:apex:deform:joints"
-    /// 
-    /// UsdHoudiniHoudiniApexShapeDeformAPI
-    const TfToken houdiniApexDeformJoints;
-    /// \brief "houdini:apex:shape"
-    /// 
-    /// Property namespace prefix for the UsdHoudiniHoudiniApexShapeBindingAPI schema.
-    const TfToken houdiniApexShape;
-    /// \brief "houdini:apex:shape:__INSTANCE_NAME__:binding"
-    /// 
-    /// UsdHoudiniHoudiniApexShapeBindingAPI
-    const TfToken houdiniApexShape_MultipleApplyTemplate_Binding;
-    /// \brief "houdini:apex:shape:__INSTANCE_NAME__:input"
-    /// 
-    /// UsdHoudiniHoudiniApexShapeBindingAPI
-    const TfToken houdiniApexShape_MultipleApplyTemplate_Input;
-    /// \brief "houdini:apex:shape:__INSTANCE_NAME__:output"
-    /// 
-    /// UsdHoudiniHoudiniApexShapeBindingAPI
-    const TfToken houdiniApexShape_MultipleApplyTemplate_Output;
     /// \brief "houdini:backgroundimage"
     /// 
     /// UsdHoudiniHoudiniCameraPlateAPI
@@ -141,42 +101,6 @@ struct UsdHoudiniTokensType {
     /// 
     /// UsdHoudiniHoudiniSelectableAPI
     const TfToken houdiniSelectable;
-    /// \brief "inheritAnimationLayers"
-    /// 
-    /// UsdHoudiniHoudiniApexScene
-    const TfToken inheritAnimationLayers;
-    /// \brief "primvars:houdini:apex:deform:jointIndices"
-    /// 
-    /// UsdHoudiniHoudiniApexShapeDeformAPI
-    const TfToken primvarsHoudiniApexDeformJointIndices;
-    /// \brief "primvars:houdini:apex:deform:jointWeights"
-    /// 
-    /// UsdHoudiniHoudiniApexShapeDeformAPI
-    const TfToken primvarsHoudiniApexDeformJointWeights;
-    /// \brief "sceneFiles"
-    /// 
-    /// UsdHoudiniHoudiniApexScene
-    const TfToken sceneFiles;
-    /// \brief "HoudiniApexCharacterAPI"
-    /// 
-    /// Schema identifer and family for UsdHoudiniHoudiniApexCharacterAPI
-    const TfToken HoudiniApexCharacterAPI;
-    /// \brief "HoudiniApexCharacterBindingAPI"
-    /// 
-    /// Schema identifer and family for UsdHoudiniHoudiniApexCharacterBindingAPI
-    const TfToken HoudiniApexCharacterBindingAPI;
-    /// \brief "HoudiniApexScene"
-    /// 
-    /// Schema identifer and family for UsdHoudiniHoudiniApexScene
-    const TfToken HoudiniApexScene;
-    /// \brief "HoudiniApexShapeBindingAPI"
-    /// 
-    /// Schema identifer and family for UsdHoudiniHoudiniApexShapeBindingAPI
-    const TfToken HoudiniApexShapeBindingAPI;
-    /// \brief "HoudiniApexShapeDeformAPI"
-    /// 
-    /// Schema identifer and family for UsdHoudiniHoudiniApexShapeDeformAPI
-    const TfToken HoudiniApexShapeDeformAPI;
     /// \brief "HoudiniCameraPlateAPI"
     /// 
     /// Schema identifer and family for UsdHoudiniHoudiniCameraPlateAPI

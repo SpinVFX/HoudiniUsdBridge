@@ -23,7 +23,6 @@
  * NAME:	XUSD_ImagingEngine.C (HUSD Library, C++)
  */
 
-#include "XUSD_ApexAnimateSceneIndex.h"
 #include "XUSD_ImagingEngine.h"
 #include "XUSD_ImagingEngineHusk.h"
 
@@ -53,7 +52,6 @@ typedef XUSD_ImagingEngine *(*XUSD_ImagingEngineCreator)(
 struct XUSD_ImagingEngine::_AppSceneIndices
 {
     HdsiSceneGlobalsSceneIndexRefPtr     sceneGlobalsSceneIndex;
-    XUSD_ApexAnimateSceneIndexRefPtr     apexAnimateSceneIndex;
 };
 
 namespace
@@ -247,21 +245,6 @@ XUSD_ImagingEngine::SetActiveRenderSettingsPrimPath(SdfPath const &path)
     sgsi->SetActiveRenderSettingsPrimPath(path);
 }
 
-void
-XUSD_ImagingEngine::updateApexAnimateSceneIndex(
-        const UT_Array<GU_Detail*> &gdp_array) const
-{
-    if (ARCH_UNLIKELY(!_appSceneIndices)) {
-        return;
-    }
-    auto &sceneIndex = _appSceneIndices->apexAnimateSceneIndex;
-    if (ARCH_UNLIKELY(!sceneIndex)) {
-        return;
-    }
-
-    sceneIndex->updatePoints(gdp_array);
-}
-
 VtDictionary
 XUSD_ImagingEngine::GetRenderStats() const
 {
@@ -381,14 +364,6 @@ XUSD_ImagingEngine::_RegisterApplicationSceneIndices()
                 insertionPhase,
                 HdSceneIndexPluginRegistry::InsertionOrderAtStart
         );
-
-        HdSceneIndexPluginRegistry::GetInstance().RegisterSceneIndexForRenderer(
-                std::string(), // empty string implies all renderers
-                &XUSD_ImagingEngine::_AppendApexAnimateSceneIndexCallback,
-                /* inputArgs = */ nullptr,
-                insertionPhase,
-                HdSceneIndexPluginRegistry::InsertionOrderAtStart
-        );
     }
 }
 
@@ -449,27 +424,6 @@ XUSD_ImagingEngine::_AppendSceneGlobalsSceneIndexCallback(
     }
     TF_CODING_ERROR("Did not find appSceneIndices instance for %s",
             renderInstanceId.c_str());
-
-    return inputScene;
-}
-
-HdSceneIndexBaseRefPtr
-XUSD_ImagingEngine::_AppendApexAnimateSceneIndexCallback(
-        const std::string &renderInstanceId,
-        const HdSceneIndexBaseRefPtr &inputScene,
-        const HdContainerDataSourceHandle &inputArgs)
-{
-    _AppSceneIndicesSharedPtr indices =
-            s_renderInstanceTracker->GetInstance(renderInstanceId);
-    if (indices)
-    {
-        auto &sceneIndex = indices->apexAnimateSceneIndex;
-        sceneIndex = XUSD_ApexAnimateSceneIndex::New(inputScene);
-        sceneIndex->SetDisplayName("APEX Animate Scene Index");
-        return sceneIndex;
-    }
-    TF_CODING_ERROR("Did not find appSceneIndices instance for %s",
-                    renderInstanceId.c_str());
 
     return inputScene;
 }

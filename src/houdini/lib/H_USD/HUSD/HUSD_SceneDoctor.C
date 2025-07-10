@@ -104,14 +104,15 @@ XUSD_ValidationTaskData::addToKindThreadData(const UsdPrim &prim,
     UsdModelAPI childModelApi(prim);
     UsdModelAPI parentModelApi(parentPrim);
 
-    if(!(childModelApi && childModelApi.GetKind(&childKindtk)
-       && parentModelApi && parentModelApi.GetKind(&parentKindtk)))
-        UT_ASSERT(!"Couldn't properly load kind");
+    if (childModelApi)
+        childModelApi.GetKind(&childKindtk);
+    if (parentModelApi)
+        parentModelApi.GetKind(&parentKindtk);
 
     if(prim.IsPseudoRoot() || prim.GetParent().IsPseudoRoot())
         return ;
 
-    //lambda function to add a new error to the thread data object
+    // lambda function to add a new error to the thread data object
     auto addValidationError = [this, &prim] (int errorType)
     {
         auto *&threadData = myThreadData.get();
@@ -127,10 +128,8 @@ XUSD_ValidationTaskData::addToKindThreadData(const UsdPrim &prim,
         {
             addValidationError(HUSD_SceneDoctor::PARENT_PRIM_IS_NONE_KIND);
         }
-        return ;
     }
     // pre: both the parent and child have a kind that is not none.
-    // TODO: consider writing an assert here
     else if(KindRegistry::IsA(parentKindtk, KindTokens->model))
     {
         if(KindRegistry::IsA(parentKindtk, KindTokens->component)
@@ -144,7 +143,6 @@ XUSD_ValidationTaskData::addToKindThreadData(const UsdPrim &prim,
         if(KindRegistry::IsA(childKindtk, KindTokens->model))
         {
             addValidationError(HUSD_SceneDoctor::SUBCOMPONENT_HAS_MODEL_CHILD);
-            return ;
         }
     }
 }

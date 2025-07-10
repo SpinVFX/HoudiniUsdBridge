@@ -1,10 +1,5 @@
 set( sources
     module.cpp
-    wrapHoudiniApexScene.cpp
-    wrapHoudiniApexCharacterAPI.cpp
-    wrapHoudiniApexCharacterBindingAPI.cpp
-    wrapHoudiniApexShapeBindingAPI.cpp
-    wrapHoudiniApexShapeDeformAPI.cpp
     wrapHoudiniCameraPlateAPI.cpp
     wrapHoudiniEditableAPI.cpp
     wrapHoudiniFieldAsset.cpp

@@ -305,8 +305,6 @@ public:
     void                 handleCopTextureChange(bool time_changed);
     /// Set a callback that is run at the end of handleCopTextureChange.
     void		 setCopTextureChangeCallback(ImagingCallback cb);
-    void                 updateSIPointPositions(
-            const UT_Array<GU_Detail*> &gdp_array) const;
 
 private:
     class husd_ImagingPrivate;

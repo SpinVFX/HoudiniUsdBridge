@@ -1,7 +1,6 @@
 add_definitions( -DUSDHOUDINI_EXPORTS -DUSDMANTRA_EXPORTS )
 
 set( husd_sources
-    HUSD_ApexScene.C
     HUSD_Asset.C
     HUSD_AssetPath.C
     HUSD_BindMaterial.C
@@ -101,7 +100,6 @@ set( husd_sources
     HUSD_VexShaderTranslator.C
     HUSD_Xform.C
     HUSD_XformAdjust.C
-    XUSD_ApexAnimateSceneIndex.C
     XUSD_AttributeUtils.C
     XUSD_AutoCollection.C
     XUSD_Data.C
@@ -133,11 +131,6 @@ set( husd_sources
     XUSD_Tokens.C
     XUSD_Utils.C
 
-    UsdHoudini/houdiniApexScene.cpp
-    UsdHoudini/houdiniApexCharacterAPI.cpp
-    UsdHoudini/houdiniApexCharacterBindingAPI.cpp
-    UsdHoudini/houdiniApexShapeBindingAPI.cpp
-    UsdHoudini/houdiniApexShapeDeformAPI.cpp
     UsdHoudini/houdiniCameraPlateAPI.cpp
     UsdHoudini/houdiniEditableAPI.cpp
     UsdHoudini/houdiniFieldAsset.cpp
@@ -153,7 +146,6 @@ set( husd_sources
 
 set( husd_hdk_headers
     HUSD_API.h
-    HUSD_ApexScene.h
     HUSD_Asset.h
     HUSD_AssetPath.h
     HUSD_BindMaterial.h
@@ -247,7 +239,6 @@ set( husd_hdk_headers
     HUSD_VexShaderTranslator.h
     HUSD_Xform.h
     HUSD_XformAdjust.h
-    XUSD_ApexAnimateSceneIndex.h
     XUSD_AttributeUtils.h
     XUSD_AutoCollection.h
     XUSD_Data.h
@@ -277,11 +268,6 @@ set( husd_internal_headers
     XUSD_ImagingEngine.h
     XUSD_Skeleton.h
 
-    UsdHoudini/houdiniApexScene.h
-    UsdHoudini/houdiniApexCharacterAPI.h
-    UsdHoudini/houdiniApexCharacterBindingAPI.h
-    UsdHoudini/houdiniApexShapeBindingAPI.h
-    UsdHoudini/houdiniApexShapeDeformAPI.h
     UsdHoudini/houdiniCameraPlateAPI.h
     UsdHoudini/houdiniEditableAPI.h
     UsdHoudini/houdiniFieldAsset.h

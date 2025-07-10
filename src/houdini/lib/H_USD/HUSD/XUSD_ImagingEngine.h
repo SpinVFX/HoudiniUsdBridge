@@ -439,8 +439,6 @@ public:
 
     void        getRoot(GfMatrix4d &xform, bool &visible) const;
     void        setRoot(const GfMatrix4d &xform, bool visible);
-    void        updateApexAnimateSceneIndex(
-            const UT_Array<GU_Detail*> &gdp_array) const;
 
 protected:
     // ------------------  protected methods ------------------------------
@@ -454,10 +452,6 @@ protected:
     HdSceneIndexBaseRefPtr _AppendOverridesSceneIndices(
                                 const HdSceneIndexBaseRefPtr &inputScene);
     static HdSceneIndexBaseRefPtr _AppendSceneGlobalsSceneIndexCallback(
-                                const std::string &renderInstanceId,
-                                const HdSceneIndexBaseRefPtr &inputScene,
-                                const HdContainerDataSourceHandle &inputArgs);
-    static HdSceneIndexBaseRefPtr _AppendApexAnimateSceneIndexCallback(
                                 const std::string &renderInstanceId,
                                 const HdSceneIndexBaseRefPtr &inputScene,
                                 const HdContainerDataSourceHandle &inputArgs);

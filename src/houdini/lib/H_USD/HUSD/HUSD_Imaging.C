@@ -1787,15 +1787,6 @@ HUSD_Imaging::setRenderFocus(int x, int y) const
 }
 
 void
-HUSD_Imaging::updateSIPointPositions(
-        const UT_Array<GU_Detail*> &gdp_array) const
-{
-    if (myPrivate->myImagingEngine)
-        return myPrivate->myImagingEngine->
-            updateApexAnimateSceneIndex(gdp_array);
-}
-
-void
 HUSD_Imaging::clearRenderFocus() const
 {
     if(myPrivate->myImagingEngine)
@@ -2268,7 +2259,9 @@ HUSD_Imaging::runSlapcompIfNeeded(const COP_SlapcompViewInfo* view_info)
             !isSlapcompAOV(HdAovTokens->instanceId.GetText()))
             return;
 
-        mySlapcompProgramManager->runSlapcomp(input_fetcher, context);
+        mySlapcompProgramManager->runSlapcomp(input_fetcher, context,
+                                              false // should_build
+                                              );
     }
 }
 

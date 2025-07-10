@@ -75,10 +75,6 @@ ARCH_PRAGMA_PUSH
 ARCH_PRAGMA_MACRO_TOO_FEW_ARGUMENTS
 TF_DEFINE_PRIVATE_TOKENS(
     _tokens,
-    // gusd comes before HUSD, so we can't use the UsdHoudini tokens here.
-    ((houdiniApexDeformJoints, "houdini:apex:deform:joints"))
-    ((primvarsHoudiniApexDeformJointIndices, "primvars:houdini:apex:deform:jointIndices"))
-    ((primvarsHoudiniApexDeformJointWeights, "primvars:houdini:apex:deform:jointWeights"))
     ((lengthsSuffix, ":lengths"))
 );
 ARCH_PRAGMA_POP
@@ -1141,107 +1137,6 @@ Gusd_ExpandSTToUV(const GT_DataArrayHandle &st)
     return uv;
 }
 
-/// Translate the HoudiniApexShapeDeformAPI attributes back to the boneCapture
-/// attribute.
-static GT_DataArrayHandle
-gusdConvertToBoneCapture(
-        const UsdGeomPrimvar& indices_primvar,
-        const VtValue& indices_val,
-        UsdTimeCode time)
-{
-    const UsdPrim& prim = indices_primvar.GetAttr().GetPrim();
-    const UsdGeomPrimvar& weights_primvar = UsdGeomPrimvar(
-            prim.GetAttribute(_tokens->primvarsHoudiniApexDeformJointWeights));
-
-    // The jointWeights and jointIndices primvars must have the same
-    // elementSize, and interpolation.
-    VtValue weights_val;
-    if (!weights_primvar
-        || weights_primvar.GetInterpolation()
-                   != indices_primvar.GetInterpolation()
-        || weights_primvar.GetElementSize() != indices_primvar.GetElementSize()
-        || !weights_primvar.ComputeFlattened(&weights_val, time))
-    {
-        return nullptr;
-    }
-
-    const VtIntArray& indices = indices_val.Get<VtIntArray>();
-    const VtFloatArray& weights = weights_val.Get<VtFloatArray>();
-    if (indices.size() == 0 || weights.size() == 0
-        || indices.size() != weights.size())
-    {
-        return nullptr;
-    }
-
-    const UsdAttribute& joints_attr
-            = prim.GetAttribute(_tokens->houdiniApexDeformJoints);
-    VtValue joints_val;
-    if (!joints_attr.Get(&joints_val, time))
-        return nullptr;
-
-    GT_DataArrayHandle gt_joints = Gusd_ConvertStringArrayToGt<TfToken>(
-            joints_attr, joints_val);
-    if (!gt_joints || !gt_joints->entries())
-        return nullptr;
-
-    const exint num_joints = gt_joints->entries();
-
-    // We don't make use of the bind transforms (capture pose)
-    // stored in the boneCapture attribute, so just set to identity
-    // transforms. For APEX, it's expected that a skeleton with the
-    // capture pose is wired into the joint deform verb's second
-    // input.
-    GEO_CaptureBoneStorage capt_data; // Default ctor sets to identity matrix.
-    auto gt_capt_data = UTmakeIntrusive<GT_DAConstantValue<fpreal32>>(
-            num_joints, capt_data.floatPtr(), capt_data.tuple_size);
-
-    const exint tuple_size = indices_primvar.GetElementSize();
-    const exint num_elements = indices.size() / tuple_size;
-    if (num_elements * tuple_size != indices.size())
-    {
-        GUSD_WARN().Msg(
-                "Invalid primvar <%s>: array size [%zu] is not a "
-                "multiple of the elementSize [%d].",
-                indices_primvar.GetAttr().GetPath().GetText(), indices.size(),
-                int(tuple_size));
-        return nullptr;
-    }
-
-    auto index_pair = UTmakeIntrusive<GT_DAIndexPair<fpreal32>>(
-            num_elements, 2 * tuple_size);
-
-    index_pair->setIndexPairObjectSetCount(1);
-    index_pair->setIndexPairObjects(
-            0, GT_AttributeList::createAttributeList(
-                       GEO_STD_ATTRIB_PNT_CAPTURE_PATH, gt_joints,
-                       GEO_STD_ATTRIB_PNT_CAPTURE_DATA, gt_capt_data));
-
-    UTparallelFor(UT_BlockedRange<exint>(0, num_elements),
-                  [&](const UT_BlockedRange<exint> &range)
-    {
-        for (exint i : range.items())
-        {
-            for (exint j = 0 ; j < tuple_size; ++j)
-            {
-                int index = indices[i * tuple_size + j];
-                float weight = weights[i * tuple_size + j];
-                // Unused influences have a weight of 0.0 in USD, but
-                // boneCapture expects -1.
-                if (weight == 0.0)
-                {
-                    index = -1;
-                    weight = -1;
-                }
-
-                index_pair->set(index, i, j * 2);
-                index_pair->set(weight, i, j * 2 + 1);
-            }
-        }
-    });
-
-    return index_pair;
-}
-
 /// Add the attribute data to the appropriate GT_AttributeList based on the
 /// interpolation and array size.
 static void
@@ -1740,10 +1635,7 @@ GusdPrimWrapper::loadPrimvars(
     {
         // - The :lengths primvar for an array attribute is handled when the
         // main data array is encountered.
-        // - The jointWeights primvar is consumed when converting jointIndices
-        if (TfStringEndsWith(primvar.GetName(), _tokens->lengthsSuffix)
-            || primvar.GetName()
-                       == _tokens->primvarsHoudiniApexDeformJointWeights)
+        if (TfStringEndsWith(primvar.GetName(), _tokens->lengthsSuffix))
         {
             continue;
         }
@@ -1825,15 +1717,6 @@ GusdPrimWrapper::loadPrimvars(
             if (flat_data && lengths_data)
                 gtData = new GT_DAVaryingArray(flat_data, lengths_data);
         }
-        else if (
-                primvar.GetName()
-                == _tokens->primvarsHoudiniApexDeformJointIndices)
-        {
-            // Special case to translate jointIndices and jointWeights back to
-            // boneCapture.
-            gtData = gusdConvertToBoneCapture(primvar, val, time);
-            name = GA_Names::boneCapture;
-        }
         else
             gtData = convertAttributeData(primvar, val);
 
@@ -1896,11 +1779,8 @@ GusdPrimWrapper::loadPrimvars(
 
             // Skip attributes that are primvars (or primvar indices) or the
             // subset family type (e.g. 'subsetFamily:foo:familyType'), etc
-            // houdini:apex:deform:joints is also handled when converting the
-            // jointIndices / jointWeights primvars to boneCapture.
             if (TfStringStartsWith(attr.GetName(), "primvars:")
                 || TfStringStartsWith(attr.GetName(), "subsetFamily:")
-                || attr.GetName() == _tokens->houdiniApexDeformJoints
                 || UsdGeomXformOp::IsXformOp(attr.GetName()))
             {
                 continue;
