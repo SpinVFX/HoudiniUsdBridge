@@ -92,15 +92,18 @@ public:
 			     : myReferenceType(XUSD_EXTERNAL_REF_OTHER),
                                myNodeBasedPath(false),
                                myTimeDependent(false),
-                               myWarnedAboutMixedTimeDependency(false)
+                               myWarnedAboutMixedTimeDependency(false),
+                               myActuallySavedFile(false)
 			 { }
     explicit		 XUSD_SavePathInfo(const UT_StringHolder &finalpath)
 			     : myReferenceType(XUSD_EXTERNAL_REF_OTHER),
                                myFinalPath(finalpath),
                                myOriginalPath(finalpath),
+                               myFinalPathWithVersionSpecifier(finalpath),
 			       myNodeBasedPath(false),
                                myTimeDependent(false),
-                               myWarnedAboutMixedTimeDependency(false)
+                               myWarnedAboutMixedTimeDependency(false),
+                               myActuallySavedFile(false)
 			 { }
     explicit		 XUSD_SavePathInfo(const UT_StringHolder &finalpath,
                                 const UT_StringHolder &originalpath,
@@ -110,20 +113,24 @@ public:
                                 bool time_dependent)
 			     : myFinalPath(finalpath),
                                myOriginalPath(originalpath),
+                               myFinalPathWithVersionSpecifier(finalpath),
                                myReferenceType(reference_type),
                                myReferenceLayerId(reference_layer_id),
 			       myNodeBasedPath(node_based_path),
                                myTimeDependent(time_dependent),
-                               myWarnedAboutMixedTimeDependency(false)
+                               myWarnedAboutMixedTimeDependency(false),
+                               myActuallySavedFile(false)
 			 { }
 
     UT_StringHolder	 myFinalPath;
     UT_StringHolder	 myOriginalPath;
+    UT_StringHolder      myFinalPathWithVersionSpecifier;
     XUSD_ExternalRefType myReferenceType;
     std::string          myReferenceLayerId;
     bool		 myNodeBasedPath;
     bool                 myTimeDependent;
     bool                 myWarnedAboutMixedTimeDependency;
+    bool                 myActuallySavedFile;
 };
 
 class XUSD_ReferenceInfo

@@ -1495,7 +1495,8 @@ HUSDgetUserEditableOverrideLayerIds()
 }
 
 bool
-HUSDcompareLayers(const UT_StringHolder &layerIdentifierA, const UT_StringHolder &layerIdentifierB)
+HUSDareLayersEqual(const UT_StringHolder &layerIdentifierA,
+        const UT_StringHolder &layerIdentifierB)
 {
     SdfLayerRefPtr layerA = SdfLayer::FindOrOpen(layerIdentifierA.toStdString());
     SdfLayerRefPtr layerB = SdfLayer::FindOrOpen(layerIdentifierB.toStdString());

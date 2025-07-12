@@ -1183,6 +1183,7 @@ saveLayer(SdfLayerRefPtr layer,
         const UT_PathPattern *save_files_pattern,
         const HUSD_OutputProcessorAndOverridesArray &output_processors,
         bool mute_before_save,
+        bool &actually_saved_file,
         UT_String &error)
 {
     SdfLayer::FileFormatArguments args;
@@ -1223,18 +1224,13 @@ saveLayer(SdfLayerRefPtr layer,
             }
         }
 
-        // if this is a HPR path, compare this layer to existing layer on disk
-        // (if there is one).  If nothing changed, no need to save.
+        // We may want to compare this layer to existing layer on disk
+        // (if there is one). If nothing has changed, no need to save.
+        // This can prevent creating a new version of this file.
         if (HUSDgetDoLayerDiffCallback() &&
-            HUSDgetDoLayerDiffCallback()(splitfilepath))
-        {
-            if (HUSDcompareLayers(splitfilepath, layer->GetIdentifier()))
-            {
-                HUSD_ErrorScope::addWarning(
-                    HUSD_ERR_SAVED_FILE, "No changes detected");
-                return true;
-            }
-        }
+            HUSDgetDoLayerDiffCallback()(splitfilepath) &&
+            HUSDareLayersEqual(splitfilepath, layer->GetIdentifier()))
+            return true;
 
         SdfLayerRefPtr oldlayer;
         if (mute_before_save)
@@ -1248,6 +1244,8 @@ saveLayer(SdfLayerRefPtr layer,
             HUSD_ErrorScope::addError(
                 HUSD_ERR_LAYER_SAVE_FAILED,
                 fullfilepath.c_str());
+        else
+            actually_saved_file = true;
         if (muteoldlayer)
             oldlayer->SetMuted(false);
     }
@@ -1270,7 +1268,7 @@ saveStageLayersVolumesAndImages(const UsdStageWeakPtr &stage,
         husd_ImageSaveMap &image_save_map,
         husd_VolumeSaveMap &volume_save_map)
 {
-    auto should_exit_with_error = [](const UT_String &error) {
+    auto should_exit_with_error_fn = [](const UT_String &error) {
         if (error.isstring())
         {
             HUSD_ErrorScope::addError(
@@ -1280,7 +1278,150 @@ saveStageLayersVolumesAndImages(const UsdStageWeakPtr &stage,
 
         return false;
     };
-    bool success = false;
+    auto pre_save_layer_fn = [&](const SdfLayerRefPtr &layer,
+        const UT_StringHolder &fullfilepath,
+        std::map<std::string, std::string> &replace_map,
+        UT_String &error)
+    {
+        saveVolumesAndTextures(layer,
+            processordata.myProcessors,
+            fullfilepath,
+            save_files_pattern,
+            saved_geo_map,
+            replace_map,
+            volume_save_map,
+            image_save_map,
+            error);
+        if (should_exit_with_error_fn(error))
+            return false;
+        HUSDmodifyAssetPaths(layer,
+            husd_UpdateReferencesWithOutputProcessors(
+                processordata.myProcessors,
+                fullfilepath,
+                replace_map,
+                error));
+        if (should_exit_with_error_fn(error))
+            return false;
+
+        if (flags.myClearHoudiniCustomData)
+            clearHoudiniCustomData(layer);
+        if (flags.myEnsureMetricsSet)
+            ensureMetricsSet(layer, stage);
+        if (flags.myTimeSamplesRange.isValid())
+            filterTimeSamples(layer,
+                { flags.myTimeSamplesRange.min -
+                    flags.myTimeSamplesRangePadding,
+                  flags.myTimeSamplesRange.max +
+                    flags.myTimeSamplesRangePadding });
+
+        return true;
+    };
+    auto save_existing_layer_fn = [&](const SdfLayerRefPtr &layer,
+        const UT_StringMap<XUSD_SavePathInfo>::iterator &saved_path_info_it,
+        UT_String &error)
+    {
+        // We've been asked to save to this layer before. Load the
+        // existing file, stitch the new data into it, and save it
+        // out.
+        SdfLayerRefPtr existinglayer;
+        bool success = true;
+
+        existinglayer = SdfLayer::FindOrOpen(
+            saved_path_info_it->second.
+                myFinalPathWithVersionSpecifier.toStdString());
+        if (existinglayer)
+        {
+            if (!saved_path_info_it->second.myActuallySavedFile &&
+                HUSDgetDoLayerDiffCallback() &&
+                HUSDgetDoLayerDiffCallback()(existinglayer->GetIdentifier()) &&
+                HUSDareLayersEqual(existinglayer->GetIdentifier(),
+                    layer->GetIdentifier()))
+            {
+                // The layer wasn't saved the first time we were asked to.
+                // And the layer in memory is still the same as the one on
+                // disk, so once again we don't need to save it.
+                success = true;
+            }
+            else
+            {
+                HUSDstitchLayers(existinglayer, layer);
+                success = existinglayer->Save();
+                if (success && !saved_path_info_it->second.myActuallySavedFile)
+                {
+                    // We are here because we previously didn't save the file
+                    // because it wasn't different from the one on disk, but
+                    // now it is. So we have saved it and now want to lock in
+                    // the current version number for saving more frames.
+                    if (HUSDgetPathWithVersionSpecifierCallback())
+                    {
+                        // Record the final path with an explicit version
+                        // specifier in case we are going to close this
+                        // file and write to it again.
+                        saved_path_info_it->second.
+                            myFinalPathWithVersionSpecifier =
+                                HUSDgetPathWithVersionSpecifierCallback()(
+                                    saved_path_info_it->second.myFinalPath);
+                    }
+                    saved_path_info_it->second.myActuallySavedFile = true;
+                }
+            }
+        }
+        else
+        {
+            // This is an odd situation that probably should never happen. It's
+            // interaction with versioning systems is particularly unclear. So
+            // trigger an assertion, but otherwise leave this code unchanged
+            // from its original form (from before we gave any thought to
+            // versioning resolvers). It might be better to just turn this
+            // code path into an error situation.
+            UT_ASSERT(!"Couldn't read a file we just wrote to disk.");
+            success = saveLayer(layer,
+                saved_path_info_it->second.
+                    myFinalPathWithVersionSpecifier.toStdString(),
+                save_files_pattern,
+                processordata.myProcessors,
+                flags.myMuteLayersBeforeSave,
+                saved_path_info_it->second.myActuallySavedFile,
+                error);
+            if (should_exit_with_error_fn(error))
+                success = false;
+        }
+
+        return success;
+    };
+    auto save_new_layer_fn = [&](const SdfLayerRefPtr &layer,
+        const XUSD_SavePathInfo &save_path_info,
+        UT_String &error)
+    {
+        // This is the first time this save operation has seen this
+        // file. Overwrite any existing file with the layer
+        // contents.
+        bool actually_saved_file = false;
+        bool success = true;
+        success = saveLayer(layer, save_path_info.myFinalPath,
+            save_files_pattern,
+            processordata.myProcessors,
+            flags.myMuteLayersBeforeSave,
+            actually_saved_file,
+            error);
+        if (should_exit_with_error_fn(error))
+            return false;
+        auto saved_path_info_it = saved_path_info_map.emplace(
+            save_path_info.myFinalPath, save_path_info).first;
+        saved_path_info_it->second.myActuallySavedFile =
+            actually_saved_file;
+        // Record the final path with an explicit version
+        // specifier in case we are going to close this
+        // file and write to it again.
+        if (HUSDgetPathWithVersionSpecifierCallback() &&
+            actually_saved_file)
+            saved_path_info_it->second.
+                myFinalPathWithVersionSpecifier =
+                    HUSDgetPathWithVersionSpecifierCallback()(
+                        saved_path_info_it->second.myFinalPath);
+
+        return success;
+    };
     UT_String error;
 
     if (save_style == HUSD_SAVE_FLATTENED_STAGE)
@@ -1295,83 +1436,28 @@ saveStageLayersVolumesAndImages(const UsdStageWeakPtr &stage,
         // Let asset processors change the path where the file will be saved.
         fullfilepath = runOutputProcessors(processordata.myProcessors,
             filepath.toStdString(), UT_StringRef(), true, true, error);
-        if (should_exit_with_error(error))
+        if (should_exit_with_error_fn(error))
             return false;
         // Make sure the save path is an absolute path.
         if (!UTisAbsolutePath(fullfilepath))
             UTmakeAbsoluteFilePath(fullfilepath);
 
-        saveVolumesAndTextures(layer,
-            processordata.myProcessors,
-            fullfilepath,
-            save_files_pattern,
-            saved_geo_map,
-            replace_map,
-            volume_save_map,
-            image_save_map,
-            error);
-        if (should_exit_with_error(error))
-            return false;
-        HUSDmodifyAssetPaths(layer,
-            husd_UpdateReferencesWithOutputProcessors(
-                processordata.myProcessors,
-                fullfilepath,
-                replace_map,
-                error));
-        if (should_exit_with_error(error))
+        if (!pre_save_layer_fn(layer, fullfilepath, replace_map, error))
             return false;
 
-        if (flags.myClearHoudiniCustomData)
-            clearHoudiniCustomData(layer);
-        if (flags.myEnsureMetricsSet)
-            ensureMetricsSet(layer, stage);
-        if (flags.myTimeSamplesRange.isValid())
-            filterTimeSamples(layer,
-                { flags.myTimeSamplesRange.min -
-                    flags.myTimeSamplesRangePadding,
-                  flags.myTimeSamplesRange.max +
-                    flags.myTimeSamplesRangePadding });
-
-        if (saved_path_info_map.contains(fullfilepath))
+        auto saved_path_info_it = saved_path_info_map.find(fullfilepath);
+        if (saved_path_info_it != saved_path_info_map.end())
         {
-            // We've been asked to save to this layer before. Load the
-            // existing file, stitch the new data into it, and save it
-            // out.
-            SdfLayerRefPtr existinglayer;
-
-            existinglayer = SdfLayer::FindOrOpen(
-                fullfilepath.toStdString());
-            if (existinglayer)
-            {
-                HUSDstitchLayers(existinglayer, layer);
-                success = existinglayer->Save();
-            }
-            else
-            {
-                success = saveLayer(layer, fullfilepath,
-                    save_files_pattern,
-                    processordata.myProcessors,
-                    flags.myMuteLayersBeforeSave,
-                    error);
-                if (should_exit_with_error(error))
-                    return false;
-            }
+            if (!save_existing_layer_fn(layer, saved_path_info_it, error))
+                return false;
         }
         else
         {
-            // This is the first time this save operation has seen this
-            // file. Overwrite any existing file with the layer
-            // contents.
-            success = saveLayer(layer, fullfilepath,
-                save_files_pattern,
-                processordata.myProcessors,
-                flags.myMuteLayersBeforeSave,
-                error);
-            if (should_exit_with_error(error))
+            XUSD_SavePathInfo save_path_info(fullfilepath, filepath,
+                XUSD_EXTERNAL_REF_OTHER, std::string(),
+                false, filepath_is_time_dependent);
+            if (!save_new_layer_fn(layer, save_path_info, error))
                 return false;
-            saved_path_info_map.emplace(fullfilepath, XUSD_SavePathInfo(
-                fullfilepath, filepath, XUSD_EXTERNAL_REF_OTHER,
-                std::string(), false, filepath_is_time_dependent));
         }
     }
     else
@@ -1555,7 +1641,7 @@ saveStageLayersVolumesAndImages(const UsdStageWeakPtr &stage,
                 idtosavepathmap[savepathmap.myReferenceLayerId].myFinalPath,
                 true, true,
                 error);
-            if (should_exit_with_error(error))
+            if (should_exit_with_error_fn(error))
                 return false;
 
             if (!UTisAbsolutePath(savepathmap.myFinalPath))
@@ -1567,8 +1653,6 @@ saveStageLayersVolumesAndImages(const UsdStageWeakPtr &stage,
         // where those layers will be saved to disk. Also update full paths
         // to relative paths for files on disk. Finally save the updated
         // layer to its desired location on disk.
-        success = true;
-
         for (const std::string &identifier : ids)
         {
             const XUSD_SavePathInfo &outpathinfo = idtosavepathmap[identifier];
@@ -1639,7 +1723,7 @@ saveStageLayersVolumesAndImages(const UsdStageWeakPtr &stage,
                         newpath = runOutputProcessors(
                             processordata.myProcessors,
                             ref, outfinalpath, true, false, error);
-                        if (should_exit_with_error(error))
+                        if (should_exit_with_error_fn(error))
                             return false;
                     }
                     else
@@ -1653,7 +1737,7 @@ saveStageLayersVolumesAndImages(const UsdStageWeakPtr &stage,
                             processordata.myProcessors,
                             updateit->second.myFinalPath,
                             outfinalpath, true, false, error);
-                        if (should_exit_with_error(error))
+                        if (should_exit_with_error_fn(error))
                             return false;
                         // Warn if the referenced file path is time dependent,
                         // but the referencing file is not, as this is not
@@ -1669,72 +1753,20 @@ saveStageLayersVolumesAndImages(const UsdStageWeakPtr &stage,
                     if (ref != newpath.c_str())
                         replace_map[ref] = newpath;
                 }
-                saveVolumesAndTextures(layercopy,
-                    processordata.myProcessors,
-                    outfinalpath,
-                    save_files_pattern,
-                    saved_geo_map,
-                    replace_map,
-                    volume_save_map,
-                    image_save_map,
-                    error);
-                if (should_exit_with_error(error))
-                    return false;
-                HUSDmodifyAssetPaths(layercopy,
-                    husd_UpdateReferencesWithOutputProcessors(
-                        processordata.myProcessors,
-                        outfinalpath,
-                        replace_map,
-                        error));
-                if (should_exit_with_error(error))
+
+                if (!pre_save_layer_fn(layer, outfinalpath, replace_map, error))
                     return false;
 
-                if (flags.myClearHoudiniCustomData)
-                    clearHoudiniCustomData(layercopy);
-                if (flags.myEnsureMetricsSet)
-                    ensureMetricsSet(layercopy, stage);
-                if (flags.myTimeSamplesRange.isValid())
-                    filterTimeSamples(layercopy,
-                        { flags.myTimeSamplesRange.min - flags.myTimeSamplesRangePadding,
-                            flags.myTimeSamplesRange.max + flags.myTimeSamplesRangePadding });
-                if (saved_path_info_map.contains(outfinalpath))
+                auto saved_path_info_it = saved_path_info_map.find(outfinalpath);
+                if (saved_path_info_it != saved_path_info_map.end())
                 {
-                    // We've been asked to save to this layer before. Load the
-                    // existing file, stitch the new data into it, and save it
-                    // out.
-                    SdfLayerRefPtr existinglayer;
-
-                    existinglayer = SdfLayer::FindOrOpen(
-                        outfinalpath.toStdString());
-                    if (existinglayer)
-                    {
-                        HUSDstitchLayers(existinglayer, layercopy);
-                        existinglayer->Save();
-                    }
-                    else
-                    {
-                        success &= saveLayer(layercopy, outfinalpath,
-                            save_files_pattern,
-                            processordata.myProcessors,
-                            flags.myMuteLayersBeforeSave,
-                            error);
-                        if (should_exit_with_error(error))
-                            return false;
-                    }
+                    if (!save_existing_layer_fn(layer, saved_path_info_it, error))
+                        return false;
                 }
                 else
                 {
-                    // This is the first time this save operation has seen this
-                    // file.  Overwrite any existing file with the layer
-                    // contents.
-                    success &= saveLayer(layercopy, outfinalpath,
-                        save_files_pattern,
-                        processordata.myProcessors,
-                        flags.myMuteLayersBeforeSave,
-                        error);
-                    if (should_exit_with_error(error))
+                    if (!save_new_layer_fn(layer, outpathinfo, error))
                         return false;
-                    saved_path_info_map.emplace(outfinalpath, outpathinfo);
                 }
 
                 XUSD_SavePathInfo &outinfo = saved_path_info_map[outfinalpath];
@@ -1754,7 +1786,7 @@ saveStageLayersVolumesAndImages(const UsdStageWeakPtr &stage,
         }
     }
 
-    return success;
+    return true;
 }
 
 bool

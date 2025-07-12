@@ -440,7 +440,8 @@ HUSD_API const UT_Array<HUSD_OverridesLayerId> &
 HUSDgetUserEditableOverrideLayerIds();
 
 HUSD_API bool
-HUSDcompareLayers(const UT_StringHolder &layerIdentifierA, const UT_StringHolder &layerIdentifierB);
+HUSDareLayersEqual(const UT_StringHolder &layerIdentifierA,
+        const UT_StringHolder &layerIdentifierB);
 
 
 #endif

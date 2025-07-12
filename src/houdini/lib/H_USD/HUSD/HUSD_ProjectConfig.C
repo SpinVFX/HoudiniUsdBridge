@@ -27,6 +27,7 @@
 namespace
 {
     HUSD_DoLayerDiffFn theDoLayerDiffFn;
+    HUSD_PathWithVersionSpecifierFn thePathWithVersionSpecifierFn;
     HUSD_GetShotContextOptionFn theActiveShotContextOptionFn;
     HUSD_ActiveShotTestFn theActiveShotTestFn;
 };
@@ -41,6 +42,18 @@ HUSD_DoLayerDiffFn
 HUSDgetDoLayerDiffCallback()
 {
     return theDoLayerDiffFn;
+}
+
+void
+HUSDsetPathWithVersionSpecifierCallback(HUSD_PathWithVersionSpecifierFn cb)
+{
+    thePathWithVersionSpecifierFn = cb;
+}
+
+HUSD_PathWithVersionSpecifierFn
+HUSDgetPathWithVersionSpecifierCallback()
+{
+    return thePathWithVersionSpecifierFn;
 }
 
 void

@@ -39,6 +39,18 @@ using HUSD_DoLayerDiffFn =
 HUSD_API void HUSDsetDoLayerDiffCallback(HUSD_DoLayerDiffFn cb);
 HUSD_API HUSD_DoLayerDiffFn HUSDgetDoLayerDiffCallback();
 
+/// Add a callback that is invoked during a USD save operation. In particular,
+/// if a USD file is being saved one frame at a time, and the asset resolver
+/// for the output file automatically creates new file versions, we use the
+/// value returned here to make sure that ever subsequent frame data is saved
+/// to the version of the file created by the first save operation.
+using HUSD_PathWithVersionSpecifierFn =
+    UT_Function<UT_StringHolder(const UT_StringHolder &)>;
+HUSD_API void HUSDsetPathWithVersionSpecifierCallback(
+    HUSD_PathWithVersionSpecifierFn cb);
+HUSD_API HUSD_PathWithVersionSpecifierFn
+    HUSDgetPathWithVersionSpecifierCallback();
+
 /// Global setting to control the context option that is used to identify the
 /// "current shot".
 using HUSD_GetShotContextOptionFn =
