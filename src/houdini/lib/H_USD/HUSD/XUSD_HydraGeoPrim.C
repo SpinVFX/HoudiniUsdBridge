@@ -1720,10 +1720,10 @@ XUSD_HydraGeoMesh::Sync(HdSceneDelegate *scene_delegate,
     bool tanu_exists =false, tanv_exists = false;
     updateAttrib(tangentu, GT_Names::tangentu,
 		 scene_delegate, id, dirty_bits, gt_prim, attrib_list,
-                 GT_TYPE_NONE, freq, &point_freq, false, &tanu_exists, myVertex);
+                 GT_TYPE_NORMAL, freq, &point_freq, false, &tanu_exists, myVertex);
     updateAttrib(tangentv, GT_Names::tangentv,
 		 scene_delegate, id, dirty_bits, gt_prim, attrib_list,
-                 GT_TYPE_NONE, freq, &point_freq, false, &tanv_exists, myVertex);
+                 GT_TYPE_NORMAL, freq, &point_freq, false, &tanv_exists, myVertex);
 
     GfRange3d extents = myExtents;
 
