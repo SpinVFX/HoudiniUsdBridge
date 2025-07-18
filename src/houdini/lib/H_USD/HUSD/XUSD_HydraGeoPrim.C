@@ -1724,6 +1724,12 @@ XUSD_HydraGeoMesh::Sync(HdSceneDelegate *scene_delegate,
     updateAttrib(tangentv, GT_Names::tangentv,
 		 scene_delegate, id, dirty_bits, gt_prim, attrib_list,
                  GT_TYPE_NORMAL, freq, &point_freq, false, &tanv_exists, myVertex);
+    
+    // signs needed as implicit attrib for normalmap node
+    static TfToken mikkt_signs("signs");
+    updateAttrib(mikkt_signs, "signs",
+                 scene_delegate, id, dirty_bits, gt_prim, attrib_list,
+                 GT_TYPE_NONE, freq, &point_freq, false, nullptr, myVertex);
 
     GfRange3d extents = myExtents;
 
@@ -2484,7 +2490,6 @@ XUSD_HydraGeoCurves::Sync(HdSceneDelegate *scene_delegate,
     // This flag indicates whether these curves are drawing a bounding box,
     // or a regular set of geometric curves.
     bool drawing_bounds = false;
-    bool pinned_curves = false;
 
     if (!myCounts || !gt_prim ||
 	HdChangeTracker::IsTopologyDirty(*dirty_bits, id))
@@ -2520,6 +2525,7 @@ XUSD_HydraGeoCurves::Sync(HdSceneDelegate *scene_delegate,
 	    myBasis = GT_BASIS_LINEAR;
         
 	myWrap = (top.GetCurveWrap() == HdTokens->periodic);
+        myPinned = false;
 
 	if (top.GetCurveWrap() == HdTokens->segmented)
         {
@@ -2537,7 +2543,7 @@ XUSD_HydraGeoCurves::Sync(HdSceneDelegate *scene_delegate,
         else
         {
             if (top.GetCurveWrap() == HdTokens->pinned)
-                pinned_curves = true;
+                myPinned = true;
                 
             myCounts = XUSD_HydraUtils::createGTArray(
                 top.GetCurveVertexCounts());
@@ -2608,7 +2614,12 @@ XUSD_HydraGeoCurves::Sync(HdSceneDelegate *scene_delegate,
             int wire = XUSDgetIntValue(scene_delegate->Get(id,
                 HusdHdPrimvarTokens->glWire), 0);
             if (wire)
+            {
                 curve_style = 0;
+                GT_DataArrayHandle dh = new GT_DAConstantValue<int32>(1, 1, 1);
+                attrib_list[GT_OWNER_DETAIL] = attrib_list[GT_OWNER_DETAIL]->
+                    addAttribute("gl_wireframe"_sh, dh, true);
+            }
         }
         auto curve_style_primvar =
             myAttribMap.find(HusdHdPrimvarTokens->glCurveStyle.GetText());
@@ -2670,7 +2681,7 @@ XUSD_HydraGeoCurves::Sync(HdSceneDelegate *scene_delegate,
     myBasisCurve = cmesh;
     if(myBasis != GT_BASIS_LINEAR)
     {
-        if(pinned_curves)
+        if(myPinned)
         {
             ph = cmesh->pinCurves();
             cmesh = UTverify_cast<GT_PrimCurveMesh*>(ph.get());

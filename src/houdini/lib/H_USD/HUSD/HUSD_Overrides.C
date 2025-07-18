@@ -416,7 +416,8 @@ namespace
     bool
     setDrawModeFromExpansionState(const UsdPrim &prim,
             const SdfLayerRefPtr &layer,
-            const HUSD_ExpansionState &expansionstate)
+            const HUSD_ExpansionState &expansionstate,
+            UsdGeomBBoxCache &bboxcache)
     {
         bool changed = false;
 
@@ -426,6 +427,7 @@ namespace
         SdfPrimSpecHandle primspec(layer->GetPrimAtPath(prim.GetPath()));
         SdfAttributeSpecHandle applydrawmodespec;
         SdfAttributeSpecHandle drawmodespec;
+        SdfAttributeSpecHandle extentshintspec;
         bool apply_expanded_effect = false;
         bool expanded = false;
 
@@ -437,6 +439,9 @@ namespace
             applydrawmodespec = primspec->GetAttributeAtPath(
                 SdfPath::ReflexiveRelativePath().AppendProperty(
                     UsdGeomTokens->modelApplyDrawMode));
+            extentshintspec = primspec->GetAttributeAtPath(
+                SdfPath::ReflexiveRelativePath().AppendProperty(
+                    UsdGeomTokens->extentsHint));
         }
 
         std::tie(apply_expanded_effect, expanded) =
@@ -449,13 +454,14 @@ namespace
                 // it to draw in bounds mode.
                 if (primspec)
                 {
-                    if (drawmodespec || applydrawmodespec)
+                    if (drawmodespec || applydrawmodespec || extentshintspec)
                     {
                         removeApiSchema(primspec,
                             UsdSchemaRegistry::GetSchemaTypeName(
                                 TfType::Find<UsdGeomModelAPI>()));
                         primspec->RemoveProperty(applydrawmodespec);
                         primspec->RemoveProperty(drawmodespec);
+                        primspec->RemoveProperty(extentshintspec);
                         layer->RemovePrimIfInert(primspec);
                         changed = true;
                     }
@@ -464,7 +470,7 @@ namespace
                 // Continue the traversal.
                 for (auto &&child : prim.GetChildren())
                     if (setDrawModeFromExpansionState(
-                            child, layer, expansionstate))
+                            child, layer, expansionstate, bboxcache))
                         changed = true;
             }
             else
@@ -493,6 +499,24 @@ namespace
                             VtValue(UsdGeomTokens->bounds));
                         applydrawmodespec->SetDefaultValue(
                             VtValue(true));
+
+                        // Author an extentsHint if one doesn't already exist
+                        // on this prim.
+                        UsdGeomModelAPI modelapi(prim);
+                        if (!modelapi ||
+                            !modelapi.GetExtentsHintAttr().HasAuthoredValue())
+                        {
+                            extentshintspec = getOrCreateAttributeSpec(primspec,
+                                UsdGeomTokens->extentsHint,
+                                SdfValueTypeNames->Float3Array);
+                            if (extentshintspec)
+                            {
+                                VtVec3fArray extentsHint =
+                                    modelapi.ComputeExtentsHint(bboxcache);
+                                extentshintspec->SetDefaultValue(
+                                    VtValue(extentsHint));
+                            }
+                        }
                         changed = true;
                     }
                 }
@@ -687,19 +711,41 @@ HUSD_Overrides::setDrawMode(HUSD_AutoWriteOverridesLock &lock,
 		primspec = layer->GetPrimAtPath(path);
 		if (primspec)
 		{
+		    bool                         attempt_removal = false;
 		    SdfAttributeSpecHandle	 drawmodespec;
+		    SdfAttributeSpecHandle	 applydrawmodespec;
 
 		    drawmodespec = primspec->GetAttributeAtPath(
 			SdfPath::ReflexiveRelativePath().AppendProperty(
 			    UsdGeomTokens->modelDrawMode));
-		    if (drawmodespec)
+		    applydrawmodespec = primspec->GetAttributeAtPath(
+                        SdfPath::ReflexiveRelativePath().AppendProperty(
+                            UsdGeomTokens->modelApplyDrawMode));
+		    if (drawmodespec || applydrawmodespec)
 		    {
                         removeApiSchema(primspec,
                             UsdSchemaRegistry::GetSchemaTypeName(
                                 TfType::Find<UsdGeomModelAPI>()));
-			primspec->RemoveProperty(drawmodespec);
-			layer->RemovePrimIfInert(primspec);
+		        if (drawmodespec)
+			    primspec->RemoveProperty(drawmodespec);
+		        if (applydrawmodespec)
+		            primspec->RemoveProperty(applydrawmodespec);
+		        attempt_removal = true;
 		    }
+
+		    SdfAttributeSpecHandle	 extentshintspec;
+
+		    extentshintspec = primspec->GetAttributeAtPath(
+                        SdfPath::ReflexiveRelativePath().AppendProperty(
+                            UsdGeomTokens->extentsHint));
+		    if (extentshintspec)
+		    {
+		        primspec->RemoveProperty(extentshintspec);
+		        attempt_removal = true;
+		    }
+
+		    if (attempt_removal)
+			layer->RemovePrimIfInert(primspec);
 		}
 	    }
 	}
@@ -709,6 +755,9 @@ HUSD_Overrides::setDrawMode(HUSD_AutoWriteOverridesLock &lock,
 	    // requested value, and create an override if required.
 	    SdfChangeBlock	 changeblock;
 	    TfToken		 drawmodetoken(drawmode.toStdString());
+	    UsdGeomBBoxCache     bboxcache(UsdTimeCode::EarliestTime(),
+                                    UsdGeomImageable::GetOrderedPurposeTokens(),
+                                    true);
 
 	    for (auto &&path : pathset.sdfPathSet())
 	    {
@@ -726,18 +775,42 @@ HUSD_Overrides::setDrawMode(HUSD_AutoWriteOverridesLock &lock,
 			if (primspec)
 			{
 			    SdfAttributeSpecHandle	 drawmodespec;
+			    SdfAttributeSpecHandle	 applydrawmodespec;
 
 			    drawmodespec = getOrCreateAttributeSpec(primspec,
 				UsdGeomTokens->modelDrawMode,
 				SdfValueTypeNames->Token);
-			    if (drawmodespec)
+			    applydrawmodespec = getOrCreateAttributeSpec(primspec,
+                                UsdGeomTokens->modelApplyDrawMode,
+                                SdfValueTypeNames->Bool);
+			    if (drawmodespec && applydrawmodespec)
                             {
                                 addApiSchema(primspec,
                                     UsdSchemaRegistry::GetSchemaTypeName(
                                         TfType::Find<UsdGeomModelAPI>()));
                                 drawmodespec->SetDefaultValue(
                                     VtValue(drawmodetoken));
+			        applydrawmodespec->SetDefaultValue(
+                                    VtValue(true));
                             }
+
+			    // Author an extentsHint if one doesn't already exist
+			    // on this prim.
+			    if (!modelapi.GetExtentsHintAttr().HasAuthoredValue())
+			    {
+			        SdfAttributeSpecHandle	 extentshintspec;
+
+			        extentshintspec = getOrCreateAttributeSpec(primspec,
+                                    UsdGeomTokens->extentsHint,
+                                    SdfValueTypeNames->Float3Array);
+			        if (extentshintspec)
+			        {
+			            VtVec3fArray extentsHint =
+                                        modelapi.ComputeExtentsHint(bboxcache);
+			            extentshintspec->SetDefaultValue(
+                                        VtValue(extentsHint));
+			        }
+			    }
 			}
 		    }
 		}
@@ -1503,11 +1576,14 @@ HUSD_Overrides::setExpansionStateDrawMode(HUSD_AutoAnyLock &lock,
 
     if (indata && indata->isStageValid())
     {
-        auto         stage = indata->stage();
-        auto         layer = myData->layer(HUSD_OVERRIDES_EXPANSION_LAYER);
+        auto             stage = indata->stage();
+        auto             layer = myData->layer(HUSD_OVERRIDES_EXPANSION_LAYER);
+        UsdGeomBBoxCache bboxcache(UsdTimeCode::EarliestTime(),
+                            UsdGeomImageable::GetOrderedPurposeTokens(),
+                            true);
 
         if (setDrawModeFromExpansionState(
-                stage->GetPseudoRoot(), layer, expansionstate))
+                stage->GetPseudoRoot(), layer, expansionstate, bboxcache))
             myVersionId++;
     }
 

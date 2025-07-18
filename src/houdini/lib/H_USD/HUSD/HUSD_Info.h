@@ -169,6 +169,7 @@ public:
 				const HUSD_TimeCode &time_code,
 				HUSD_TimeSampling *time_sampling=nullptr) const;
     bool		 isInstance(const UT_StringRef &primpath) const;
+    bool		 isInstanceProxy(const UT_StringRef &primpath) const;
     UT_StringHolder	 getKind(const UT_StringRef &primpath) const;
     bool		 isKind(const UT_StringRef &primpath, 
 				const UT_StringRef &kind) const;

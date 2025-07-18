@@ -1811,6 +1811,13 @@ HUSD_Info::isInstance(const UT_StringRef &primpath) const
     return prim && prim.IsInstance();
 }
 
+bool
+HUSD_Info::isInstanceProxy(const UT_StringRef &primpath) const
+{
+    auto prim = husdGetPrimAtPath(myAnyLock, primpath);
+    return prim && prim.IsInstanceProxy();
+}
+
 UT_StringHolder
 HUSD_Info::getKind(const UT_StringRef &primpath) const
 {
