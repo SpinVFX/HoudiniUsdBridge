@@ -495,6 +495,33 @@ BRAY_HdParam::shutterToFrameTime(float *frame,
     }
 }
 
+float
+BRAY_HdParam::frameShutterTime() const
+{
+    // Compute the shutter time which corresponds to the actual frame.
+    // This is used to compute frame-specific values (like the world to camera
+    // transform stored in OpenEXR metadata).
+    static constexpr float SHUTTER_MIN    = 1 - SYS_FP32_EPSILON;
+
+    fpreal                      dshutter = myShutter[1] - myShutter[0];
+    if (myDisableMotionBlur || SYSequalZero(dshutter))
+        return shutterMid();
+
+    // If the shutter brackets the frame
+    if (myShutter[0] <= 0 && myShutter[1] >= 0)
+        return SYSmin(-myShutter[0] / dshutter, SHUTTER_MIN);
+
+    // If both shutters are to the left of the frame, 1 is closer to the frame
+    if (myShutter[1] < 0)
+        return SHUTTER_MIN;
+    // If both shutters are to the right of the frame, 0 is closer to the frame
+    if (myShutter[0] > 0)
+        return 0;
+
+    // Very weird case (likely shutter close is less than shutter open)
+    return shutterMid();
+}
+
 namespace
 {
     static bool

@@ -130,6 +130,7 @@ public:
     /// Return the raw shutter open/close times
     float	shutterOpen() const { return myShutter[0]; }
     float	shutterClose() const { return myShutter[1]; }
+    float       frameShutterTime() const;
     /// @}
 
     /// Shutter mid-point could be `(shutterOpen()+shutterClose())/2`, but in

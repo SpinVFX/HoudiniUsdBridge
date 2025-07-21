@@ -491,6 +491,9 @@ BRAY_HdPass::_Execute(const HdRenderPassStateSharedPtr &renderPassState,
 	for (auto &&aov : myAOVBindings)
 	    UTverify_cast<BRAY_HdAOVBuffer *>(aov.renderBuffer)->clearConverged();
 
+        myScene.sceneOptions().set(BRAY_OPT_FRAME_SHUTTER_TIME,
+                                   myRenderParam.frameShutterTime());
+
         // When rendering for the Houdini viewport, update the random seed on
         // every restart
         if (myRenderParam.isHoudiniViewport())
