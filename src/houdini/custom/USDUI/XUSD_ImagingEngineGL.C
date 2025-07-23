@@ -596,7 +596,9 @@ XUSD_ImagingEngineGL::SetLightingState(
     {
         GlfSimpleLight glflight;
         glflight.SetIsDomeLight(light.myIsDomeLight);
-        if (light.myIsDomeLight && defaultDomeLightTex)
+        if (light.myIsDomeLight && light.myDomeMapPath)
+            glflight.SetDomeLightTextureFile(SdfAssetPath(light.myDomeMapPath.c_str()));
+        else if (light.myIsDomeLight && defaultDomeLightTex)
             glflight.SetDomeLightTextureFile(SdfAssetPath(defaultDomeLightTex));
         glflight.SetIsCameraSpaceLight(!light.myIsDomeLight);
         glflight.SetTransform(GusdUT_Gf::Cast(light.myXform));

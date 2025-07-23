@@ -917,7 +917,10 @@ BRAY_HdPointPrim::Sync(HdSceneDelegate *sd,
     {
         UT_ErrorLog::format(8, "Assign {} to {}", matId.path(), id);
 	for (auto&& p : myPrims)
+        {
 	    p.setMaterial(scene, material, props);
+            scene.updateObject(p, BRAY_EVENT_MATERIAL);
+        }
     }
     for (auto &&p : myPrims)
     {

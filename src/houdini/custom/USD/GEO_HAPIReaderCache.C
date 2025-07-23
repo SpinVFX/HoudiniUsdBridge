@@ -76,11 +76,7 @@ static UT_Thread&
 timeoutThread()
 {
     static UT_Thread* theTimeoutThread(
-#if defined(WITH_ONETBB)
             UT_Thread::allocThread(UT_Thread::SpinMode::ThreadLowUsage)
-#else
-            UT_Thread::allocThread(UT_Thread::SpinMode::ThreadLowUsage, false)
-#endif
     );
 
     return *theTimeoutThread;

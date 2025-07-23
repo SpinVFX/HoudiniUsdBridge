@@ -778,6 +778,7 @@ HUSD_Imaging::resetImagingEngine()
     myHasHeadlight = false;
     myHasDomelight = false;
     myHasThreePointlight = false;
+    myHasPhysicalSky = false;
     // With no imaging engine, always claim to be "converged" so we don't
     // continuously try to re-render when there is nothing to do the rendering.
     myConverged = true;
@@ -975,6 +976,9 @@ HUSD_Imaging::setLightingMode(HUSD_LightingMode mode)
         myWantsThreePointlight = (mode == HUSD_LIGHTING_MODE_THREE_POINT_ONLY);
         myWantsPhysicalSky = (mode == HUSD_LIGHTING_MODE_PHYSICAL_SKY_ONLY);
 	changed = true;
+
+        myLightingMode = mode;
+        myWorkLightsChanged = true;
     }
 
     return changed;
@@ -1242,7 +1246,8 @@ HUSD_Imaging::setupRenderer(const UT_StringRef &renderer_name,
     myPrivate->myRenderParams.myEnableSceneLights = do_lighting &&
         (lighting_mode != HUSD_LIGHTING_MODE_HEADLIGHT_ONLY &&
          lighting_mode != HUSD_LIGHTING_MODE_DOMELIGHT_ONLY && 
-         lighting_mode != HUSD_LIGHTING_MODE_THREE_POINT_ONLY);
+         lighting_mode != HUSD_LIGHTING_MODE_THREE_POINT_ONLY && 
+         lighting_mode != HUSD_LIGHTING_MODE_PHYSICAL_SKY_ONLY);
     myPrivate->myRenderParams.myEnableSceneMaterials = myDoMaterials;
     
     // Setting this value to true causes the "automatic" Alpha Threshold
@@ -1971,11 +1976,12 @@ HUSD_Imaging::updateRenderData(const UT_Matrix4D &view_matrix,
             myHasPhysicalSky = myWantsPhysicalSky;
             engine->SetLightingState(lights, ambient);
         }
-        else if (myHasHeadlight || myHasDomelight || myHasThreePointlight)
+        else if (myHasHeadlight || myHasDomelight || myHasThreePointlight || myHasPhysicalSky)
         {
             myHasHeadlight = false;
             myHasDomelight = false;
             myHasThreePointlight = false;
+            myHasPhysicalSky = false;
             engine->SetLightingState(lights, ambient);
         }
 

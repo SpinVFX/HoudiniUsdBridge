@@ -387,6 +387,7 @@ BRAY_HdVolume::Sync(HdSceneDelegate* sceneDelegate,
     {
         UT_ErrorLog::format(8, "Assign {} to {}", matId.path(), id);
 	myVolume.setMaterial(scene, material, props);
+        scene.updateObject(myVolume, BRAY_EVENT_MATERIAL);
     }
 
     myVolume.setCoordSysAliases(scene,

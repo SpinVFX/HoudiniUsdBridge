@@ -2602,9 +2602,11 @@ XUSD_HydraGeoCurves::Sync(HdSceneDelegate *scene_delegate,
                  GT_TYPE_NONE, freq);
 
     int curve_style = 1;
+    bool is_wireframe = false;
     if (drawing_bounds)
     {
         curve_style = 0;
+        is_wireframe = true;
     }
     else
     {
@@ -2616,9 +2618,7 @@ XUSD_HydraGeoCurves::Sync(HdSceneDelegate *scene_delegate,
             if (wire)
             {
                 curve_style = 0;
-                GT_DataArrayHandle dh = new GT_DAConstantValue<int32>(1, 1, 1);
-                attrib_list[GT_OWNER_DETAIL] = attrib_list[GT_OWNER_DETAIL]->
-                    addAttribute("gl_wireframe"_sh, dh, true);
+                is_wireframe = true;
             }
         }
         auto curve_style_primvar =
@@ -2642,24 +2642,33 @@ XUSD_HydraGeoCurves::Sync(HdSceneDelegate *scene_delegate,
                 addAttribute("rounded_curves"_sh, dh, true);
         }
     }
-    else if(gt_prim)
+    else 
     {
-#if 0
-        GT_Owner owner;
-        if(gt_prim->findAttribute("width"_sh, owner, 0))
+        if (is_wireframe)
         {
-            if(owner == GT_OWNER_DETAIL)
-                gt_prim->getDetailAttributes()->removeAttribute("width"_sh);
-            else if(owner == GT_OWNER_POINT)
-                gt_prim->getPointAttributes()->removeAttribute("width"_sh);
-            else if(owner == GT_OWNER_VERTEX)
-                gt_prim->getVertexAttributes()->removeAttribute("width"_sh);
-            else if(owner == GT_OWNER_UNIFORM)
-                gt_prim->getUniformAttributes()->removeAttribute("width"_sh);
+            GT_DataArrayHandle dh = new GT_DAConstantValue<int32>(1, 1, 1);
+            attrib_list[GT_OWNER_DETAIL] = attrib_list[GT_OWNER_DETAIL]->
+                addAttribute("gl_wireframe"_sh, dh, true);
         }
-        if(gt_prim->findAttribute("rounded_curves"_sh, owner, 0))
-            gt_prim->getDetailAttributes()->removeAttribute("rounded_curves"_sh);
+        if(gt_prim)
+        {
+#if 0
+            GT_Owner owner;
+            if(gt_prim->findAttribute("width"_sh, owner, 0))
+            {
+                if(owner == GT_OWNER_DETAIL)
+                    gt_prim->getDetailAttributes()->removeAttribute("width"_sh);
+                else if(owner == GT_OWNER_POINT)
+                    gt_prim->getPointAttributes()->removeAttribute("width"_sh);
+                else if(owner == GT_OWNER_VERTEX)
+                    gt_prim->getVertexAttributes()->removeAttribute("width"_sh);
+                else if(owner == GT_OWNER_UNIFORM)
+                    gt_prim->getUniformAttributes()->removeAttribute("width"_sh);
+            }
+            if(gt_prim->findAttribute("rounded_curves"_sh, owner, 0))
+                gt_prim->getDetailAttributes()->removeAttribute("rounded_curves"_sh);
 #endif
+        }
     }
         
         

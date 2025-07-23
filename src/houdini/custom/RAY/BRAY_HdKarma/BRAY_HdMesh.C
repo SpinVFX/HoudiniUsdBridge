@@ -1087,6 +1087,7 @@ BRAY_HdMesh::Sync(HdSceneDelegate *sceneDelegate,
         UT_ErrorLog::format(8, "Assign {} to {} ({} face set materials)",
                 matId.path(), id, fmats.size());
 	myMesh.setMaterial(scene, material, props, fmats.size(), fmats.array());
+        scene.updateObject(myMesh, BRAY_EVENT_MATERIAL);
     }
 
     myMesh.setCoordSysAliases(scene,

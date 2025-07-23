@@ -180,11 +180,7 @@ static UT_Thread &
 unregisterThread()
 {
     static UT_Thread* unregisterThread(
-#if defined(WITH_ONETBB)
             UT_Thread::allocThread(UT_Thread::SpinMode::ThreadSingleRun)
-#else
-            UT_Thread::allocThread(UT_Thread::SpinMode::ThreadSingleRun, false)
-#endif
     );
 
     return *unregisterThread;

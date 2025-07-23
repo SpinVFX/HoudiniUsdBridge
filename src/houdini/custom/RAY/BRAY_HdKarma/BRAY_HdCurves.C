@@ -560,6 +560,7 @@ BRAY_HdCurves::Sync(HdSceneDelegate *sceneDelegate,
     {
         UT_ErrorLog::format(8, "Assign {} to {}", matId.path(), id);
 	myMesh.setMaterial(scene, material, props);
+        scene.updateObject(myMesh, BRAY_EVENT_MATERIAL);
     }
 
     myMesh.setCoordSysAliases(scene,
