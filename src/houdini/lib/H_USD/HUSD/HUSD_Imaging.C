@@ -698,6 +698,7 @@ HUSD_Imaging::HUSD_Imaging()
     : myLastCompositedBufferSet(BUFFER_NONE),
       myIsPaused(false),
       myAllowUpdates(true),
+      myAllowStormRenderer(true),
       myHandlingCopTextureChange(false)
 {
     myPrivate = UTmakeUnique<husd_ImagingPrivate>(*this);
@@ -961,6 +962,12 @@ HUSD_Imaging::setAspectPolicy(HUSD_AspectConformPolicy p)
         myConformPolicy = CameraUtilMatchVertically;
     else if(p == HUSD_AspectConformPolicy::ADJUST_PIXEL_ASPECT)
         myConformPolicy = CameraUtilDontConform;
+}
+
+void
+HUSD_Imaging::setAllowStormRenderer(bool allow_storm)
+{
+    myAllowStormRenderer = allow_storm;
 }
 
 bool
@@ -1275,6 +1282,7 @@ HUSD_Imaging::setupRenderer(const UT_StringRef &renderer_name,
         params.allowAsynchronousSceneProcessing = false;
         params.enable_usd_draw_modes = drawmode;
         params.use_scene_indices = HUSD_Info::getUsingStageSceneIndex();
+        params.force_null_hgi = !myAllowStormRenderer;
         
 	myPrivate->myImagingEngine =
             XUSD_ImagingEngine::createImagingEngine(params);

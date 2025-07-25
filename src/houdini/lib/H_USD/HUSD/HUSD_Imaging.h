@@ -113,6 +113,11 @@ public:
     void		 setMaterials(bool enable);
     void                 setAspectPolicy(HUSD_AspectConformPolicy p);
 
+    // Pass false to this method before setting up the renderer. This
+    // causes the XUSD_ImagingEngineGL object to be created with the
+    // "Null Hgi" instead of the standard OpenGL Hgi.
+    void                 setAllowStormRenderer(bool allow_storm);
+
     enum BufferSet
     {
         BUFFER_COLOR_DEPTH,
@@ -251,8 +256,8 @@ public:
                                  fpreal resscale=0.0,
                                  const UT_Vector4F &render_region={ 0.0, 0.0, 0.0, 0.0 });
 
-    const UT_StringArray &rendererPlanes() const { return myPlaneList; }
-    bool                 setOutputPlane(const UT_StringRef &name);
+    const UT_StringArray  &rendererPlanes() const { return myPlaneList; }
+    bool                   setOutputPlane(const UT_StringRef &name);
     const UT_StringHolder &outputPlane() const { return myOutputPlane; }
     const UT_StringHolder &currentAov() const { return myCurrentAOV; }
 
@@ -371,6 +376,7 @@ private:
                                          myAOVsStashed : 1;
     bool                                 myIsPaused;
     bool                                 myAllowUpdates;
+    bool                                 myAllowStormRenderer;
     HUSD_Scene				*myScene;
     UT_StringHolder			 myRendererName;
     HUSD_Compositor			*myCompositor;

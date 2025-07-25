@@ -185,6 +185,7 @@ public:
         bool use_scene_indices = false;
         bool enable_gpu_context = true;
         bool create_offline_gpu_render = false;
+        bool force_null_hgi = false;
         bool fast_path_color = true;    // Direct render color buffer
         /// @}
     };
