@@ -2645,7 +2645,10 @@ XUSD_HydraGeoCurves::Sync(HdSceneDelegate *scene_delegate,
     else 
     {
         if (is_wireframe)
-        {
+        {    
+            // add gl_wireframe attrib to signal to VK that should be
+            // drawn as unlit wires
+            // TODO: check how GL renderer handles this without the attrib
             GT_DataArrayHandle dh = new GT_DAConstantValue<int32>(1, 1, 1);
             attrib_list[GT_OWNER_DETAIL] = attrib_list[GT_OWNER_DETAIL]->
                 addAttribute("gl_wireframe"_sh, dh, true);
@@ -3141,6 +3144,13 @@ XUSD_HydraGeoBounds::Sync(HdSceneDelegate *scene_delegate,
     updateAttrib(HdTokens->displayOpacity, "Alpha"_sh,
 		 scene_delegate, id, dirty_bits, gt_prim, attrib_list,
                  GT_TYPE_NONE, freq);
+
+    // add gl_wireframe attrib to signal to VK that should be
+    // drawn as unlit wires
+    // TODO: check how GL renderer handles this without the attrib
+    GT_DataArrayHandle dh = new GT_DAConstantValue<int32>(1, 1, 1);
+    attrib_list[GT_OWNER_DETAIL] = attrib_list[GT_OWNER_DETAIL]->
+                addAttribute("gl_wireframe"_sh, dh, true);
 
     GfRange3d extents = scene_delegate->GetExtent(id);
 
