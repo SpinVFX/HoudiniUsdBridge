@@ -956,6 +956,21 @@ HUSD_BindMaterial::unbind( const HUSD_FindPrims &find_prims,
     return ok;
 }
 
+static SdfPath
+husdConvertDefaultPrimTokenToPath(const TfToken &default_prim)
+{
+    const std::string &path_string = default_prim.GetString();
+    if (!SdfPath::IsValidPathString(path_string)) {
+        return SdfPath();
+    }
+    const SdfPath path(path_string);
+    return path.IsPrimPath()
+        ? path.IsAbsolutePath()
+            ? path
+            : path.MakeAbsolutePath(SdfPath::AbsoluteRootPath())
+        : SdfPath();
+}
+
 bool
 HUSD_BindMaterial::assignMaterialsFromAttribute(
         const UT_StringRef &layername,
@@ -979,6 +994,17 @@ HUSD_BindMaterial::assignMaterialsFromAttribute(
         HUSDconvertToFileFormatArguments(args, sdfargs);
         layer = SdfLayer::Find(layername.toStdString(), sdfargs);
         edit_source_layer = false;
+
+        // If we have a reference, refprimpath might be set to automatic or
+        // default so we need to determine the actual reference prim path.
+        UsdStageRefPtr temp_stage;
+        sdfrefprimpath = HUSDgetBestRefPrimPath(
+                layername, sdfargs, refprimpath, temp_stage);
+        if (sdfrefprimpath.IsEmpty() && layer)
+        {
+            sdfrefprimpath = husdConvertDefaultPrimTokenToPath(
+                    layer->GetDefaultPrim());
+        }
     }
     else
     {
