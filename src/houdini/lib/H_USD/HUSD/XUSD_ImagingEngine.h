@@ -494,6 +494,7 @@ protected:
     // Note that we'll only ever use one of _sceneIndex/_sceneDelegate
     // at a time...
     UsdImagingStageSceneIndexRefPtr _stageSceneIndex;
+    HdNoticeBatchingSceneIndexRefPtr _postInstancingNoticeBatchingSceneIndex;
     UsdImagingSelectionSceneIndexRefPtr _selectionSceneIndex;
     UsdImagingRootOverridesSceneIndexRefPtr _rootOverridesSceneIndex;
     HdsiLegacyDisplayStyleOverrideSceneIndexRefPtr _displayStyleSceneIndex;

@@ -59,6 +59,31 @@ namespace
     using _RenderInstanceAppSceneIndicesTracker = HdUtils::RenderInstanceTracker<
         XUSD_ImagingEngine::_AppSceneIndices>;
     TfStaticData<_RenderInstanceAppSceneIndicesTracker> s_renderInstanceTracker;
+
+    // RAII helper to enable and disable notice batching when using the stage scene
+    // index.
+    class _ScopedHydraNoticeBatch
+    {
+    public:
+        _ScopedHydraNoticeBatch(
+             const HdNoticeBatchingSceneIndexRefPtr &noticeBatchingSceneIndex)
+            : _noticeBatchingSceneIndex(noticeBatchingSceneIndex)
+        {
+            if (_noticeBatchingSceneIndex) {
+                _noticeBatchingSceneIndex->SetBatchingEnabled(true);
+            }
+        }
+
+        ~_ScopedHydraNoticeBatch()
+        {
+            if (_noticeBatchingSceneIndex) {
+                _noticeBatchingSceneIndex->SetBatchingEnabled(false);
+            }
+        }
+
+    private:
+        HdNoticeBatchingSceneIndexRefPtr _noticeBatchingSceneIndex;
+    };
 }
 
 UT_UniquePtr<XUSD_ImagingEngine>
@@ -464,6 +489,8 @@ XUSD_ImagingEngine::createSceneAPI(bool display_unloaded,
                 UsdImagingCreateSceneIndices(info);
 
         _stageSceneIndex = sceneIndices.stageSceneIndex;
+        _postInstancingNoticeBatchingSceneIndex =
+            sceneIndices.postInstancingNoticeBatchingSceneIndex;
         _selectionSceneIndex = sceneIndices.selectionSceneIndex;
         _sceneIndex = sceneIndices.finalSceneIndex;
 
@@ -490,6 +517,7 @@ XUSD_ImagingEngine::destroyCommonHydraResources()
         if (_renderIndex && _sceneIndex) {
             _renderIndex->RemoveSceneIndex(_sceneIndex);
             _stageSceneIndex = nullptr;
+            _postInstancingNoticeBatchingSceneIndex = nullptr;
             _rootOverridesSceneIndex = nullptr;
             _selectionSceneIndex = nullptr;
             _displayStyleSceneIndex = nullptr;
@@ -518,6 +546,8 @@ XUSD_ImagingEngine::populateScene(const UsdPrim &root, bool enable_usd_draw_mode
         auto stage = root.GetStage();
         if (_useSceneIndices)
         {
+            _ScopedHydraNoticeBatch noticeBatch(
+                    _postInstancingNoticeBatchingSceneIndex);
             TF_VERIFY(_stageSceneIndex);
             _stageSceneIndex->SetStage(stage);
 
@@ -642,7 +672,11 @@ void
 XUSD_ImagingEngine::applyPendingUpdates()
 {
     if (_useSceneIndices)
+    {
+        _ScopedHydraNoticeBatch noticeBatch(
+                _postInstancingNoticeBatchingSceneIndex);
         _stageSceneIndex->ApplyPendingUpdates();
+    }
     else
         _sceneDelegate->ApplyPendingUpdates();
 }
