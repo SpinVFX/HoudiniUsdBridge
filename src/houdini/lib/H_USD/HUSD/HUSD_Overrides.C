@@ -459,9 +459,12 @@ namespace
                         removeApiSchema(primspec,
                             UsdSchemaRegistry::GetSchemaTypeName(
                                 TfType::Find<UsdGeomModelAPI>()));
-                        primspec->RemoveProperty(applydrawmodespec);
-                        primspec->RemoveProperty(drawmodespec);
-                        primspec->RemoveProperty(extentshintspec);
+                        if (applydrawmodespec)
+                            primspec->RemoveProperty(applydrawmodespec);
+                        if (drawmodespec)
+                            primspec->RemoveProperty(drawmodespec);
+                        if (extentshintspec)
+                            primspec->RemoveProperty(extentshintspec);
                         layer->RemovePrimIfInert(primspec);
                         changed = true;
                     }
