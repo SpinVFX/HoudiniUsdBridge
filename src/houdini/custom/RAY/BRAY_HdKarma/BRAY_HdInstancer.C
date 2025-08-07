@@ -24,6 +24,7 @@
 
 #include "BRAY_HdInstancer.h"
 #include "BRAY_HdFormat.h"
+#include "BRAY_HdTokens.h"
 
 #include <pxr/imaging/hd/instancedBySchema.h>
 #include <pxr/imaging/hd/instancerTopologySchema.h>
@@ -60,6 +61,18 @@ namespace
 	static UT_Set<TfToken>	theTokens({
                 HdTokens->velocities,
                 HdTokens->accelerations,
+                //UsdGeomTokens->angularVelocities
+	});
+	return theTokens;
+    }
+
+    static UT_Set<TfToken> &
+    transformVisTokens()
+    {
+	static UT_Set<TfToken>	theTokens({
+                HdTokens->velocities,
+                HdTokens->accelerations,
+                BRAYHdTokens->karma_object_rendervisibility,
                 //UsdGeomTokens->angularVelocities
 	});
 	return theTokens;
@@ -1063,7 +1076,7 @@ BRAY_HdInstancer::syncPrimvars(HdSceneDelegate* delegate,
                         propstmp,
                         HdInterpolationConstant,
                         BRAY_HdUtil::PrimvarSpan(),
-                        &transformTokens(),
+                        &transformVisTokens(),
                         false);
     }
 }
