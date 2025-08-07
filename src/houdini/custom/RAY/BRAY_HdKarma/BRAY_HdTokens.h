@@ -139,6 +139,7 @@ PXR_NAMESPACE_OPEN_SCOPE
     ((karma_camera_use_lensshader, "karma:camera:use_lensshader"))      \
     ((karma_global_rendercamera, "karma:global:rendercamera"))          \
     ((karma_global_engine, "karma:global:engine"))                      \
+    ((karma_object_rendervisibility, "karma:object:rendervisibility"))  \
     \
     ((aovDescriptor_aovSettings,         "aovDescriptor.aovSettings"))  \
     ((driver_parameters_aov_name,        "driver:parameters:aov:name")) \
