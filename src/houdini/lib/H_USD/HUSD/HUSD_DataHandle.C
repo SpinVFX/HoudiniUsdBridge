@@ -59,50 +59,39 @@ void _getSavePaths(const SdfLayerRefPtr layer, UT_StringArray &paths)
     }
 }
 
-void getRecursiveSublayerInfo(SdfLayerRefPtr layer, UT_StringArray &identifiers)
+void getRecursiveSublayerInfo(const SdfLayerRefPtr layer, UT_StringArray &o_identifiers)
 {
-    for (const std::string &sublayeridentifier : layer->GetSubLayerPaths())
+    // Need a copy of each sublayer path since it might get modified by
+    // HUSDgetSavePath
+    for (std::string sublayeridentifier : layer->GetSubLayerPaths())
     {
-        std::string assetidentifier = sublayeridentifier;
         SdfLayerRefPtr sublayer = SdfLayer::FindRelativeToLayer(layer, sublayeridentifier);
-        if (!sublayer) // TODO: is this necessary?
+        if (!sublayer)
             sublayer = SdfLayer::Find(sublayeridentifier);
 
         if (sublayer)
         {
+            // don't want to target placeholder layers
             if (HUSDisLayerPlaceholder(sublayer))
-            {
-                // don't want to target placeholder layers
                 continue;
-            }
 
+            // if sublayer is a Lop Layer, we are only interested in editing
+            // it if it has a save path set (otherwise it's difficult to target
+            // by identifier)
             if (HUSDisLopLayer(sublayer))
-            {
-                // if sublayer is a Lop Layer, we are only interested in editing
-                // it if it has a save path set (otherwise it's difficult to target
-                // by identifier)
-                if (!HUSDgetSavePath(sublayer, assetidentifier))
-                {
+                if (!HUSDgetSavePath(sublayer, sublayeridentifier))
                     continue;
-                }
-            }
-            UT_String identifier(assetidentifier);
-            // need to strip the layer.ext off the anchor layer's identifier
-            // to properly resolve relative identifiers
-            UT_String anchorLayer(layer->GetResolvedPath().GetPathString());
-            UT_String anchor, filename;
-            anchorLayer.splitPath(anchor, filename);
-            UTmakeAbsoluteFilePath(identifier, anchor);
-            identifiers.append(identifier);
-            getRecursiveSublayerInfo(sublayer, identifiers);
+
+            o_identifiers.append(
+                layer->ComputeAbsolutePath(sublayeridentifier));
+            getRecursiveSublayerInfo(sublayer, o_identifiers);
         }
         else
         {
             // even if the sublayer doesn't exist, it's still (yet), it's position
             // in the sublayer stack is still a valid place to edit.
-            UT_StringHolder identifier(sublayeridentifier);
-            UTmakeAbsoluteFilePath(identifier, layer->GetResolvedPath().GetPathString().c_str());
-            identifiers.append(identifier);
+            o_identifiers.append(
+                layer->ComputeAbsolutePath(sublayeridentifier));
         }
     }
 }
