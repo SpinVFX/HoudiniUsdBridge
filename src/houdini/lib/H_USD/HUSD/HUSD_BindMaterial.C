@@ -976,6 +976,7 @@ HUSD_BindMaterial::assignMaterialsFromAttribute(
         const UT_StringRef &layername,
         const UT_StringMap<UT_StringHolder> &args,
         const UT_StringRef &primpath,
+        bool loadasreference,
         const UT_StringRef &refprimpath,
         const UT_StringRef &attrname,
         bool remove_attr,
@@ -985,7 +986,7 @@ HUSD_BindMaterial::assignMaterialsFromAttribute(
     SdfLayerRefPtr layer;
     UsdStageRefPtr stage;
     SdfPath sdfprimpath(HUSDgetSdfPath(primpath));
-    SdfPath sdfrefprimpath(HUSDgetSdfPath(refprimpath));
+    SdfPath sdfrefprimpath;
     bool edit_source_layer = false;
 
     if (layername.isstring())
@@ -995,15 +996,19 @@ HUSD_BindMaterial::assignMaterialsFromAttribute(
         layer = SdfLayer::Find(layername.toStdString(), sdfargs);
         edit_source_layer = false;
 
-        // If we have a reference, refprimpath might be set to automatic or
-        // default so we need to determine the actual reference prim path.
-        UsdStageRefPtr temp_stage;
-        sdfrefprimpath = HUSDgetBestRefPrimPath(
-                layername, sdfargs, refprimpath, temp_stage);
-        if (sdfrefprimpath.IsEmpty() && layer)
+        // If we have a reference, refprimpath might be set to automatic,
+        // default, or the empty string, so we need to determine the actual
+        // reference prim path.
+        if (loadasreference)
         {
-            sdfrefprimpath = husdConvertDefaultPrimTokenToPath(
-                    layer->GetDefaultPrim());
+            UsdStageRefPtr temp_stage;
+            sdfrefprimpath = HUSDgetBestRefPrimPath(
+                    layername, sdfargs, refprimpath, temp_stage);
+            if (sdfrefprimpath.IsEmpty() && layer)
+            {
+                sdfrefprimpath = husdConvertDefaultPrimTokenToPath(
+                        layer->GetDefaultPrim());
+            }
         }
     }
     else
