@@ -156,6 +156,7 @@ public:
     bool                         setEditLayer(int root_index,
                                         const UT_IntArray &nested_indices);
     bool			 endEditLayer();
+    bool                         inEditLayerBlock() const;
 
     UT_StringArray               outputPaths() const;
     void                         editableLayerIdentifiers(
@@ -218,6 +219,7 @@ private:
     PXR_NS::XUSD_DataLockPtr	 myDataLock;
     HUSD_MirroringType		 myMirroring;
     int				 myNodeId;
+    int                          myEditBlockCount;
 };
 
 // Parent class for read and write locks that permits reading.

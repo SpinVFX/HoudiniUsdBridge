@@ -915,7 +915,10 @@ XUSD_Data::createReplacementLayer(const XUSD_Data &src,
                 myNewLayer->GetIdentifier(), new_layer_position);
 
             UT_String path(new_layer_name.toStdString());
-            UTmakeAbsoluteFilePath(path, found_identifier);
+            UT_String parentpath(resolved_found_identifier.toStdString());
+            UT_String dir, file;
+            parentpath.splitPath(dir, file);
+            UTmakeAbsoluteFilePath(path, dir);
             HUSDsetSavePath(myNewLayer, path, false);
         }
 
@@ -2669,6 +2672,9 @@ XUSD_Data::afterLock(bool for_write,
 SdfLayerRefPtr
 XUSD_Data::resolveSourceLayer() const
 {
+    if (myActiveLayerIndex >= mySourceLayers.size())
+        return nullptr;
+
     SdfLayerRefPtr layer = mySourceLayers[myActiveLayerIndex].myLayer;
     if (myActiveLayerIndices.size() > 0)
     {
@@ -2700,7 +2706,6 @@ XUSD_Data::resolveSourceLayer() const
 SdfLayerRefPtr
 XUSD_Data::resolveStageLayer() const
 {
-    //TODO: check this is working right...
     SdfLayerRefPtr layer = (*myStageLayers)(myActiveLayerIndex);
     if (myActiveLayerIndices.size() > 0)
     {

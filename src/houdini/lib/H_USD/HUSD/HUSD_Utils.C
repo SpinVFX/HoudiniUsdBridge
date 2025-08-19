@@ -723,6 +723,22 @@ HUSDgetUsdParentPath(const UT_StringRef &primpath)
 }
 
 UT_StringHolder
+HUSDremoveInstanceId(const UT_StringHolder &selectionpath)
+{
+    int instidstart = selectionpath.findCharIndex('[');
+    if (instidstart < 0)
+        return selectionpath;
+
+    UT_String newpath(selectionpath);
+    if (newpath.findChar('['))
+    {
+        newpath.harden();
+        *newpath.findChar('[') = '\0';
+    }
+    return UT_StringHolder(newpath);
+}
+
+UT_StringHolder
 HUSDmakeValidPathExpression(const UT_StringHolder &path_expr)
 {
     if (path_expr.findCharIndex('\n') >= 0 ||

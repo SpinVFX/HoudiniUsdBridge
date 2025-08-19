@@ -88,8 +88,9 @@ void getRecursiveSublayerInfo(const SdfLayerRefPtr layer, UT_StringArray &o_iden
         }
         else
         {
-            // even if the sublayer doesn't exist, it's still (yet), it's position
-            // in the sublayer stack is still a valid place to edit.
+            // even if the sublayer doesn't exist (yet), it's position
+            // in the sublayer stack is still a valid place to edit and will
+            // be given this identifier as a savepath.
             o_identifiers.append(
                 layer->ComputeAbsolutePath(sublayeridentifier));
         }
@@ -252,7 +253,8 @@ HUSD_AutoLayerLock::constData() const
 
 HUSD_DataHandle::HUSD_DataHandle(HUSD_MirroringType mirroring)
     : myNodeId(OP_INVALID_ITEM_ID),
-      myMirroring(mirroring)
+      myMirroring(mirroring),
+      myEditBlockCount(0)
 {
 }
 
@@ -264,7 +266,8 @@ HUSD_DataHandle::HUSD_DataHandle(const HUSD_DataHandle &src)
 
 HUSD_DataHandle::HUSD_DataHandle(void *stage_ptr)
     : myNodeId(OP_INVALID_ITEM_ID),
-      myMirroring(HUSD_EXTERNAL_STAGE)
+      myMirroring(HUSD_EXTERNAL_STAGE),
+      myEditBlockCount(0)
 {
     UsdStageWeakPtr stage =
             BOOST_NS::python::extract<UsdStageWeakPtr>((PyObject*)stage_ptr);
@@ -274,7 +277,8 @@ HUSD_DataHandle::HUSD_DataHandle(void *stage_ptr)
 
 HUSD_DataHandle::HUSD_DataHandle(const UT_StringRef &filepath)
     : myNodeId(OP_INVALID_ITEM_ID),
-      myMirroring(HUSD_EXTERNAL_STAGE)
+      myMirroring(HUSD_EXTERNAL_STAGE),
+      myEditBlockCount(0)
 {
     UsdStageRefPtr stage = UsdStage::Open(filepath.toStdString());
 
@@ -315,6 +319,7 @@ HUSD_DataHandle::reset(int nodeid)
     myData.reset();
     myDataLock.reset();
     myNodeId = nodeid;
+    myEditBlockCount = 0; // TODO: when is this called
 }
 
 const HUSD_DataHandle &
@@ -326,6 +331,7 @@ HUSD_DataHandle::operator=(const HUSD_DataHandle &src)
     myData = src.myData;
     myDataLock = src.myDataLock;
     myNodeId = src.myNodeId;
+    myEditBlockCount = src.myEditBlockCount;
 
     return *this;
 }
@@ -380,6 +386,7 @@ HUSD_DataHandle::createNewData(const HUSD_LoadMasksPtr &load_masks,
             UsdStageWeakPtr(), nullptr);
     }
     myDataLock = myData->myDataLock;
+    myEditBlockCount = 0;
 }
 
 bool
@@ -404,6 +411,7 @@ HUSD_DataHandle::createSoftCopy(const HUSD_DataHandle &src,
 	success = true;
     }
     myDataLock = myData->myDataLock;
+    myEditBlockCount = src.myEditBlockCount;
 
     return success;
 }
@@ -432,6 +440,7 @@ HUSD_DataHandle::createCopyWithReplacement(
 	success = true;
     }
     myDataLock = myData->myDataLock;
+    myEditBlockCount = src.myEditBlockCount;
 
     return success;
 }
@@ -469,13 +478,41 @@ HUSD_DataHandle::createReplacementLayer(const HUSD_DataHandle &src,
 }
 
 bool
+HUSD_DataHandle::inEditLayerBlock() const
+{
+    return myEditBlockCount > 0;
+}
+
+bool
 HUSD_DataHandle::setEditLayer(int root_index,
         const UT_IntArray &nested_indices)
 {
-    bool		 success = false;
-
+    bool success = false;
     if (myData)
+    {
+        if (inEditLayerBlock())
+        {
+            // we're already in an edit block, so root_index and nested_indices
+            // must contain myData->activeLayerIndex & myData->activeLayerIndices
+            if (root_index != myData->myActiveLayerIndex ||
+                nested_indices.size() <= myData->myActiveLayerIndices.size())
+            {
+                HUSD_ErrorScope::addError(HUSD_ERR_INVALID_TARGET_LAYER);
+                return false;
+            }
+            for (int i = 0; i < myData->myActiveLayerIndices.size(); ++i)
+            {
+                if (nested_indices[i] != myData->myActiveLayerIndices[i])
+                {
+                    HUSD_ErrorScope::addError(HUSD_ERR_INVALID_TARGET_LAYER);
+                    return false;
+                }
+            }
+        }
         success = myData->setEditLayer(root_index, nested_indices);
+        if (success)
+            ++myEditBlockCount;
+    }
 
     return success;
 }
@@ -509,34 +546,12 @@ HUSD_DataHandle::editableLayerIdentifiers(UT_StringArray &identifiers) const
     {
         // TODO: Ensure we are resolving using the same context as the incoming stage
         // ArResolverContextBinder binder(lock.constData()->stage()->GetPathResolverContext());
-        for (XUSD_LayerAtPath sublayerpath : lock.constData()->sourceLayers())
-        {
-            SdfLayerRefPtr sublayer = SdfLayer::Find(sublayerpath.myIdentifier);
-            if (!sublayer)
-            {
-                identifiers.append(sublayerpath.myIdentifier);
-                continue;
-            }
-
-            if (HUSDisLayerPlaceholder(sublayer))
-                continue;
-
-            std::string assetidentifier;
-            if (HUSDisLopLayer(sublayer))
-            {
-                if (!HUSDgetSavePath(sublayer, assetidentifier))
-                {
-                    continue;
-                }
-            }
-            else
-            {
-                assetidentifier = sublayerpath.myIdentifier;
-            }
-
-            identifiers.append(assetidentifier);
-            getRecursiveSublayerInfo(sublayer, identifiers);
-        }
+        SdfLayerRefPtr rootlayer;
+        if (inEditLayerBlock())
+            rootlayer = myData->activeLayer();
+        else
+            rootlayer = SdfLayer::Find(myData->rootLayerIdentifier());
+        getRecursiveSublayerInfo(rootlayer, identifiers);
     }
 }
 
@@ -544,9 +559,12 @@ bool
 HUSD_DataHandle::endEditLayer()
 {
     HUSD_AutoWriteLock	 lock(*this);
+    XUSD_DataPtr         data = lock.data();
     if (lock.data() && lock.data()->isStageValid())
     {
         lock.data()->addLayer();
+        if (inEditLayerBlock())
+            --myEditBlockCount;
         return true;
     }
     return false;

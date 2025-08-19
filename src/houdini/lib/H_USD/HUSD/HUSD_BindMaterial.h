@@ -107,6 +107,7 @@ public:
                         const UT_StringRef &layername,
                         const UT_StringMap<UT_StringHolder> &args,
                         const UT_StringRef &primpath,
+                        bool loadasreference,
                         const UT_StringRef &refprimpath,
                         const UT_StringRef &attrname,
                         bool remove_attr,

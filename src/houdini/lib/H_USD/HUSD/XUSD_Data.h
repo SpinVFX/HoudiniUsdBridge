@@ -329,6 +329,7 @@ private:
                                 UT_StringHolder &out_replacement_identifier,
                                 int &out_found_layer_root_index,
                                 UT_IntArray &out_found_layer_indices);
+
     bool                 setEditLayer(int root_index,
                                 const UT_IntArray &nested_indices);
 

@@ -280,6 +280,11 @@ HUSDgetUsdName(const UT_StringRef &primpath);
 HUSD_API UT_StringHolder
 HUSDgetUsdParentPath(const UT_StringRef &primpath);
 
+// Returns the provided selection path with any instance id portion stripped
+// off (e.g. /foo[6] -> /foo, but also /foo -> /foo).
+HUSD_API UT_StringHolder
+HUSDremoveInstanceId(const UT_StringHolder &selectionpath);
+
 // Gives us a chance to fix problems in path expressions before passing them
 // to USD. Many errors we can't fix, but simple ones like using spaces instead
 // of \n or \t characters can be.
