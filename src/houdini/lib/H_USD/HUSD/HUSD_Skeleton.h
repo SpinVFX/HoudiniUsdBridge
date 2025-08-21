@@ -54,6 +54,17 @@ enum class HUSD_SkeletonPoseType
     RestPose
 };
 
+enum class HUSD_ClipRangeMode
+{
+    /// Uses the stage's time code range.
+    Stage,
+    /// Uses the range of time samples for attributes which are used to compute
+    /// the skeleton animation.
+    SkelAnimation,
+    /// Use a manually-specified time code range.
+    Custom
+};
+
 /// Opaque type containing cached data for HUSDimportSkeletonPose(). The cache
 /// is initialized by HUSDimportSkeleton().
 class HUSD_API HUSD_SkeletonCache
@@ -134,7 +145,11 @@ HUSDimportAgentShapes(GU_AgentShapeLib &shapelib,
 HUSD_API GU_AgentClipPtr
 HUSDimportAgentClip(const GU_AgentRigConstPtr &rig,
                     HUSD_AutoReadLock &readlock,
-                    const UT_StringRef &skelrootpath);
+                    const UT_StringRef &skelrootpath,
+                    HUSD_ClipRangeMode clip_range_mode,
+                    HUSD_TimeCode custom_start_tc,
+                    HUSD_TimeCode custom_end_tc,
+                    fpreal64 custom_tc_per_s);
 
 /// Import clips from the provided primitive pattern, which can match against
 /// either SkelRoot or Skeleton prims.
@@ -142,6 +157,10 @@ HUSDimportAgentClip(const GU_AgentRigConstPtr &rig,
 HUSD_API UT_Array<GU_AgentClipPtr>
 HUSDimportAgentClips(const GU_AgentRigConstPtr &rig,
                      HUSD_AutoReadLock &readlock,
-                     const UT_StringRef &prim_pattern);
+                     const UT_StringRef &prim_pattern,
+                     HUSD_ClipRangeMode clip_range_mode,
+                     HUSD_TimeCode custom_start_tc,
+                     HUSD_TimeCode custom_end_tc,
+                     fpreal64 custom_tc_per_s);
 
 #endif

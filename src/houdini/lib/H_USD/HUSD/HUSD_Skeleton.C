@@ -495,7 +495,7 @@ HUSDimportSkeletonPose(
             }
 
             // Evaluate the blend shape channels.
-            UsdSkelAnimQuery animquery = skelquery.GetAnimQuery();
+            const UsdSkelAnimQuery &animquery = skelquery.GetAnimQuery();
             if (animquery.IsValid())
             {
                 channel_names = animquery.GetBlendShapeOrder();
@@ -856,19 +856,206 @@ HUSDimportAgentShapes(GU_AgentShapeLib &shapelib,
     return true;
 }
 
+/// Builds the time code range from the stage's start / end time code metadata.
+static bool
+husdGetTimeCodeRangeFromStage(
+        HUSD_AutoReadLock &readlock,
+        UsdTimeCode &start_tc,
+        UsdTimeCode &end_tc,
+        fpreal64 &tc_per_s)
+{
+    HUSD_Info info(readlock);
+
+    tc_per_s = 0;
+    info.getTimeCodesPerSecond(tc_per_s);
+
+    fpreal64 start_tc_val = 0;
+    fpreal64 end_tc_val = 0;
+    if (!info.getStartTimeCode(start_tc_val)
+        || !info.getEndTimeCode(end_tc_val))
+    {
+        HUSD_ErrorScope::addWarning(
+                HUSD_ERR_STRING, "Unable to determine frame range: stage does "
+                                 "not specify a valid start time code "
+                                 "and end time code. This metadata can be set "
+                                 "with the Configure Layer LOP.");
+        return false;
+    }
+
+    start_tc = UsdTimeCode(start_tc_val);
+    end_tc = UsdTimeCode(end_tc_val);
+    return true;
+}
+
+/// Update the start / end timecode from a particular attribute's list of time
+/// samples.
+static void
+husdCombineTimeSamples(
+        const std::vector<double> &times,
+        double &start_tc,
+        double &end_tc)
+{
+    if (times.empty())
+        return;
+
+    start_tc = SYSmin(start_tc, times.front());
+    end_tc = SYSmax(end_tc, times.back());
+}
+
+/// Builds the time code range from the time samples of attributes which affect
+/// the skeleton animation (the SkelAnimation attributes, and the Skeleton
+/// prim's xform).
+static bool
+husdGetTimeCodeRangeFromSkelAnimation(
+        HUSD_AutoReadLock &readlock,
+        const UsdSkelSkeleton &skel,
+        const UsdSkelAnimQuery &anim_query,
+        UsdTimeCode &start_tc,
+        UsdTimeCode &end_tc,
+        fpreal64 &tc_per_s)
+{
+    if (!skel || !anim_query.IsValid())
+        return false;
+
+    // Use the stage's time codes per second metadata.
+    HUSD_Info info(readlock);
+    tc_per_s = 0;
+    info.getTimeCodesPerSecond(tc_per_s);
+
+    // Include time samples from the joint xforms and blendshape weights.
+    double start_tc_val = SYS_FP64_MAX;
+    double end_tc_val = SYS_FP64_MIN;
+
+    std::vector<double> times;
+    anim_query.GetJointTransformTimeSamples(&times);
+    husdCombineTimeSamples(times, start_tc_val, end_tc_val);
+
+    times.clear();
+    anim_query.GetBlendShapeWeightTimeSamples(&times);
+    husdCombineTimeSamples(times, start_tc_val, end_tc_val);
+
+    // Include time samples for the skeleton prim's xform.
+    for (UsdPrim p = skel.GetPrim(); !p.IsPseudoRoot(); p = p.GetParent())
+    {
+        const UsdGeomXformable xformable(p);
+        if (!xformable)
+            continue;
+
+        const UsdGeomXformable::XformQuery query(xformable);
+        times.clear();
+        query.GetTimeSamples(&times);
+        husdCombineTimeSamples(times, start_tc_val, end_tc_val);
+
+        if (query.GetResetXformStack())
+            break;
+    }
+
+    if (SYSisGreater(start_tc_val, end_tc_val))
+    {
+        HUSD_ErrorScope::addWarning(
+                HUSD_ERR_STRING,
+                "SkelAnimation does not contain any time samples");
+        return false;
+    }
+
+    start_tc = UsdTimeCode(start_tc_val);
+    end_tc = UsdTimeCode(end_tc_val);
+    return true;
+}
+
+/// Determines the frame rate and time codes to sample from the stage.
+static void
+husdGetTimeCodesToSample(
+        HUSD_AutoReadLock &readlock,
+        HUSD_ClipRangeMode clip_range_mode,
+        const UsdSkelSkeleton &skel,
+        const UsdSkelAnimQuery &anim_query,
+        UsdTimeCode custom_start_tc,
+        UsdTimeCode custom_end_tc,
+        fpreal64 custom_tc_per_s,
+        UT_Array<UsdTimeCode> &timecodes,
+        fpreal64 &tc_per_s)
+{
+    bool success = true;
+    UsdTimeCode start_tc;
+    UsdTimeCode end_tc;
+    tc_per_s = 0;
+
+    switch (clip_range_mode)
+    {
+        case HUSD_ClipRangeMode::Stage:
+            success = husdGetTimeCodeRangeFromStage(
+                    readlock, start_tc, end_tc, tc_per_s);
+            break;
+        case HUSD_ClipRangeMode::SkelAnimation:
+            success = husdGetTimeCodeRangeFromSkelAnimation(
+                    readlock, skel, anim_query, start_tc, end_tc, tc_per_s);
+            break;
+        case HUSD_ClipRangeMode::Custom:
+            start_tc = custom_start_tc;
+            end_tc = custom_end_tc;
+            tc_per_s = custom_tc_per_s;
+            break;
+    };
+
+    // Validate the range and frame rate.
+    if (success && SYSisGreater(start_tc.GetValue(), end_tc.GetValue()))
+    {
+        UT_WorkBuffer msg;
+        msg.format(
+                "Invalid time range: {0} to {1}", start_tc.GetValue(),
+                end_tc.GetValue());
+        HUSD_ErrorScope::addWarning(HUSD_ERR_STRING, msg.buffer());
+        success = false;
+    }
+
+    if (success && SYSisLessOrEqual(tc_per_s, 0.0))
+    {
+        UT_WorkBuffer msg;
+        msg.format("Invalid number of time codes per second: {0}", tc_per_s);
+        HUSD_ErrorScope::addWarning(HUSD_ERR_STRING, msg.buffer());
+        success = false;
+    }
+
+    // If we couldn't determine the range, just import a single frame.
+    if (!success)
+    {
+        timecodes.append(UsdTimeCode::Default());
+        tc_per_s = 24.0;
+        return;
+    }
+
+    const exint count = SYSrint(end_tc.GetValue() - start_tc.GetValue()) + 1;
+    timecodes.setSizeNoInit(count);
+    for (exint i = 0; i < count; ++i)
+        timecodes[i] = UsdTimeCode(start_tc.GetValue() + i);
+}
+
 static GU_AgentClipPtr
 husdImportAgentClip(
         const GU_AgentRigConstPtr &rig,
+        HUSD_AutoReadLock &readlock,
         const UsdSkelSkeleton &skel,
         const UsdSkelSkeletonQuery &skelquery,
-        const UT_Array<UsdTimeCode> &timecodes,
-        fpreal64 tc_per_s)
+        HUSD_ClipRangeMode clip_range_mode,
+        UsdTimeCode custom_start_tc,
+        UsdTimeCode custom_end_tc,
+        fpreal64 custom_tc_per_s)
 {
     if (!skelquery.IsValid())
     {
         HUSD_ErrorScope::addError(HUSD_ERR_STRING, "Invalid skeleton query.");
         return nullptr;
     }
+
+    const UsdSkelTopology &topology = skelquery.GetTopology();
+    const UsdSkelAnimQuery &animquery = skelquery.GetAnimQuery();
+
+    UT_Array<UsdTimeCode> timecodes;
+    fpreal64 tc_per_s;
+    husdGetTimeCodesToSample(
+            readlock, clip_range_mode, skel, animquery, custom_start_tc,
+            custom_end_tc, custom_tc_per_s, timecodes, tc_per_s);
 
     // The rig's joint order may be different from the skeleton's joint order.
     VtTokenArray skel_joint_names;
@@ -884,9 +1071,6 @@ husdImportAgentClip(
         if (rig_idx >= 0)
             rig_to_skel[rig_idx] = i;
     }
-
-    const UsdSkelTopology &topology = skelquery.GetTopology();
-    const UsdSkelAnimQuery &animquery = skelquery.GetAnimQuery();
 
     auto clip = GU_AgentClip::addClip(skel.GetPath().GetName(), rig);
 
@@ -977,45 +1161,15 @@ husdImportAgentClip(
     return clip;
 }
 
-/// Determines the frame range and framerate from the stage.
-static void
-husdGetFrameRange(HUSD_AutoReadLock &readlock,
-                  UT_Array<UsdTimeCode> &timecodes,
-                  fpreal64 &tc_per_s)
-{
-    HUSD_Info info(readlock);
-
-    tc_per_s = 0;
-    info.getTimeCodesPerSecond(tc_per_s);
-
-    timecodes.clear();
-    fpreal64 start_time = 0;
-    fpreal64 end_time = 0;
-    if (!info.getStartTimeCode(start_time) || !info.getEndTimeCode(end_time) ||
-        SYSisGreater(start_time, end_time))
-    {
-        HUSD_ErrorScope::addWarning(
-                HUSD_ERR_STRING, "Unable to determine frame range: stage does "
-                                 "not specify a valid start time code "
-                                 "and end time code. This metadata can be set "
-                                 "with the Configure Layer LOP.");
-
-        // If there isn't a frame range specified, just import a single frame.
-        timecodes.append(UsdTimeCode::Default());
-    }
-    else
-    {
-        const exint num_samples = SYSrint(end_time - start_time) + 1;
-        timecodes.setSizeNoInit(num_samples);
-        for (exint i = 0; i < num_samples; ++i)
-            timecodes[i] = UsdTimeCode(start_time + i);
-    }
-}
-
 GU_AgentClipPtr
-HUSDimportAgentClip(const GU_AgentRigConstPtr &rig,
-                    HUSD_AutoReadLock &readlock,
-                    const UT_StringRef &skelrootpath)
+HUSDimportAgentClip(
+        const GU_AgentRigConstPtr &rig,
+        HUSD_AutoReadLock &readlock,
+        const UT_StringRef &skelrootpath,
+        HUSD_ClipRangeMode clip_range_mode,
+        HUSD_TimeCode custom_start_tc,
+        HUSD_TimeCode custom_end_tc,
+        fpreal64 custom_tc_per_s)
 {
     UsdSkelCache skelcache;
     std::vector<UsdSkelBinding> bindings;
@@ -1023,20 +1177,22 @@ HUSDimportAgentClip(const GU_AgentRigConstPtr &rig,
         return nullptr;
 
     const UsdSkelBinding &binding = bindings[0];
-
-    UT_Array<UsdTimeCode> timecodes;
-    fpreal64 tc_per_s = 0;
-    husdGetFrameRange(readlock, timecodes, tc_per_s);
-
     return husdImportAgentClip(
-            rig, binding.GetSkeleton(),
-            skelcache.GetSkelQuery(binding.GetSkeleton()), timecodes, tc_per_s);
+            rig, readlock, binding.GetSkeleton(),
+            skelcache.GetSkelQuery(binding.GetSkeleton()), clip_range_mode,
+            HUSDgetUsdTimeCode(custom_start_tc),
+            HUSDgetUsdTimeCode(custom_end_tc), custom_tc_per_s);
 }
 
 UT_Array<GU_AgentClipPtr>
-HUSDimportAgentClips(const GU_AgentRigConstPtr &rig,
-                     HUSD_AutoReadLock &readlock,
-                     const UT_StringRef &prim_pattern)
+HUSDimportAgentClips(
+        const GU_AgentRigConstPtr &rig,
+        HUSD_AutoReadLock &readlock,
+        const UT_StringRef &prim_pattern,
+        HUSD_ClipRangeMode clip_range_mode,
+        HUSD_TimeCode custom_start_tc,
+        HUSD_TimeCode custom_end_tc,
+        fpreal64 custom_tc_per_s)
 {
     HUSD_FindPrims findprims(readlock);
 
@@ -1088,8 +1244,9 @@ HUSDimportAgentClips(const GU_AgentRigConstPtr &rig,
     {
         for (const auto &skelrootpath : skelrootpaths)
         {
-            auto clip = HUSDimportAgentClip(rig, readlock,
-                skelrootpath.GetText());
+            auto clip = HUSDimportAgentClip(
+                    rig, readlock, skelrootpath.GetText(), clip_range_mode,
+                    custom_start_tc, custom_end_tc, custom_tc_per_s);
 
             if (!clip)
                 return UT_Array<GU_AgentClipPtr>();
@@ -1103,10 +1260,6 @@ HUSDimportAgentClips(const GU_AgentRigConstPtr &rig,
         UT_ASSERT(data && data->isStageValid());
 
         UsdSkelCache skelcache;
-        UT_Array<UsdTimeCode> timecodes;
-        fpreal64 tc_per_s = 0;
-        husdGetFrameRange(readlock, timecodes, tc_per_s);
-
         for (const auto &sdfpath : skeletonpaths)
         {
             UsdPrim prim(data->stage()->GetPrimAtPath(sdfpath));
@@ -1117,9 +1270,10 @@ HUSDimportAgentClips(const GU_AgentRigConstPtr &rig,
 
             UsdSkelSkeletonQuery skelquery = skelcache.GetSkelQuery(skel);
 
-            auto clip = husdImportAgentClip(
-                    rig, skel, skelcache.GetSkelQuery(skel), timecodes,
-                    tc_per_s);
+            GU_AgentClipPtr clip = husdImportAgentClip(
+                    rig, readlock, skel, skelcache.GetSkelQuery(skel),
+                    clip_range_mode, HUSDgetUsdTimeCode(custom_start_tc),
+                    HUSDgetUsdTimeCode(custom_end_tc), custom_tc_per_s);
             if (!clip)
                 return UT_Array<GU_AgentClipPtr>();
 
