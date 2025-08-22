@@ -3230,21 +3230,41 @@ public:
             if (keepoutsiderangeit != namedargs.end())
                 keepoutsiderange = parseBool(keepoutsiderangeit->second);
 
+            // Check if set inversion is requested.
+            bool invertselection = false;
+            auto invertselectionit = namedargs.find("invert");
+            if (invertselectionit != namedargs.end())
+                invertselection = parseBool(invertselectionit->second);
+
             for (auto it = myPaths.begin(); it != myPaths.end();)
             {
                 if ((count++ & 0x3FF) == 0 && boss.wasInterrupted())
                     break;
 
                 if (!keepoutsiderange && (idx < start || idx >= end))
-                    it = myPaths.erase(it);
+                {
+                    if (invertselection)
+                        ++it;
+                    else
+                        it = myPaths.erase(it);
+                }
                 else if (idx >= start && idx < end &&
                     (idx - start) % interval >= icount)
-                    it = myPaths.erase(it);
+                {
+                    if (invertselection)
+                        ++it;
+                    else
+                        it = myPaths.erase(it);
+                }
                 else
-                    ++it;
-
+                {
+                    if (invertselection)
+                        it = myPaths.erase(it);
+                    else
+                        ++it;
+                }
                 idx++;
-                if (idx >= end && keepoutsiderange)
+                if (idx >= end && ((keepoutsiderange && !invertselection) || (!keepoutsiderange && invertselection)))
                     break;
             }
         }
@@ -3317,7 +3337,15 @@ public:
             if (fractionit != namedargs.end())
                 parseFloat(fractionit->second, fraction);
 
+            bool invertselection = false;
+            auto invertselectionit = namedargs.find("invert");
+            if (invertselectionit != namedargs.end())
+                invertselection = parseBool(invertselectionit->second);
+
             exint removecount = (1.0 - fraction) * myPaths.size();
+            if (invertselection)
+                removecount = myPaths.size() - removecount;
+
             UT_AutoInterrupt boss("Primitive pattern evaluation: %keeprandom");
             int count = 0;
 
@@ -3336,15 +3364,24 @@ public:
                         hash++;
                 }
 
-                for (auto &&it : randommap)
+                auto remove_paths = [&](auto begin, auto end)
                 {
-                    if ((count++ & 0x3FF) == 0 && boss.wasInterrupted())
-                        break;
+                    for (auto it = begin; it != end; ++it)
+                    {
+                        if ((count++ & 0x3FF) == 0 && boss.wasInterrupted())
+                            break;
 
-                    myPaths.erase(it.second);
-                    if (--removecount == 0)
-                        break;
-                }
+                        myPaths.erase(it->second);
+                        if (--removecount == 0)
+                            break;
+                    }
+                };
+
+                // Set the direction for map traversal at runtime
+                if (invertselection)
+                    remove_paths(randommap.rbegin(), randommap.rend());
+                else
+                    remove_paths(randommap.begin(), randommap.end());
             }
         }
     }
