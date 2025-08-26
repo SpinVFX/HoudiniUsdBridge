@@ -128,17 +128,30 @@ XUSD_HydraCamera::Sync(HdSceneDelegate *del,
         myCamera.GuideScale(scale);
 
         SdfAssetPath image;
+        std::string path;
+
+        // Foreground image
         XUSD_HydraUtils::evalCameraAttrib(image, del, id,
             UsdHoudiniTokens->houdiniForegroundimage);
-        std::string path;
         path = image.GetResolvedPath();
-        
+        if(path.empty())
+        {
+            UT_StringHolder apath(image.GetAuthoredPath());
+            if(apath.startsWith("op:"))
+                path = apath;
+        }
         myCamera.ForegroundImage(path);
 
+        // Background image
         XUSD_HydraUtils::evalCameraAttrib(image, del, id,
             UsdHoudiniTokens->houdiniBackgroundimage);
         path = image.GetResolvedPath();
-
+        if(path.empty())
+        {
+            UT_StringHolder apath(image.GetAuthoredPath());
+            if(apath.startsWith("op:"))
+                path = apath;
+        }
         myCamera.BackgroundImage(path);
     }
     

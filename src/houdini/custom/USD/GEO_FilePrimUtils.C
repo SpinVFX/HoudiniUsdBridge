@@ -986,9 +986,7 @@ geoConvertToScalar(
         }
         else
         {
-            UT_ASSERT_MSG(
-                    false, "Unable to cast to the expected SdfValueTypeName");
-            return new GEO_FilePropConstantSource<T>(data[0]);
+            return nullptr;
         }
     }
 
@@ -1021,10 +1019,7 @@ geoConvertToScalar<std::string, std::string>(
                 SdfAssetPath(str.toStdString()));
     }
     else
-    {
-        UT_ASSERT_MSG(false, "Unexpected data type");
         return nullptr;
-    }
 }
 
 static inline TfToken
@@ -1196,6 +1191,13 @@ GEOinitProperty(GEO_FilePrim &fileprim,
             {
                 prop_source = geoConvertToScalar<GtT, GtComponentT>(
                         usd_attr_type, hou_attr);
+                if (!prop_source)
+                {
+                    TF_WARN("Failed to convert attribute '%s' to type '%s'",
+                            attr_name.c_str(),
+                            usd_attr_type.GetAsToken().GetText());
+                    return nullptr;
+                }
             }
 
             // Otherwise, create a normal data array.
@@ -1464,6 +1466,21 @@ initCommonBoneCaptureAttrib(
     }
 }
 
+/// Returns whether the attribute's type is allowed to be converted to the type
+/// expected for the USD attribute. We allow converting between numeric types,
+/// but we disallow e.g. converting a string attribute to integer.
+template <typename T>
+static inline bool
+geoIsCompatibleStorage(GT_Storage attrib_storage)
+{
+    constexpr GT_Storage expected_storage = GTstorage<T>();
+
+    if constexpr (GTisFloat(expected_storage) || GTisInteger(expected_storage))
+        return GTisFloat(attrib_storage) || GTisInteger(attrib_storage);
+    else
+        return attrib_storage == expected_storage;
+}
+
 template <class GtT, class GtComponentT>
 static GEO_FileProp *
 initCommonAttrib(GEO_FilePrim &fileprim,
@@ -1492,9 +1509,21 @@ initCommonAttrib(GEO_FilePrim &fileprim,
     if (!processed_attribs.contains(attr_name) && options.multiMatch(attr_name))
     {
         hou_attr = gtprim->findAttribute(attr_name, attr_owner, 0);
-        hou_attr = GEOconvertTupleSize(hou_attr, tuple_size, fill_method);
+        if (!hou_attr)
+            return nullptr;
 
         processed_attribs.insert(attr_name);
+
+        if (!geoIsCompatibleStorage<GtComponentT>(hou_attr->getStorage()))
+        {
+            TF_WARN("Unexpected type '%s' for attribute '%s' (expected '%s')",
+                    GTstorage(hou_attr->getStorage()), attr_name.c_str(),
+                    GTstorage(GTstorage<GtComponentT>()));
+            return nullptr;
+        }
+
+        hou_attr = GEOconvertTupleSize(hou_attr, tuple_size, fill_method);
+
         prop = GEOinitProperty<GtT, GtComponentT>(
                 fileprim, hou_attr, attr_name, decoded_attr_name, attr_owner,
                 prim_is_curve, options, usd_attr_name, usd_attr_type,
@@ -1995,6 +2024,13 @@ initPointSizeAttribs(GEO_FilePrim &fileprim,
     GT_DataArrayHandle width_attr = gtprim->findAttribute(
         width_name, attr_owner, 0);
     processed_attribs.insert(width_name);
+
+    if (width_attr && !GTisFloat(width_attr->getStorage()))
+    {
+        TF_WARN("Unexpected type '%s' for attribute '%s' (expected 'float')",
+                GTstorage(width_attr->getStorage()), width_name.c_str());
+        width_attr.reset();
+    }
 
     if (!width_attr)
     {
