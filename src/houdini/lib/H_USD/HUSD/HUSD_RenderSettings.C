@@ -49,7 +49,6 @@ namespace
                                     HdRenderSettingsMap &settings) const override;
         HdAovDescriptor defaultAovDescriptor(const TfToken &aov) const override;
 
-        TfToken          renderer() const override;
         SdfPath          overrideCamera() const override;
         GfVec2i          defaultResolution() const override;
         GfVec2i          overrideResolution(const GfVec2i &res) const override;
@@ -642,12 +641,6 @@ husd_RenderSettingsContext::overrideSettings(const XUSD_RenderSettings &xs,
     }
 }
 
-TfToken
-husd_RenderSettingsContext::renderer() const
-{
-    return TfToken(myImpl->renderer().c_str());
-}
-
 SdfPath
 husd_RenderSettingsContext::overrideCamera() const
 {
@@ -1228,12 +1221,6 @@ HUSD_RenderSettings::writer()
 {
     auto *owner = UTverify_cast<husd_RenderSettings *>(myOwner);
     return HUSD_RenderSettingsContext::storeProperty(owner->renderSettingsPtr());
-}
-
-UT_StringHolder
-HUSD_RenderSettings::renderer() const
-{
-    return UTmakeUnsafeRef(myOwner->renderer().GetText());
 }
 
 UT_StringHolder

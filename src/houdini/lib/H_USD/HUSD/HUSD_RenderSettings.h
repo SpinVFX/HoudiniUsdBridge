@@ -125,7 +125,6 @@ public:
     virtual void        overrideSettings(const HUSD_RenderSettings &settings,
                                 storeProperty &writer) const {};
 
-    virtual UT_StringHolder     renderer() const = 0;
     virtual UT_StringHolder     overrideCamera() const
                                 { return UT_StringHolder(); }
 
@@ -402,7 +401,6 @@ public:
 
     /// @{
     /// Query settings that are shared with all products
-    UT_StringHolder     renderer() const;
     void                purpose(UT_StringArray &purposes) const;
     /// @}
 

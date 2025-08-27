@@ -1735,8 +1735,6 @@ void
 XUSD_RenderSettings::dump(UT_JSONWriter &w) const
 {
     w.jsonBeginMap();
-    if (!myRenderer.IsEmpty())
-        w.jsonKeyValue("RenderDelegate", myRenderer.GetText());
     if (!myCameraPath.IsEmpty())
         w.jsonKeyValue(UsdRenderTokens->camera.GetText(), myCameraPath.GetString());
     w.jsonKeyToken("RenderSettings");
@@ -1831,8 +1829,6 @@ void
 XUSD_RenderSettings::setDefaults(const UsdStageRefPtr &usd,
 	const XUSD_RenderSettingsContext &ctx)
 {
-    myRenderer = ctx.renderer();
-
     if (myFirstFrame)
         myProducts.clear();
 

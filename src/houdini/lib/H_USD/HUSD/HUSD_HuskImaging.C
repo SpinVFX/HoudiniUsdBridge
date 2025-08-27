@@ -758,6 +758,7 @@ HUSD_HuskImaging::pluginName() const
 
 bool
 HUSD_HuskImaging::setRendererPlugin(const HUSD_RenderSettings &settings,
+        const UT_StringHolder &delegate,
         const DelegateParms &rparms)
 {
     bool        recreate = false;
@@ -820,7 +821,7 @@ HUSD_HuskImaging::setRendererPlugin(const HUSD_RenderSettings &settings,
     }
 
     // Special case: TfToken() selects the first plugin in the list.
-    TfToken actualId = settings.myOwner->renderer();
+    TfToken actualId = TfToken(delegate.c_str());
     if (actualId.IsEmpty())
     {
         actualId = HdRendererPluginRegistry::GetInstance().
@@ -880,12 +881,13 @@ HUSD_HuskImaging::setRendererPlugin(const HUSD_RenderSettings &settings,
 
 bool
 HUSD_HuskImaging::restartRendererPlugin(const HUSD_RenderSettings &settings,
+        const UT_StringHolder &delegate,
         const DelegateParms &rparms)
 {
     myContents->newEngine(myEnableGPU);
     // Clear out renderer to forcibly recreate the renderer plugin
     myContents->myRendererId = TfToken();
-    return setRendererPlugin(settings, rparms);
+    return setRendererPlugin(settings, delegate, rparms);
 }
 
 

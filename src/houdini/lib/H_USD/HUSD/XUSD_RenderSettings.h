@@ -59,9 +59,6 @@ public:
     /// This function will always be called - even if there are no settings.
     virtual void	initFromUSD(UsdRenderSettings &settings) { }
 
-    /// Return the name of the render delegate
-    virtual TfToken	renderer() const = 0;
-
     /// Override the path to the camera
     virtual SdfPath	overrideCamera() const
     {
@@ -377,9 +374,6 @@ public:
     /// Get the render settings
     UsdPrim	prim() const { return myUsdSettings.GetPrim(); }
 
-    /// Rendering head
-    const TfToken	        &renderer() const { return myRenderer; }
-
     /// Properties from the render settings which cannot be overridden per
     /// product.
     const VtArray<TfToken>      &purpose() const { return myPurpose; }
@@ -494,7 +488,6 @@ protected:
     UsdRenderSettings		myUsdSettings;
     SdfPath			myCameraPath;
     HdRenderSettingsMap		mySettings;
-    TfToken			myRenderer;
     ProductList			myProducts;
     ProductGroupList		myProductGroups;
     GfVec2d			myShutter;

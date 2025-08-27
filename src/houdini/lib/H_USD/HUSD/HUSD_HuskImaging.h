@@ -162,10 +162,12 @@ public:
 
     /// Set the current delegate based on the settings
     bool setRendererPlugin(const HUSD_RenderSettings &settings,
+            const UT_StringHolder &delegate,
 	    const DelegateParms &rparms);
 
     /// Restart the render delegate based on the settings
     bool restartRendererPlugin(const HUSD_RenderSettings &settings,
+            const UT_StringHolder &delegate,
 	    const DelegateParms &rparms);
 
     /// Once render products have been finalized, set the AOVs.

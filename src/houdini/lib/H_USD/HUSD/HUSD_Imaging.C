@@ -194,8 +194,6 @@ namespace
 class husd_DefaultRenderSettingContext : public XUSD_RenderSettingsContext
 {
 public: 
-    TfToken	renderer() const override
-        { return TfToken(""); }
     fpreal      startFrame() const override
         { return myFrame; }
     fpreal      fps() const override
@@ -2827,18 +2825,6 @@ void
 HUSD_Imaging::waitForUpdateToComplete()
 {
     RunningStatus status = RunningStatus(myRunningInBackground.relaxedLoad());
-    bool redo_pause = false;
-
-    if(myIsPaused)
-    {
-	// If the render is paused, it's possible that it was paused in the
-	// middle of doing an update, and the renderer may be respecting that
-	// and stopping the update. If the update isn't resumed, the loop below
-	// will wait forever for an update that never finishes.
-	myPrivate->myImagingEngine->ResumeRenderer();
-        myIsPaused = false;
-        redo_pause = true;
-    }
 
     // Loop as long as the background thread is still updating.
     while (status == RUNNING_UPDATE_IN_BACKGROUND)
@@ -2857,14 +2843,6 @@ HUSD_Imaging::waitForUpdateToComplete()
     // the RUNNING_UPDATE_NOT_STARTED state, and free our lock on the stage.
     // But don't do any actual rendering.
     checkRender(false);
-
-    // The checkRender call may delete myImagingEngine if there is an error,
-    // so test that this pointer is still valid before redoing the pause.
-    if(redo_pause && myPrivate->myImagingEngine)
-    {
-	myPrivate->myImagingEngine->PauseRenderer();
-        myIsPaused = true;
-    }
 }
 
 bool
@@ -3255,6 +3233,9 @@ HUSD_Imaging::pauseRender()
 {
     if (!myIsPaused && canPause())
     {
+        // Not safe to pause while background updates are happening, because
+        // background updates pause/resume the renderer.
+        waitForUpdateToComplete();
         myPrivate->myImagingEngine->PauseRenderer();
         myIsPaused = true;
     }
@@ -3269,6 +3250,9 @@ HUSD_Imaging::resumeRender()
     // update to the scene.
     if (myIsPaused && myAllowUpdates && canPause())
     {
+        // Not safe to pause while background updates are happening, because
+        // background updates pause/resume the renderer.
+        waitForUpdateToComplete();
         myPrivate->myImagingEngine->ResumeRenderer();
         myIsPaused = false;
     }
