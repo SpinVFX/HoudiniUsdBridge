@@ -156,6 +156,7 @@ public:
                                 HUSD_PrimTraversalDemands demands,
                                 int nodeid,
                                 const HUSD_TimeCode &timecode,
+                                bool respect_instance_proxy_demands,
                                 XUSD_PathSet &paths,
                                 bool *timevaryingflag);
     // Parse a source pattern string, but only return the first result.
@@ -164,6 +165,7 @@ public:
                                 HUSD_PrimTraversalDemands demands,
                                 int nodeid,
                                 const HUSD_TimeCode &timecode,
+                                bool respect_instance_proxy_demands,
                                 SdfPath &path,
                                 bool *timevaryingflag);
 

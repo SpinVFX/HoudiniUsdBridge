@@ -73,8 +73,7 @@ public:
     void		 removeMuteLayer(const UT_StringHolder &identifier);
     void		 removeAllMuteLayers();
 
-    bool		 isLayerMuted(const UT_StringHolder &identifier) const
-			 { return myMuteLayers.contains(identifier); }
+    bool		 isLayerMuted(const UT_StringHolder &identifier) const;
     const UT_SortedStringSet &muteLayers() const
 			 { return myMuteLayers; }
 
@@ -101,6 +100,16 @@ public:
                                     HUSD_MATCH_EXACT) const;
     const UT_SortedStringSet &loadPaths() const
 			 { return myLoadPaths; }
+
+    // Returns the original identifier unless it identifies a LOP-authored
+    // layer, in which case a string indicating the LOP node path is
+    // returned instead.
+    static UT_StringHolder getMutingIdentifier(
+                                const UT_StringHolder &identifier);
+    // Return true if the provided identifier represents a desire to mute a
+    // particular LOP's layer.
+    static bool            isLopMutingIdentifier(
+                                const UT_StringHolder &identifier);
 
     static const HUSD_LoadMasks theEmptyLoadMasks;
 

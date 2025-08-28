@@ -3330,8 +3330,14 @@ HUSDcreateStageInMemory(const HUSD_LoadMasks *load_masks,
 	{
 	    std::vector<std::string>	 mutelayers;
 
+	    // Skip over any LOP layers set to be muted. We can't actually
+	    // mute them yet because we don't know the identifiers of the
+	    // stage layers that will be copies of these layers.
 	    for (auto &&identifier : load_masks->muteLayers())
-		mutelayers.push_back(identifier.toStdString());
+	    {
+	        if (!HUSD_LoadMasks::isLopMutingIdentifier(identifier))
+	            mutelayers.push_back(identifier.toStdString());
+	    }
 	    stage->MuteAndUnmuteLayers(
 		mutelayers, std::vector<std::string>());
 	}
@@ -3388,6 +3394,9 @@ HUSDcreateStageFromRootLayer(const SdfLayerRefPtr &rootlayer,
     {
         std::vector<std::string>	 mutelayers;
 
+        // We don't need to worry about updating layer muting for anonymous
+        // LOP layers because we only get here creating a stage from a layer
+        // on disk, which guarantees no inclusion of any LOP layers.
         for (auto &&identifier : load_masks->muteLayers())
             mutelayers.push_back(identifier.toStdString());
         stage->MuteAndUnmuteLayers(
@@ -3734,6 +3743,22 @@ HUSDisLayerPlaceholder(const SdfLayerHandle &layer)
     }
 
     return false;
+}
+
+std::string
+HUSDgetLopLayerMutingIdentifier(const SdfLayerHandle &layer)
+{
+    std::string loppath;
+
+    if (layer)
+    {
+        std::string loppathstr;
+        if (HUSDgetCreatorNode(layer, loppathstr))
+            loppath = std::string(HUSD_LOP_MUTING_IDENTIFIER_PREFIX) +
+                loppathstr;
+    }
+
+    return loppath;
 }
 
 bool

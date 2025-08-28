@@ -987,7 +987,7 @@ protected:
         {
             // Treat the string as a pattern.
             parsePattern(str,
-                lock, demands, nodeid, timecode, myPaths,
+                lock, demands, nodeid, timecode, false, myPaths,
                 &myMayBeTimeVaryingSubPattern);
         }
     }

@@ -370,6 +370,8 @@ private:
                                 const HUSD_ConstPostLayersPtr
                                     &postlayers = HUSD_ConstPostLayersPtr(),
 				bool remove_layer_breaks = false);
+    void                 updateLayerMutingAfterLock();
+
     XUSD_LayerPtr	 editActiveSourceLayer(bool create_change_block);
     void                 createInitialPlaceholderSublayers();
     void                 applyRootLayerDataToStage();

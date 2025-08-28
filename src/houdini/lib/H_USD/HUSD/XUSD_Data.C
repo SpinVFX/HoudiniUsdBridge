@@ -1173,19 +1173,31 @@ XUSD_Data::mirror(const XUSD_Data &src,
     if (!mutelayers.empty() ||
 	!myStage->GetMutedLayers().empty())
     {
-	std::vector<std::string>	 newmutelayers;
-	std::vector<std::string>	 oldmutelayers;
+	std::set<std::string>	     newmutelayers;
+	std::set<std::string>	     oldmutelayers;
 
+        // Deal with muting of non-LOP layers. Compare the requested list of
+        // muted layers to the current list of muted layers (with all LOP
+        // layers removed from both lists). Make any additions or removals
+        // required to make these sets match. LOP layers are dealt with in
+        // afterLock().
 	for (auto &&identifier : mutelayers)
-	    newmutelayers.push_back(identifier.toStdString());
-	if (newmutelayers != myStage->GetMutedLayers())
+	{
+	    if (!HUSD_LoadMasks::isLopMutingIdentifier(identifier))
+	        newmutelayers.insert(identifier.toStdString());
+	}
+	for (auto &&identifier : myStage->GetMutedLayers())
+	{
+	    if (!SdfLayer::IsAnonymousLayerIdentifier(identifier))
+	        oldmutelayers.insert(identifier);
+	}
+
+        // Update the stage if the set of muted (non-LOP) layers has changed.
+	if (newmutelayers != oldmutelayers)
 	{
 	    std::vector<std::string>	 addlayers;
 	    std::vector<std::string>	 removelayers;
 
-	    oldmutelayers = myStage->GetMutedLayers();
-	    std::sort(newmutelayers.begin(), newmutelayers.end());
-	    std::sort(oldmutelayers.begin(), oldmutelayers.end());
 	    std::set_difference(newmutelayers.begin(), newmutelayers.end(),
 		oldmutelayers.begin(), oldmutelayers.end(),
 		std::inserter(addlayers, addlayers.begin()));
@@ -1207,6 +1219,7 @@ XUSD_Data::mirror(const XUSD_Data &src,
     myHeldLayers = src.myHeldLayers;
     myReplacementLayers = src.myReplacementLayers;
     myLockedStages = src.myLockedStages;
+    myLoadMasks = src.myLoadMasks;
     myActiveLayerIndex = mySourceLayers.size();
     myActiveLayerIndices.clear();
     myActiveLayers.clear();
@@ -2580,6 +2593,9 @@ XUSD_Data::afterLock(bool for_write,
                 offsets.insert(offsets.begin(), SdfLayerOffset());
             }
 
+            // Handle muting and unmuting of LOP layers.
+            updateLayerMutingAfterLock();
+
             // End of the SdfChangeBlock.
 	}
 
@@ -2667,6 +2683,79 @@ XUSD_Data::afterLock(bool for_write,
 	    }
 	}
     }
+}
+
+void
+XUSD_Data::updateLayerMutingAfterLock()
+{
+    // Generate a list of all LOP layers listed for muting in the
+    // load masks.
+    std::set<std::string> lop_layers_in_load_masks;
+    if (loadMasks() && !loadMasks()->muteLayers().empty())
+    {
+        for (auto &&identifier : loadMasks()->muteLayers())
+        {
+            if (HUSD_LoadMasks::isLopMutingIdentifier(identifier))
+            {
+                lop_layers_in_load_masks.insert(identifier.toStdString());
+            }
+        }
+    }
+    // Start by assuming that we will unmute all anonymous/LOP layers.
+    std::vector<std::string> muted_layers = myStage->GetMutedLayers();
+    std::set<std::string> lop_layers_to_mute;
+    std::set<std::string> lop_layers_to_unmute;
+    for (auto &&muted_layer : muted_layers)
+    {
+        if (SdfLayer::IsAnonymousLayerIdentifier(muted_layer))
+            lop_layers_to_unmute.insert(muted_layer);
+    }
+
+    // If we have no LOP layers we want to mute, and there are no currently
+    // muted LOP layers we may need to remove, we can exit early.
+    if (lop_layers_in_load_masks.empty() &&
+        lop_layers_to_unmute.empty())
+        return;
+
+    // Run over all the sublayers on the stage's root layer. If they are LOP
+    // layers, we may need to mute or unmute them.
+    for  (auto &&layer : (*myStageLayers))
+    {
+        if (!HUSDisLopLayer(layer))
+            continue;
+
+        std::string identifier = layer->GetIdentifier();
+        std::string lopidentifier = HUSDgetLopLayerMutingIdentifier(layer);
+        if (!lopidentifier.empty())
+        {
+            auto it = lop_layers_in_load_masks.find(lopidentifier);
+            if (it != lop_layers_in_load_masks.end())
+            {
+                // We want to mute this layer. Either remove it from the
+                // set of layers to unmute, or add it to the list of layers
+                // to mute.
+                auto unmuteit = lop_layers_to_unmute.find(identifier);
+                if (unmuteit == lop_layers_to_unmute.end())
+                    lop_layers_to_mute.insert(identifier);
+                else
+                    lop_layers_to_unmute.erase(unmuteit);
+            }
+        }
+    }
+
+    // After running through all the stage root layers if we end up with no
+    // LOP layers to mute or unmute, we can just exit.
+    if (lop_layers_to_mute.empty() &&
+        lop_layers_to_unmute.empty())
+        return;
+
+    std::vector<std::string> layers_to_mute;
+    std::vector<std::string> layers_to_unmute;
+    layers_to_mute.insert(layers_to_mute.begin(),
+        lop_layers_to_mute.begin(), lop_layers_to_mute.end());
+    layers_to_unmute.insert(layers_to_unmute.begin(),
+        lop_layers_to_unmute.begin(), lop_layers_to_unmute.end());
+    myStage->MuteAndUnmuteLayers(layers_to_mute, layers_to_unmute);
 }
 
 SdfLayerRefPtr

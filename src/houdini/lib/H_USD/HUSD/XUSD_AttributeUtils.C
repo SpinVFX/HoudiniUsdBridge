@@ -25,6 +25,7 @@
 #include "XUSD_AttributeUtils.h"
 #include "HUSD_AssetPath.h"
 #include "HUSD_Constants.h"
+#include "HUSD_DataHandle.h"
 #include "HUSD_PathExpression.h"
 #include "HUSD_Token.h"
 #include "HUSD_TimeCode.h"
@@ -861,7 +862,8 @@ template<typename T, typename ParmT = T>
 void
 husdSetParmScalar( PRM_Parm &parm,
         const UsdAttribute &attrib,
-        const UsdTimeCode &timecode )
+        const UsdTimeCode &timecode,
+        UT_UniquePtr<HUSD_AutoAnyLock> *lock_to_release )
 {
     T value(0);
 
@@ -891,6 +893,8 @@ husdSetParmScalar( PRM_Parm &parm,
     else
         attrib.Get(&value, timecode);
 
+    if (lock_to_release)
+        lock_to_release->reset();
     parm.setValue(0, (ParmT)value);
 }
 
@@ -898,7 +902,8 @@ template<typename T>
 void
 husdSetParmVector( PRM_Parm &parm,
         const UsdAttribute &attrib,
-        const UsdTimeCode &timecode )
+        const UsdTimeCode &timecode,
+        UT_UniquePtr<HUSD_AutoAnyLock> *lock_to_release)
 {
     T value(0);
     // In the case of an array of this type, set the first entry.
@@ -921,6 +926,8 @@ husdSetParmVector( PRM_Parm &parm,
     for( exint i = 0, n = SYSmin( a_size, p_size); i < n; i++ )
 	buff[i] = value.data()[i];
 
+    if (lock_to_release)
+        lock_to_release->reset();
     parm.setValues( 0, buff.data() );
 }
 
@@ -929,7 +936,8 @@ inline void
 husdSetParmString( PRM_Parm &parm,
         const UsdAttribute &attrib,
         const UsdTimeCode &timecode,
-        const ConvertToStrFn &convert_to_str )
+        const ConvertToStrFn &convert_to_str,
+        UT_UniquePtr<HUSD_AutoAnyLock> *lock_to_release)
 {
     // In the case of an array of this type, set the parm to a space separated
     // list of all entries.
@@ -944,12 +952,16 @@ husdSetParmString( PRM_Parm &parm,
                 buf.append(' ');
             buf.append(convert_to_str(v));
         }
+        if (lock_to_release)
+            lock_to_release->reset();
         parm.setValue( 0, buf.buffer(), CH_STRING_LITERAL );
     }
     else
     {
         T value;
         attrib.Get( &value, timecode );
+        if (lock_to_release)
+            lock_to_release->reset();
         parm.setValue( 0, convert_to_str(value), CH_STRING_LITERAL );
     }
 }
@@ -957,7 +969,8 @@ husdSetParmString( PRM_Parm &parm,
 inline void
 husdSetParmAssetPath( PRM_Parm &parm,
         const UsdAttribute &attrib,
-        const UsdTimeCode &timecode )
+        const UsdTimeCode &timecode,
+        UT_UniquePtr<HUSD_AutoAnyLock> *lock_to_release)
 {
     SdfAssetPath value;
     // In the case of an array of this type, set the first entry.
@@ -971,6 +984,8 @@ husdSetParmAssetPath( PRM_Parm &parm,
     else
         attrib.Get( &value, timecode );
 
+    if (lock_to_release)
+        lock_to_release->reset();
     if (value.GetResolvedPath().empty())
         parm.setValue( 0, value.GetAssetPath().c_str(), CH_STRING_LITERAL );
     else
@@ -979,8 +994,9 @@ husdSetParmAssetPath( PRM_Parm &parm,
 
 inline void
 husdSetParmPathExpression( PRM_Parm &parm,
-    const UsdAttribute &attrib,
-    const UsdTimeCode &timecode )
+        const UsdAttribute &attrib,
+        const UsdTimeCode &timecode,
+        UT_UniquePtr<HUSD_AutoAnyLock> *lock_to_release)
 {
     // In the case of an array of this type, set the parm to a space separated
     // list of all entries.
@@ -997,12 +1013,16 @@ husdSetParmPathExpression( PRM_Parm &parm,
             buf.append(v.GetText());
             buf.append('"');
         }
+        if (lock_to_release)
+            lock_to_release->reset();
         parm.setValue( 0, buf.buffer(), CH_STRING_LITERAL );
     }
     else
     {
         SdfPathExpression value;
         attrib.Get(&value, timecode);
+        if (lock_to_release)
+            lock_to_release->reset();
         parm.setValue( 0, value.GetText().c_str(), CH_STRING_LITERAL );
     }
 }
@@ -1011,7 +1031,8 @@ template<typename T>
 void
 husdSetParmQuat( PRM_Parm &parm,
         const UsdAttribute &attrib,
-        const UsdTimeCode &timecode )
+        const UsdTimeCode &timecode,
+        UT_UniquePtr<HUSD_AutoAnyLock> *lock_to_release)
 {
     T value;
     // In the case of an array of this type, set the first entry.
@@ -1034,13 +1055,16 @@ husdSetParmQuat( PRM_Parm &parm,
 	buff[i] = value.GetImaginary().data()[i];
     buff[3] = value.GetReal();
 
+    if (lock_to_release)
+        lock_to_release->reset();
     parm.setValues( 0, buff.data() );
 }
 
 void
 husdSetParmTimeCode( PRM_Parm &parm,
         const UsdAttribute &attrib,
-        const UsdTimeCode &timecode )
+        const UsdTimeCode &timecode,
+        UT_UniquePtr<HUSD_AutoAnyLock> *lock_to_release)
 {
     SdfTimeCode value(0.0);
     // In the case of an array of this type, set the first entry.
@@ -1054,6 +1078,8 @@ husdSetParmTimeCode( PRM_Parm &parm,
     else
         attrib.Get( &value, timecode );
 
+    if (lock_to_release)
+        lock_to_release->reset();
     parm.setValue( 0, (fpreal)value.GetValue() );
 }
 
@@ -1061,7 +1087,8 @@ template<typename T>
 void
 husdSetParmMatrix( PRM_Parm &parm,
         const UsdAttribute &attrib,
-        const UsdTimeCode &timecode )
+        const UsdTimeCode &timecode,
+        UT_UniquePtr<HUSD_AutoAnyLock> *lock_to_release)
 {
     T value;
     // In the case of an array of this type, set the first entry.
@@ -1084,6 +1111,8 @@ husdSetParmMatrix( PRM_Parm &parm,
     for( exint i = 0, n = SYSmin(a_size, p_size); i < n; i++ )
 	buff[i] = value.GetArray()[i];
 
+    if (lock_to_release)
+        lock_to_release->reset();
     parm.setValues( 0, buff.data() );
 }
 
@@ -1093,7 +1122,8 @@ bool
 HUSDsetNodeParm(PRM_Parm &parm,
         const UsdAttribute &attrib, 
 	const UsdTimeCode &timecode,
-        bool save_for_undo)
+        bool save_for_undo,
+        UT_UniquePtr<HUSD_AutoAnyLock> *lock_to_release)
 {
     SdfValueTypeName	 type = attrib.GetTypeName().GetScalarType();
     bool		 ok = true;
@@ -1108,99 +1138,99 @@ HUSDsetNodeParm(PRM_Parm &parm,
 
     if(	     type == SdfValueTypeNames->Double4 ||
 	     type == SdfValueTypeNames->Color4d )
-	husdSetParmVector<GfVec4d>( parm, attrib, timecode );
+	husdSetParmVector<GfVec4d>( parm, attrib, timecode, lock_to_release );
     else if( type == SdfValueTypeNames->Double3 ||
 	     type == SdfValueTypeNames->Vector3d ||
 	     type == SdfValueTypeNames->TexCoord3d ||
 	     type == SdfValueTypeNames->Color3d ||
 	     type == SdfValueTypeNames->Point3d ||
 	     type == SdfValueTypeNames->Normal3d )
-	husdSetParmVector<GfVec3d>( parm, attrib, timecode );
+	husdSetParmVector<GfVec3d>( parm, attrib, timecode, lock_to_release );
     else if( type == SdfValueTypeNames->Double2 ||
              type == SdfValueTypeNames->TexCoord2d )
-	husdSetParmVector<GfVec2d>( parm, attrib, timecode );
+	husdSetParmVector<GfVec2d>( parm, attrib, timecode, lock_to_release );
     else if( type == SdfValueTypeNames->Double )
-	husdSetParmScalar<fpreal64, fpreal>( parm, attrib, timecode );
+	husdSetParmScalar<fpreal64, fpreal>( parm, attrib, timecode, lock_to_release );
     else if( type == SdfValueTypeNames->Quatd )
-	husdSetParmQuat<GfQuatd>( parm, attrib, timecode );
+	husdSetParmQuat<GfQuatd>( parm, attrib, timecode, lock_to_release );
 
     else if( type == SdfValueTypeNames->Float4 ||
 	     type == SdfValueTypeNames->Color4f )
-	husdSetParmVector<GfVec4f>( parm, attrib, timecode );
+	husdSetParmVector<GfVec4f>( parm, attrib, timecode, lock_to_release );
     else if( type == SdfValueTypeNames->Float3 ||
 	     type == SdfValueTypeNames->Vector3f ||
 	     type == SdfValueTypeNames->TexCoord3f ||
 	     type == SdfValueTypeNames->Color3f ||
 	     type == SdfValueTypeNames->Point3f ||
 	     type == SdfValueTypeNames->Normal3f )
-	husdSetParmVector<GfVec3f>( parm, attrib, timecode );
+	husdSetParmVector<GfVec3f>( parm, attrib, timecode, lock_to_release );
     else if( type == SdfValueTypeNames->Float2 ||
              type == SdfValueTypeNames->TexCoord2f )
-	husdSetParmVector<GfVec2f>( parm, attrib, timecode );
+	husdSetParmVector<GfVec2f>( parm, attrib, timecode, lock_to_release );
     else if( type == SdfValueTypeNames->Float )
-	husdSetParmScalar<fpreal32, fpreal>( parm, attrib, timecode );
+	husdSetParmScalar<fpreal32, fpreal>( parm, attrib, timecode, lock_to_release );
     else if( type == SdfValueTypeNames->Quatf )
-	husdSetParmQuat<GfQuatf>( parm, attrib, timecode );
+	husdSetParmQuat<GfQuatf>( parm, attrib, timecode, lock_to_release );
 
     else if( type == SdfValueTypeNames->Half4 ||
 	     type == SdfValueTypeNames->Color4h )
-	husdSetParmVector<GfVec4h>( parm, attrib, timecode );
+	husdSetParmVector<GfVec4h>( parm, attrib, timecode, lock_to_release );
     else if( type == SdfValueTypeNames->Half3 ||
 	     type == SdfValueTypeNames->Vector3h ||
 	     type == SdfValueTypeNames->TexCoord3h ||
 	     type == SdfValueTypeNames->Color3h ||
 	     type == SdfValueTypeNames->Point3h ||
 	     type == SdfValueTypeNames->Normal3h )
-	husdSetParmVector<GfVec3h>( parm, attrib, timecode );
+	husdSetParmVector<GfVec3h>( parm, attrib, timecode, lock_to_release );
     else if( type == SdfValueTypeNames->Half2 ||
              type == SdfValueTypeNames->TexCoord2h )
-	husdSetParmVector<GfVec2h>( parm, attrib, timecode );
+	husdSetParmVector<GfVec2h>( parm, attrib, timecode, lock_to_release );
     else if( type == SdfValueTypeNames->Half )
-	husdSetParmScalar<GfHalf, fpreal>( parm, attrib, timecode );
+	husdSetParmScalar<GfHalf, fpreal>( parm, attrib, timecode, lock_to_release );
     else if( type == SdfValueTypeNames->Quath )
-	husdSetParmQuat<GfQuath>( parm, attrib, timecode );
+	husdSetParmQuat<GfQuath>( parm, attrib, timecode, lock_to_release );
 
     else if( type == SdfValueTypeNames->Int4 )
-	husdSetParmVector<GfVec4i>( parm, attrib, timecode );
+	husdSetParmVector<GfVec4i>( parm, attrib, timecode, lock_to_release );
     else if( type == SdfValueTypeNames->Int3 )
-	husdSetParmVector<GfVec3i>( parm, attrib, timecode );
+	husdSetParmVector<GfVec3i>( parm, attrib, timecode, lock_to_release );
     else if( type == SdfValueTypeNames->Int2 )
-	husdSetParmVector<GfVec2i>( parm, attrib, timecode );
+	husdSetParmVector<GfVec2i>( parm, attrib, timecode, lock_to_release );
     else if( type == SdfValueTypeNames->Int )
-	husdSetParmScalar<int32>( parm, attrib, timecode );
+	husdSetParmScalar<int32>( parm, attrib, timecode, lock_to_release );
     else if( type == SdfValueTypeNames->Int64 )
-	husdSetParmScalar<int64>( parm, attrib, timecode );
+	husdSetParmScalar<int64>( parm, attrib, timecode, lock_to_release );
     else if( type == SdfValueTypeNames->UChar )
-	husdSetParmScalar<uchar, int32>( parm, attrib, timecode );
+	husdSetParmScalar<uchar, int32>( parm, attrib, timecode, lock_to_release );
     else if( type == SdfValueTypeNames->UInt )
-	husdSetParmScalar<uint32, int32>( parm, attrib, timecode );
+	husdSetParmScalar<uint32, int32>( parm, attrib, timecode, lock_to_release );
     else if( type == SdfValueTypeNames->UInt64 )
-	husdSetParmScalar<uint64, int64>( parm, attrib, timecode );
+	husdSetParmScalar<uint64, int64>( parm, attrib, timecode, lock_to_release );
 
     else if( type == SdfValueTypeNames->Bool )
-	husdSetParmScalar<bool>( parm, attrib, timecode );
+	husdSetParmScalar<bool>( parm, attrib, timecode, lock_to_release );
 
     else if( type == SdfValueTypeNames->String )
 	husdSetParmString<std::string>( parm, attrib, timecode,
-            [](const std::string &v) { return v.c_str(); } );
+            [](const std::string &v) { return v.c_str(); }, lock_to_release );
     else if( type == SdfValueTypeNames->Token )
 	husdSetParmString<TfToken>( parm, attrib, timecode,
-            [](const TfToken &v) { return v.GetText(); } );
+            [](const TfToken &v) { return v.GetText(); }, lock_to_release );
     else if( type == SdfValueTypeNames->Asset )
-	husdSetParmAssetPath( parm, attrib, timecode );
+	husdSetParmAssetPath( parm, attrib, timecode, lock_to_release );
     else if( type == SdfValueTypeNames->PathExpression )
-        husdSetParmPathExpression( parm, attrib, timecode );
+        husdSetParmPathExpression( parm, attrib, timecode, lock_to_release );
 
     else if( type == SdfValueTypeNames->Matrix2d )
-	husdSetParmMatrix<GfMatrix2d>( parm, attrib, timecode );
+	husdSetParmMatrix<GfMatrix2d>( parm, attrib, timecode, lock_to_release );
     else if( type == SdfValueTypeNames->Matrix3d )
-	husdSetParmMatrix<GfMatrix3d>( parm, attrib, timecode );
+	husdSetParmMatrix<GfMatrix3d>( parm, attrib, timecode, lock_to_release );
     else if( type == SdfValueTypeNames->Matrix4d ||
              type == SdfValueTypeNames->Frame4d )
-	husdSetParmMatrix<GfMatrix4d>( parm, attrib, timecode );
+	husdSetParmMatrix<GfMatrix4d>( parm, attrib, timecode, lock_to_release );
 
     else if( type == SdfValueTypeNames->TimeCode )
-	husdSetParmTimeCode( parm, attrib, timecode );
+	husdSetParmTimeCode( parm, attrib, timecode, lock_to_release );
     else
 	ok = false;
 
@@ -1208,12 +1238,11 @@ HUSDsetNodeParm(PRM_Parm &parm,
 }
 
 bool
-HUSDsetNodeParm(PRM_Parm &parm,
-        const UsdRelationship &rel, 
-        bool save_for_undo)
+HUSDsetRelationshipNodeParm(PRM_Parm &parm,
+        const SdfPathVector &rel_targets,
+        bool save_for_undo,
+        UT_UniquePtr<HUSD_AutoAnyLock> *lock_to_release)
 {
-    bool		 ok = true;
-
     // Save the parameter value for undo.
     if (save_for_undo)
     {
@@ -1222,22 +1251,43 @@ HUSDsetNodeParm(PRM_Parm &parm,
             node->saveParmForUndo(&parm);
     }
 
-    SdfPathVector targets;
-    if (rel.GetTargets(&targets))
+    UT_WorkBuffer buf;
+
+    for (auto &&target : rel_targets)
     {
-        UT_WorkBuffer buf;
-
-        for (auto &&target : targets)
-        {
-            if (!buf.isEmpty())
-                buf.append(' ');
-            buf.append(target.GetString());
-        }
-        parm.setValue( 0, buf.buffer(), CH_STRING_LITERAL );
-        ok = true;
+        if (!buf.isEmpty())
+            buf.append(' ');
+        buf.append(target.GetString());
     }
+    if (lock_to_release)
+        lock_to_release->reset();
+    parm.setValue( 0, buf.buffer(), CH_STRING_LITERAL );
 
-    return ok;
+    return true;
+}
+
+bool
+HUSDsetConnectionNodeParm(PRM_Parm &parm,
+        const UsdShadeConnectionSourceInfo &src_info,
+        bool save_for_undo,
+        UT_UniquePtr<HUSD_AutoAnyLock> *lock_to_release)
+{
+    if( !src_info )
+        return false;
+
+    UsdAttribute src_attr;
+    if( src_info.sourceType == UsdShadeAttributeType::Input )
+        src_attr = src_info.source.GetInput(src_info.sourceName).GetAttr();
+    if( src_info.sourceType == UsdShadeAttributeType::Output )
+        src_attr = src_info.source.GetOutput(src_info.sourceName).GetAttr();
+    if( !src_attr )
+        return false;
+
+    UT_StringHolder src_path( src_attr.GetPath().GetString() );
+    if (lock_to_release)
+        lock_to_release->reset();
+    parm.setValue( 0, src_path, CH_STRING_LITERAL );
+    return true;
 }
 
 template<typename UT_VALUE_TYPE>
@@ -1265,27 +1315,6 @@ HUSDgetAttribute(const UsdAttribute &attribute, UT_VALUE_TYPE &ut_value,
 	ut_value = husdGetUtFromGf(gf_value);
 
     return ok;
-}
-
-bool
-HUSDsetConnectionNodeParm(PRM_Parm &parm,
-	const UsdShadeConnectionSourceInfo &src_info,
-        bool save_for_undo)
-{
-    if( !src_info )
-        return false;
-
-    UsdAttribute src_attr;
-    if( src_info.sourceType == UsdShadeAttributeType::Input )
-	src_attr = src_info.source.GetInput(src_info.sourceName).GetAttr();
-    if( src_info.sourceType == UsdShadeAttributeType::Output )
-	src_attr = src_info.source.GetOutput(src_info.sourceName).GetAttr();
-    if( !src_attr )
-        return false;
-
-    UT_StringHolder src_path( src_attr.GetPath().GetString() );
-    parm.setValue( 0, src_path, CH_STRING_LITERAL );
-    return true;
 }
 
 template <typename T>

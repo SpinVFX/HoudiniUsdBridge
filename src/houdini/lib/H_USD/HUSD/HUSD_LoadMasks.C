@@ -25,6 +25,8 @@
 #include "HUSD_LoadMasks.h"
 #include "HUSD_Info.h"
 #include "HUSD_Path.h"
+#include "XUSD_Utils.h"
+
 #include <UT/UT_JSONParser.h>
 #include <UT/UT_JSONValue.h>
 #include <UT/UT_JSONValueArray.h>
@@ -34,13 +36,19 @@
 #include <UT/UT_WorkArgs.h>
 #include <pxr/base/tf/pathUtils.h>
 #include <pxr/usd/ar/resolver.h>
+#include <pxr/usd/sdf/layer.h>
 
-static constexpr UT_StringLit	 thePopulateAllKey("populateall");
-static constexpr UT_StringLit	 thePopulatePathsKey("populatepaths");
-static constexpr UT_StringLit	 theLoadAllKey("loadall");
-static constexpr UT_StringLit	 theLoadPathsKey("loadpaths");
-static constexpr UT_StringLit	 theMuteLayersKey("mutelayers");
-static constexpr UT_StringLit	 theVariantSelectionFallbacksKey("fallbacks");
+PXR_NAMESPACE_USING_DIRECTIVE
+
+namespace
+{
+    constexpr UT_StringLit thePopulateAllKey("populateall");
+    constexpr UT_StringLit thePopulatePathsKey("populatepaths");
+    constexpr UT_StringLit theLoadAllKey("loadall");
+    constexpr UT_StringLit theLoadPathsKey("loadpaths");
+    constexpr UT_StringLit theMuteLayersKey("mutelayers");
+    constexpr UT_StringLit theVariantSelectionFallbacksKey("fallbacks");
+}
 
 const HUSD_LoadMasks HUSD_LoadMasks::theEmptyLoadMasks;
 
@@ -336,25 +344,54 @@ HUSD_LoadMasks::isPathPopulated(const UT_StringHolder &path,
 
     return false;
 }
-    
+
+UT_StringHolder
+HUSD_LoadMasks::getMutingIdentifier(const UT_StringHolder &identifier)
+{
+    UT_StringHolder lopidentifier = identifier;
+    std::string identifierstr = identifier.toStdString();
+
+    if (SdfLayer::IsAnonymousLayerIdentifier(identifierstr))
+    {
+        SdfLayerRefPtr layer = SdfLayer::Find(identifierstr);
+        std::string lopidentifierstr =  HUSDgetLopLayerMutingIdentifier(layer);
+        if (!lopidentifierstr.empty())
+            lopidentifier = lopidentifierstr;
+    }
+
+    return lopidentifier;
+}
+
+bool
+HUSD_LoadMasks::isLopMutingIdentifier(const UT_StringHolder &identifier)
+{
+    return identifier.startsWith(HUSD_LOP_MUTING_IDENTIFIER_PREFIX);
+}
+
 void
 HUSD_LoadMasks::addMuteLayer(const UT_StringHolder &identifier)
 {
-    myMuteLayers.insert(
-        PXR_NS::ArGetResolver().CreateIdentifier(identifier.toStdString()));
+    myMuteLayers.insert(getMutingIdentifier(
+        ArGetResolver().CreateIdentifier(identifier.toStdString())));
 }
 
 void
 HUSD_LoadMasks::removeMuteLayer(const UT_StringHolder &identifier)
 {
-    myMuteLayers.erase(
-        PXR_NS::ArGetResolver().CreateIdentifier(identifier.toStdString()));
+    myMuteLayers.erase(getMutingIdentifier(
+        ArGetResolver().CreateIdentifier(identifier.toStdString())));
 }
 
 void
 HUSD_LoadMasks::removeAllMuteLayers()
 {
     myMuteLayers.clear();
+}
+
+bool
+HUSD_LoadMasks::isLayerMuted(const UT_StringHolder &identifier) const
+{
+    return myMuteLayers.contains(getMutingIdentifier(identifier));
 }
 
 void

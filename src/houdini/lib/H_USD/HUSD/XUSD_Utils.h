@@ -62,6 +62,8 @@ class UsdGeomXformCache;
 class XUSD_Data;
 class XUSD_ExistenceTracker;
 
+#define HUSD_LOP_MUTING_IDENTIFIER_PREFIX "lop:"
+
 class XUSD_StageFactory
 {
 public:
@@ -543,6 +545,9 @@ HUSDisLayerPlaceholder(const SdfLayerHandle &layer);
 // As above, but takes an identifier, which is used to find the layer handle.
 HUSD_API bool
 HUSDisLayerPlaceholder(const std::string &identifier);
+// Return the special identifier we use to specify a LOP layer we want to mute.
+HUSD_API std::string
+HUSDgetLopLayerMutingIdentifier(const SdfLayerHandle &layer);
 
 // Test if a string is a stage variable expression. Optionally try to parse
 // the expression, and raise an error if it is an invalid expression.

@@ -387,7 +387,7 @@ HUSD_API bool	         HUSDisTimeVarying(HUSD_TimeSampling time_sampling);
 HUSD_API bool	         HUSDisTimeSampled(HUSD_TimeSampling time_sampling);
 
 /// Set a parameter value from the value of a USD property.
-HUSD_API bool            HUSDsetParmFromProperty(HUSD_AutoAnyLock &lock,
+HUSD_API bool            HUSDsetParmFromProperty(const HUSD_DataHandle &data,
                                 const UT_StringRef &primpath,
                                 const UT_StringRef &attribname,
                                 const HUSD_TimeCode &tc,

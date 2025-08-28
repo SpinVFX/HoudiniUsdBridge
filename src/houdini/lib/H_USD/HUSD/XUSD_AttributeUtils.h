@@ -29,6 +29,7 @@
 #include "HUSD_API.h"
 #include <SYS/SYS_Deprecated.h>
 #include <SYS/SYS_Types.h>
+#include <UT/UT_UniquePtr.h>
 #include <pxr/pxr.h>
 #include <pxr/usd/sdf/attributeSpec.h>
 
@@ -37,6 +38,7 @@ class VOP_TypeInfo;
 class PI_EditScriptedParm;
 class PRM_Parm;
 class HUSD_TimeCode;
+class HUSD_AutoAnyLock;
 
 PXR_NAMESPACE_OPEN_SCOPE
 class UsdObject;
@@ -68,28 +70,41 @@ HUSDsetAttribute(const UsdAttribute &attribute,
         const PRM_Parm &parm, 
 	const HUSD_TimeCode &timecode);
 
+/// The lock_to_release is freed before calling setValue on the parm. This
+/// may be necessary because PRM_Parm::setValue evaluates the PRM_Parm first.
+/// This may execute expression functions which involve cooking the LOP
+/// Network in a way this might invalidate the lock. So in this function we
+/// will free the lock object before calling setValue.
 HUSD_API bool
 HUSDsetNodeParm(PRM_Parm &parm,
         const UsdAttribute &attribute, 
 	const UsdTimeCode &timecode,
-        bool save_for_undo = false); 
+        bool save_for_undo = false,
+        UT_UniquePtr<HUSD_AutoAnyLock> *lock_to_release = nullptr);
 
+/// The lock_to_release is freed before calling setValue on the parm. This
+/// may be necessary because PRM_Parm::setValue evaluates the PRM_Parm first.
+/// This may execute expression functions which involve cooking the LOP
+/// Network in a way this might invalidate the lock. So in this function we
+/// will free the lock object before calling setValue.
 HUSD_API bool
-HUSDsetNodeParm(PRM_Parm &parm,
-        const UsdRelationship &relationship, 
-        bool save_for_undo = false); 
+HUSDsetRelationshipNodeParm(PRM_Parm &parm,
+        const SdfPathVector &rel_targets,
+        bool save_for_undo = false,
+        UT_UniquePtr<HUSD_AutoAnyLock> *lock_to_release = nullptr);
+
+/// Sets the parameter to specify the given source for a connection.
+HUSD_API bool
+HUSDsetConnectionNodeParm(PRM_Parm &parm,
+        const UsdShadeConnectionSourceInfo &src_info,
+        bool save_for_undo = false,
+        UT_UniquePtr<HUSD_AutoAnyLock> *lock_to_release = nullptr);
 
 /// Gets the @p value of the given @p attribute at specified @p timecode.
 template<typename UT_VALUE_TYPE>
 HUSD_API bool
 HUSDgetAttribute(const UsdAttribute &attribute, UT_VALUE_TYPE &value,
 	const UsdTimeCode &timecode);
-
-/// Sets the parameter to specify the given source for a connection.
-HUSD_API bool
-HUSDsetConnectionNodeParm(PRM_Parm &parm,
-	const UsdShadeConnectionSourceInfo &src_info,
-        bool save_for_undo = false); 
 
 /// Obtains the source the given destination attribute is connected to.
 HUSD_API bool

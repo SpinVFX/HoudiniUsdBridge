@@ -1027,20 +1027,21 @@ HUSDisTimeSampled(HUSD_TimeSampling time_sampling)
 }
 
 bool
-HUSDsetParmFromProperty(HUSD_AutoAnyLock &lock,
+HUSDsetParmFromProperty(const HUSD_DataHandle &data,
         const UT_StringRef &primpath,
         const UT_StringRef &attribname,
         const HUSD_TimeCode &tc,
         PRM_Parm &parm,
         HUSD_TimeSampling &timesampling)
 {
-    UsdPrim prim;
+    UT_UniquePtr<HUSD_AutoAnyLock>   lock(new HUSD_AutoReadLock(data));
+    UsdPrim                          prim;
 
     if (primpath.isstring() &&
-	lock.constData() && lock.constData()->isStageValid())
+	lock->constData() && lock->constData()->isStageValid())
     {
 	SdfPath sdfpath(HUSDgetSdfPath(primpath));
-	prim = lock.constData()->stage()->GetPrimAtPath(sdfpath);
+	prim = lock->constData()->stage()->GetPrimAtPath(sdfpath);
     }
 
     if (!prim)
@@ -1063,9 +1064,12 @@ HUSDsetParmFromProperty(HUSD_AutoAnyLock &lock,
 
         bool ok = true;
 	if (!HUSDgetFirstConnectedSrc(attrib, src_info))
-            parm.setValue( 0, "", CH_STRING_LITERAL ); // No source: clear parm
+	{
+	    lock.reset();
+	    parm.setValue( 0, "", CH_STRING_LITERAL ); // No source: clear parm
+	}
         else
-            ok = HUSDsetConnectionNodeParm(parm, src_info, true);
+            ok = HUSDsetConnectionNodeParm(parm, src_info, true, &lock);
 
         return ok;
     }
@@ -1079,7 +1083,6 @@ HUSDsetParmFromProperty(HUSD_AutoAnyLock &lock,
 
         if (coll)
         {
-            PRM_Parm *collparm = nullptr;
             auto get_parm_from_names_fn = [&](const char *suffix) {
                 UT_WorkBuffer parmname(attribname);
                 if (UTisstring(suffix))
@@ -1090,34 +1093,60 @@ HUSDsetParmFromProperty(HUSD_AutoAnyLock &lock,
                 return parm.getOwner()->getParmPtr(
                     UT_VarEncode::encodeParm(parmname.buffer()));
             };
-            bool ispathexpr = coll.IsInExpressionMode();
+            bool is_path_expr = coll.IsInExpressionMode();
+            SdfPathExpression path_expr;
+            bool include_root = false;
+            SdfPathVector include_rel_targets;
+            bool has_authored_exclude_targets = false;
+            SdfPathVector exclude_rel_targets;
+            TfToken expansion_rule;
+            PRM_Parm *collparm = nullptr;
+
+            // Putting a collection into a parm requires reading a bunch of
+            // attributes and setting values in a bunch of parameters. To make
+            // this safe, we must gather all the information first, then
+            // release the read lock, then make all our setValue calls.
+            coll.GetExpansionRuleAttr().Get<TfToken>(&expansion_rule);
+            if (is_path_expr)
+            {
+                if (coll.GetMembershipExpressionAttr())
+                    coll.GetMembershipExpressionAttr().
+                        Get<SdfPathExpression>(&path_expr);
+            }
+            else
+            {
+                if (coll.GetIncludeRootAttr())
+                    coll.GetIncludeRootAttr().Get<bool>(&include_root);
+                if (coll.GetIncludesRel())
+                    coll.GetIncludesRel().GetTargets(&include_rel_targets);
+                if (coll.GetExcludesRel())
+                {
+                    has_authored_exclude_targets =
+                        coll.GetExcludesRel().HasAuthoredTargets();
+                    coll.GetExcludesRel().GetTargets(&exclude_rel_targets);
+                }
+            }
+            lock.reset();
 
             // Always allow instance proxies when setting parms from a prim.
             if ((collparm = get_parm_from_names_fn("allowinstanceproxies")))
                 ok &= collparm->setValue(0.0, true, true);
             // Record whether this collection is in expression mode.
             if ((collparm = get_parm_from_names_fn("ispathexpression")))
-                ok &= collparm->setValue(0.0, ispathexpr, true);
+                ok &= collparm->setValue(0.0, is_path_expr, true);
             // Set the expansion rule. Ignored by path expression mode,
             // but still worth setting the value.
-            if (coll.GetExpansionRuleAttr())
-            {
-                if ((collparm = get_parm_from_names_fn("expansionrule")))
-                    ok &= HUSDsetNodeParm(*collparm,
-                        coll.GetExpansionRuleAttr(),
-                        UsdTimeCode::Default(), true);
-            }
+            if (!expansion_rule.IsEmpty() &&
+                ((collparm = get_parm_from_names_fn("expansionrule"))))
+                collparm->setValue(0.0, expansion_rule.GetText(),
+                    CH_STRING_LITERAL, true);
 
-            if (ispathexpr)
+            if (is_path_expr)
             {
-                if (coll.GetMembershipExpressionAttr())
-                {
-                    if ((collparm = get_parm_from_names_fn(nullptr)))
-                        ok &= HUSDsetNodeParm(*collparm,
-                            coll.GetMembershipExpressionAttr(),
-                            UsdTimeCode::Default(), true);
-                }
-                // Turn of "exclusions" in path expression mode. We support
+                if ((collparm = get_parm_from_names_fn(nullptr)))
+                    collparm->setValue(0.0, path_expr.GetText().c_str(),
+                        CH_STRING_LITERAL, true);
+                // Turn off "exclusions" in path expression mode. We support
                 // it for authoring the collection, but we can't extract a
                 // value for this parameter from an existing path expression.
                 if ((collparm = get_parm_from_names_fn("doexclusions")))
@@ -1125,33 +1154,24 @@ HUSDsetParmFromProperty(HUSD_AutoAnyLock &lock,
             }
             else
             {
-                bool includeroot = false;
 
-                if (coll.GetExcludesRel())
+                if ((collparm = get_parm_from_names_fn("excludepattern")))
+                    ok &= HUSDsetRelationshipNodeParm(*collparm,
+                        exclude_rel_targets, true);
+                if ((collparm = get_parm_from_names_fn("doexclusions")))
+                    collparm->setValue(0.0, has_authored_exclude_targets, true);
+
+                if ((collparm = get_parm_from_names_fn(nullptr)))
+                    ok &= HUSDsetRelationshipNodeParm(*collparm,
+                        include_rel_targets, true);
+                // Special case for "includeRoot" - we express this in
+                // parms by putting the root path in the patter string.
+                if (include_root)
                 {
-                    if ((collparm = get_parm_from_names_fn("excludepattern")))
-                        ok &= HUSDsetNodeParm(*collparm,
-                            coll.GetExcludesRel(), true);
-                    if ((collparm = get_parm_from_names_fn("doexclusions")))
-                        collparm->setValue(0.0,
-                            coll.GetExcludesRel().HasAuthoredTargets(), true);
-                }
-                if (coll.GetIncludeRootAttr())
-                    coll.GetIncludeRootAttr().Get<bool>(&includeroot);
-                if (coll.GetIncludesRel() || includeroot)
-                {
-                    if ((collparm = get_parm_from_names_fn(nullptr)))
-                        ok &= HUSDsetNodeParm(*collparm,
-                            coll.GetIncludesRel(), true);
-                    // Special case for "includeRoot" - we express this in
-                    // parms by putting the root path in the patter string.
-                    if (includeroot)
-                    {
-                        UT_String pattern;
-                        collparm->getValue(0.0, pattern, 0, false, SYSgetSTID());
-                        pattern.insert(0, "/ ");
-                        collparm->setValue(0.0, pattern, CH_STRING_LITERAL, true);
-                    }
+                    UT_String pattern;
+                    collparm->getValue(0.0, pattern, 0, false, SYSgetSTID());
+                    pattern.insert(0, "/ ");
+                    collparm->setValue(0.0, pattern, CH_STRING_LITERAL, true);
                 }
             }
         }
@@ -1164,12 +1184,16 @@ HUSDsetParmFromProperty(HUSD_AutoAnyLock &lock,
         HUSDupdateValueTimeSampling(timesampling, attrib);
         UsdTimeCode usdtc = HUSDgetNonDefaultUsdTimeCode(tc);
 
-        return HUSDsetNodeParm(parm, attrib, usdtc, true);
+        return HUSDsetNodeParm(parm, attrib, usdtc, true, &lock);
     }
 
     auto rel = prim.GetRelationship(TfToken(attribname.toStdString()));
     if (rel)
-        return HUSDsetNodeParm(parm, rel, true);
+    {
+        SdfPathVector rel_targets;
+        if (rel.GetTargets(&rel_targets))
+            return HUSDsetRelationshipNodeParm(parm, rel_targets, true, &lock);
+    }
 
     return false;
 }
