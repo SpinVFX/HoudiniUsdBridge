@@ -41,6 +41,14 @@ void wrapUsdHoudiniTokens()
 {
     pxr_boost::python::class_<UsdHoudiniTokensType, pxr_boost::python::noncopyable>
         cls("Tokens", pxr_boost::python::no_init);
+    _AddToken(cls, "barndoorbottom", UsdHoudiniTokens->barndoorbottom);
+    _AddToken(cls, "barndoorbottomedge", UsdHoudiniTokens->barndoorbottomedge);
+    _AddToken(cls, "barndoorleft", UsdHoudiniTokens->barndoorleft);
+    _AddToken(cls, "barndoorleftedge", UsdHoudiniTokens->barndoorleftedge);
+    _AddToken(cls, "barndoorright", UsdHoudiniTokens->barndoorright);
+    _AddToken(cls, "barndoorrightedge", UsdHoudiniTokens->barndoorrightedge);
+    _AddToken(cls, "barndoortop", UsdHoudiniTokens->barndoortop);
+    _AddToken(cls, "barndoortopedge", UsdHoudiniTokens->barndoortopedge);
     _AddToken(cls, "houdiniBackgroundimage", UsdHoudiniTokens->houdiniBackgroundimage);
     _AddToken(cls, "houdiniClippingRange", UsdHoudiniTokens->houdiniClippingRange);
     _AddToken(cls, "houdiniEditable", UsdHoudiniTokens->houdiniEditable);
@@ -59,6 +67,7 @@ void wrapUsdHoudiniTokens()
     _AddToken(cls, "HoudiniEditableAPI", UsdHoudiniTokens->HoudiniEditableAPI);
     _AddToken(cls, "HoudiniFieldAsset", UsdHoudiniTokens->HoudiniFieldAsset);
     _AddToken(cls, "HoudiniLayerInfo", UsdHoudiniTokens->HoudiniLayerInfo);
+    _AddToken(cls, "HoudiniLightBarnDoorAPI", UsdHoudiniTokens->HoudiniLightBarnDoorAPI);
     _AddToken(cls, "HoudiniMetaCurves", UsdHoudiniTokens->HoudiniMetaCurves);
     _AddToken(cls, "HoudiniProceduralAPI", UsdHoudiniTokens->HoudiniProceduralAPI);
     _AddToken(cls, "HoudiniSelectableAPI", UsdHoudiniTokens->HoudiniSelectableAPI);

@@ -4,6 +4,7 @@ set( sources
     wrapHoudiniEditableAPI.cpp
     wrapHoudiniFieldAsset.cpp
     wrapHoudiniLayerInfo.cpp
+    wrapHoudiniLightBarnDoorAPI.cpp
     wrapHoudiniMetaCurves.cpp
     wrapHoudiniProceduralAPI.cpp
     wrapHoudiniSelectableAPI.cpp

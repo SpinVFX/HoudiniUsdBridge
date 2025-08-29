@@ -152,3 +152,60 @@ class "HoudiniViewportLightAPI" (
         doc = """Near and far clipping distances in scene units."""
     )
 }
+
+class "HoudiniLightBarnDoorAPI" (
+    customData = {
+        string className = "HoudiniLightBarnDoorAPI"
+    }
+    inherits = </APISchemaBase>
+    doc = """Houdini API schema for describing barn door attributes on lights.
+    This should not be avoided, if possible, in favour of using Light Filters
+    instead. This schema (and the associated attributes) will be deprecated and
+    removed from Solaris in a later release of Houdini.""" 
+)
+{
+    float barndoorleft = 0.0 (
+        doc = """Slides in a light blocker from the left, covering part of the
+        spotlight cone. `1.0` reaches all the way across the cone, blocking all
+        light."""
+    )
+
+    float barndoorleftedge = 0.0 (
+        doc = """Extends the solid light blocker above by an additional soft
+        edge. `1.0` creates a gradient as wide as the spotlight cone."""
+    )
+
+    float barndoorright = 0.0 (
+        doc = """Slides in a light blocker from the right, covering part of the
+        spotlight cone. `1.0` reaches all the way across the cone, blocking all
+        light."""
+    )
+
+    float barndoorrightedge = 0.0 (
+        doc = """Extends the solid light blocker above by an additional soft
+        edge. `1.0` creates a gradient as wide as the spotlight cone."""
+    )
+
+    float barndoortop = 0.0 (
+        doc = """Slides in a light blocker from the top, covering part of the
+        spotlight cone. `1.0` reaches all the way across the cone, blocking all
+        light."""
+    )
+
+    float barndoortopedge = 0.0 (
+        doc = """Extends the solid light blocker above by an additional soft
+        edge. `1.0` creates a gradient as wide as the spotlight cone."""
+    )
+
+    float barndoorbottom = 0.0 (
+        doc = """Slides in a light blocker from the bottom, covering part of the
+        spotlight cone. `1.0` reaches all the way across the cone, blocking all
+        light."""
+    )
+
+    float barndoorbottomedge = 0.0 (
+        doc = """Extends the solid light blocker above by an additional soft
+        edge. `1.0` creates a gradient as wide as the spotlight cone."""
+    )
+}
+

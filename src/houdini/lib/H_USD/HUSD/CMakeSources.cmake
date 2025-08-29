@@ -135,6 +135,7 @@ set( husd_sources
     UsdHoudini/houdiniEditableAPI.cpp
     UsdHoudini/houdiniFieldAsset.cpp
     UsdHoudini/houdiniLayerInfo.cpp
+    UsdHoudini/houdiniLightBarnDoorAPI.cpp
     UsdHoudini/houdiniMetaCurves.cpp
     UsdHoudini/houdiniProceduralAPI.cpp
     UsdHoudini/houdiniSelectableAPI.cpp
@@ -272,6 +273,7 @@ set( husd_internal_headers
     UsdHoudini/houdiniEditableAPI.h
     UsdHoudini/houdiniFieldAsset.h
     UsdHoudini/houdiniLayerInfo.h
+    UsdHoudini/houdiniLightBarnDoorAPI.h
     UsdHoudini/houdiniMetaCurves.h
     UsdHoudini/houdiniProceduralAPI.h
     UsdHoudini/houdiniSelectableAPI.h

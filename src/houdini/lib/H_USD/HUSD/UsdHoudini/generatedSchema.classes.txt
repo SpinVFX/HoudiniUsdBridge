@@ -5,6 +5,7 @@ houdiniCameraPlateAPI
 houdiniEditableAPI
 houdiniFieldAsset
 houdiniLayerInfo
+houdiniLightBarnDoorAPI
 houdiniMetaCurves
 houdiniProceduralAPI
 houdiniSelectableAPI
@@ -18,6 +19,7 @@ wrapHoudiniCameraPlateAPI.cpp
 wrapHoudiniEditableAPI.cpp
 wrapHoudiniFieldAsset.cpp
 wrapHoudiniLayerInfo.cpp
+wrapHoudiniLightBarnDoorAPI.cpp
 wrapHoudiniMetaCurves.cpp
 wrapHoudiniProceduralAPI.cpp
 wrapHoudiniSelectableAPI.cpp

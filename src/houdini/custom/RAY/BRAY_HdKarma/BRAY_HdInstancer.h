@@ -155,6 +155,7 @@ private:
     VtValue                             myAccelerations;
     UT_Map<SdfPath, GT_DataArrayHandle> myCategories;
     int                                 mySegments;
+    double                              myAngularVelocityScale;
     MotionBlurStyle                     myMotionBlur;
     BRAY::SpacePtr::MBStyle             myMotionStyle;
     bool				myNewObject;

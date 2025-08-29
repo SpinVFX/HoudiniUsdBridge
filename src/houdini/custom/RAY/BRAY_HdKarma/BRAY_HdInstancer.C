@@ -45,6 +45,13 @@
 
 PXR_NAMESPACE_OPEN_SCOPE
 
+TF_DEFINE_PRIVATE_TOKENS(
+    theGATokens,
+    ((v, GA_Names::v))
+    ((accel, GA_Names::accel))
+    ((w, GA_Names::w))
+);
+
 namespace
 {
     template <typename D, typename S>
@@ -335,10 +342,11 @@ namespace
 
     /// Rotation matrix taking `w` in degrees
     void
-    rotationMatrixDeg(GfMatrix4d &xform, const GfVec3d &p, GfVec3f w)
+    rotationMatrixDeg(GfMatrix4d &xform, const GfVec3d &p, GfVec3f w,
+            double angular_velocity_scale)
     {
         static constexpr double EPS = 1e-12;
-        double   theta = SYSdegToRad(w.Normalize());
+        double   theta = w.Normalize() * angular_velocity_scale;
         if (theta <= EPS)
             return;
         double  st, ct;
@@ -363,7 +371,9 @@ namespace
             const VtArray<GfVec3f> *velocities,
             const VtArray<GfVec3f> *angularVelocities,
             const VtArray<GfVec3f> *accel,
-            UT_Array<GfMatrix4d> *xformList, const float *shutter_times)
+            UT_Array<GfMatrix4d> *xformList,
+            const float *shutter_times,
+            float angular_velocity_scale)
     {
         UT_ASSERT(velocities || angularVelocities);
         size_t  nitems = velocities ? velocities->size() : angularVelocities->size();
@@ -399,7 +409,8 @@ namespace
                     GfMatrix4d  xlate(1.0);
                     rotationMatrixDeg(xform,
                             xformList[seg][i].ExtractTranslation(),     // pivot
-                            (*angularVelocities)[idx] * tm);
+                            (*angularVelocities)[idx] * tm,
+                            angular_velocity_scale);
                     xform *= xlate.SetTranslateOnly(vel);
                 }
                 else
@@ -964,9 +975,22 @@ BRAY_HdInstancer::syncPrimvars(HdSceneDelegate* delegate,
     {
         auto *sd = GetDelegate();
         myVelocities = BRAY_HdUtil::evalVt(sd, id, HdTokens->velocities);
+        if (myVelocities.IsEmpty())
+            myVelocities = BRAY_HdUtil::evalVt(sd, id, theGATokens->v);
         myAccelerations = BRAY_HdUtil::evalVt(sd, id, HdTokens->accelerations);
+        if (myAccelerations.IsEmpty())
+            myAccelerations = BRAY_HdUtil::evalVt(sd, id, theGATokens->accel);
         myAngularVelocities = BRAY_HdUtil::evalVt(sd, id,
                                     UsdGeomTokens->angularVelocities);
+        // USD Angular Velocities are in degrees/second
+        myAngularVelocityScale = M_PI/180;
+        if (myAngularVelocities.IsEmpty())
+        {
+            // USD Angular Velocities are in radians/second
+            myAngularVelocityScale = 1;
+            myAngularVelocities = BRAY_HdUtil::evalVt(sd, id, theGATokens->w);
+        }
+
         if (!myVelocities.IsHolding<VtArray<GfVec3f>>()
                 && !myAngularVelocities.IsHolding<VtArray<GfVec3f>>())
         {
@@ -1166,7 +1190,8 @@ BRAY_HdInstancer::NestedInstances(BRAY_HdParam &rparm,
                     angularVelocities,
                     accelerations,
                     xformList.array(),
-                    frameTimes.array());
+                    frameTimes.array(),
+                    myAngularVelocityScale);
     }
     UT_ASSERT(xformList.size() >= mySegments);
     BRAY_HdUtil::makeSpaceList(xforms, xformList.array(),

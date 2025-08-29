@@ -15,4 +15,5 @@ TF_WRAP(UsdHoudiniHoudiniViewportGuideAPI);
 TF_WRAP(UsdHoudiniHoudiniCameraPlateAPI);
 TF_WRAP(UsdHoudiniHoudiniProceduralAPI);
 TF_WRAP(UsdHoudiniHoudiniViewportLightAPI);
+TF_WRAP(UsdHoudiniHoudiniLightBarnDoorAPI);
 TF_WRAP(UsdHoudiniTokens);

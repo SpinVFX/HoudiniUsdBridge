@@ -41,10 +41,42 @@ PXR_NAMESPACE_OPEN_SCOPE
 /// Use UsdHoudiniTokens like so:
 ///
 /// \code
-///     gprim.GetMyTokenValuedAttr().Set(UsdHoudiniTokens->houdiniBackgroundimage);
+///     gprim.GetMyTokenValuedAttr().Set(UsdHoudiniTokens->barndoorbottom);
 /// \endcode
 struct UsdHoudiniTokensType {
     USDHOUDINI_API UsdHoudiniTokensType();
+    /// \brief "barndoorbottom"
+    /// 
+    /// UsdHoudiniHoudiniLightBarnDoorAPI
+    const TfToken barndoorbottom;
+    /// \brief "barndoorbottomedge"
+    /// 
+    /// UsdHoudiniHoudiniLightBarnDoorAPI
+    const TfToken barndoorbottomedge;
+    /// \brief "barndoorleft"
+    /// 
+    /// UsdHoudiniHoudiniLightBarnDoorAPI
+    const TfToken barndoorleft;
+    /// \brief "barndoorleftedge"
+    /// 
+    /// UsdHoudiniHoudiniLightBarnDoorAPI
+    const TfToken barndoorleftedge;
+    /// \brief "barndoorright"
+    /// 
+    /// UsdHoudiniHoudiniLightBarnDoorAPI
+    const TfToken barndoorright;
+    /// \brief "barndoorrightedge"
+    /// 
+    /// UsdHoudiniHoudiniLightBarnDoorAPI
+    const TfToken barndoorrightedge;
+    /// \brief "barndoortop"
+    /// 
+    /// UsdHoudiniHoudiniLightBarnDoorAPI
+    const TfToken barndoortop;
+    /// \brief "barndoortopedge"
+    /// 
+    /// UsdHoudiniHoudiniLightBarnDoorAPI
+    const TfToken barndoortopedge;
     /// \brief "houdini:backgroundimage"
     /// 
     /// UsdHoudiniHoudiniCameraPlateAPI
@@ -117,6 +149,10 @@ struct UsdHoudiniTokensType {
     /// 
     /// Schema identifer and family for UsdHoudiniHoudiniLayerInfo
     const TfToken HoudiniLayerInfo;
+    /// \brief "HoudiniLightBarnDoorAPI"
+    /// 
+    /// Schema identifer and family for UsdHoudiniHoudiniLightBarnDoorAPI
+    const TfToken HoudiniLightBarnDoorAPI;
     /// \brief "HoudiniMetaCurves"
     /// 
     /// Schema identifer and family for UsdHoudiniHoudiniMetaCurves

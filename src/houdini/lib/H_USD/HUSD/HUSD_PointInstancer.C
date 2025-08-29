@@ -410,7 +410,7 @@ bool HUSD_PointInstancer::copyUsdXformAttrsToGeoAttrs(HUSD_AutoAnyLock &lock,
     UT_Array<UT_Vector3F>    scales;
     UT_Array<UT_Vector3F>    accelerations;
     UT_Array<UT_Vector3F>    velocities;
-    UT_Array<UT_Vector3F>    angularVeolcities;
+    UT_Array<UT_Vector3F>    angularVelocities;
 
     if (copyScales)
         getAttrs.getAttribute(primPath, UsdGeomTokens->scales.GetString(), scales, timeCode);
@@ -419,12 +419,12 @@ bool HUSD_PointInstancer::copyUsdXformAttrsToGeoAttrs(HUSD_AutoAnyLock &lock,
     if (copyVelocities)
         getAttrs.getAttribute(primPath, UsdGeomTokens->velocities.GetString(), velocities, timeCode);
     if (copyAngularVelocities)
-        getAttrs.getAttribute(primPath, UsdGeomTokens->angularVelocities.GetString(), angularVeolcities, timeCode);
+        getAttrs.getAttribute(primPath, UsdGeomTokens->angularVelocities.GetString(), angularVelocities, timeCode);
 
     hasScales = !scales.isEmpty();
     hasAccelerations = !accelerations.isEmpty();
     hasVelocities = !velocities.isEmpty();
-    hasAngularVelocities = !angularVeolcities.isEmpty();
+    hasAngularVelocities = !angularVelocities.isEmpty();
 
     if (copyScales && hasScales)
         scaleAttr = gdp->addFloatTuple(GA_ATTRIB_POINT, GA_Names::scale, 3);
@@ -457,7 +457,11 @@ bool HUSD_PointInstancer::copyUsdXformAttrsToGeoAttrs(HUSD_AutoAnyLock &lock,
             velAttr.set(ptoff, velocities[i]);
 
         if (copyAngularVelocities && hasAngularVelocities)
-            angvelAttr.set(ptoff, angularVeolcities[i]);
+        {
+            // angularVelocities is in degrees/s, but w is radians/s
+            angularVelocities[i].degToRad();
+            angvelAttr.set(ptoff, angularVelocities[i]);
+        }
     }
     return true;
 }
