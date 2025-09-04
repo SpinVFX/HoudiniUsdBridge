@@ -52,6 +52,7 @@
 #include <pxr/usd/usdGeom/xformCache.h>
 #include <pxr/usd/usdShade/tokens.h>
 #include <pxr/usd/usdSkel/bakeSkinning.h>
+#include <pxr/usd/usdSkel/bindingAPI.h>
 #include <pxr/usd/usdSkel/cache.h>
 #include <pxr/usd/usdSkel/root.h>
 #include <pxr/usd/usdSkel/skeletonQuery.h>
@@ -1193,7 +1194,9 @@ husdBindMaterial(
 }
 
 void
-husdClearAnimSource(const SdfPrimSpecHandle &prim_spec)
+husdSetAnimSource(
+        const SdfPrimSpecHandle &prim_spec,
+        const SdfPath &anim_source)
 {
     // Apply the SkelBindingAPI since we're authoring skel:animationSource.
     VtValue listopval = prim_spec->GetInfo(UsdTokens->apiSchemas);
@@ -1208,12 +1211,14 @@ husdClearAnimSource(const SdfPrimSpecHandle &prim_spec)
             prim_spec, UsdSkelTokens->skelAnimationSource,
             /*custom=*/false);
     rel_spec->GetTargetPathList().ClearEditsAndMakeExplicit();
+    if (!anim_source.IsEmpty())
+        rel_spec->GetTargetPathList().Append(anim_source);
 }
 
 /// Author the instancing-related overlays for the exemplars to be baked, and
 /// the instances of those exemplars.
 void
-husdCreateInstances(
+husdSetupBakedInstances(
         const UsdStageRefPtr &stage,
         const SdfLayerRefPtr &layer,
         UT_Set<HUSD_Path> &exemplars_to_bake,
@@ -1266,7 +1271,7 @@ husdCreateInstances(
         // Since we're baking skinning for the prototype, we need to author an
         // empty skel:animationSource (overriding the inherited animation
         // binding) so Hydra can actually aggregate these instances together.
-        husdClearAnimSource(prim_spec);
+        husdSetAnimSource(prim_spec, SdfPath::EmptyPath());
 
         SdfAttributeSpecHandle vis_spec = SdfAttributeSpec::New(
                 prim_spec, UsdGeomTokens->visibility, SdfValueTypeNames->Token);
@@ -1299,6 +1304,85 @@ husdCreateInstances(
                 prim_spec->SetInstanceable(false);
                 exemplars_to_bake.insert(path);
             }
+
+            if (visualize)
+                husdBindMaterial(prim_spec, default_material);
+        }
+    }
+}
+
+/// Author overlays for instances to use the skel:animationSource of the
+/// exemplar agent.
+void
+husdModifyAnimSources(
+        const UsdStageRefPtr &stage,
+        const SdfLayerRefPtr &layer,
+        const UT_Set<HUSD_Path> &exemplars_to_bake,
+        const UT_Map<HUSD_Path, HUSD_Path> &paths_to_reduce,
+        const UT_Array<HUSD_Path> &paths_skipped,
+        bool visualize,
+        const HUSD_Path &prototype_material,
+        const HUSD_Path &instance_material,
+        const HUSD_Path &default_material)
+{
+    SdfChangeBlock changeblock;
+
+    UT_Map<HUSD_Path, HUSD_Path> exemplar_anim_sources;
+    exemplar_anim_sources.reserve(exemplars_to_bake.size());
+
+    // Record the animation sources for the exemplar agents.
+    for (const HUSD_Path &exemplar_path : exemplars_to_bake)
+    {
+        const UsdSkelRoot skel_root(
+                stage->GetPrimAtPath(exemplar_path.sdfPath()));
+        UT_ASSERT(skel_root);
+
+        UsdSkelBindingAPI skel_binding(skel_root);
+        UsdPrim anim_source = skel_binding.GetInheritedAnimationSource();
+        exemplar_anim_sources.emplace(
+                exemplar_path, anim_source.IsValid() ? anim_source.GetPrimPath()
+                                                     : SdfPath::EmptyPath());
+
+        if (visualize)
+        {
+            SdfPrimSpecHandle prim_spec = SdfCreatePrimInLayer(
+                    layer, exemplar_path.sdfPath());
+            husdBindMaterial(prim_spec, prototype_material);
+        }
+    }
+
+    // Update the instanced agents to use the same skel:animationSource (same
+    // pose) as the exemplars. In Hydra 2, this is translated into instances of
+    // the same prototype..
+    for (auto &&[path, target_path] : paths_to_reduce)
+    {
+        // Ignore the exemplar agent, which is already using the correct
+        // animation source (this shows up in the list because the baking mode
+        // needs to adjust the exemplar to instance the baked geo)
+        const bool is_exemplar
+                = (path.parentPath() == target_path.parentPath());
+        if (is_exemplar)
+            continue;
+
+        const HUSD_Path &exemplar_anim_source
+                = exemplar_anim_sources.at(target_path);
+
+        SdfPrimSpecHandle prim_spec = SdfCreatePrimInLayer(
+                layer, path.sdfPath());
+        husdSetAnimSource(prim_spec, exemplar_anim_source.sdfPath());
+
+        if (visualize)
+            husdBindMaterial(prim_spec, instance_material);
+    }
+
+    // If visualization is enabled, color the primitives which weren't affected
+    // by the procedural.
+    if (visualize)
+    {
+        for (const HUSD_Path &path : paths_skipped)
+        {
+            SdfPrimSpecHandle prim_spec = SdfCreatePrimInLayer(
+                    layer, path.sdfPath());
 
             if (visualize)
                 husdBindMaterial(prim_spec, default_material);
@@ -1414,6 +1498,7 @@ HUSDapplyCrowdProcedural(
         fpreal lod_threshold,
         fpreal offscreen_quality,
         bool optimize_identical_poses,
+        bool bake_prototype_agents,
         bool bake_all_agents,
         const HUSD_Path &prototype_material,
         const HUSD_Path &instance_material,
@@ -1519,20 +1604,36 @@ HUSDapplyCrowdProcedural(
     }
 
     timer.restart();
-    // Apply the instancing changes to the stage and bake out skinning for the
-    // prototypes.
-    husdCreateInstances(
-            stage, edit_layer, exemplars_to_bake, paths_to_reduce,
-            paths_skipped, bake_all_agents, visualize, prototype_material,
-            instance_material, default_material);
 
-    GfInterval bake_interval = husdComputeBakeInterval(
-            stage, HUSDgetUsdTimeCode(time_sample), shutter_range);
-    husdBakeSkinning(stage, edit_layer, exemplars_to_bake, bake_interval);
+    if (bake_prototype_agents)
+    {
+        // Apply the instancing changes to the stage and bake out skinning for
+        // the prototypes.
+        husdSetupBakedInstances(
+                stage, edit_layer, exemplars_to_bake, paths_to_reduce,
+                paths_skipped, bake_all_agents, visualize, prototype_material,
+                instance_material, default_material);
 
-    UT_Date::printSeconds(seconds, timer.stop(), false, true, true);
-    UT_ErrorLog::format(
-            3, "Crowd Procedural: bake skinning time {0}", seconds);
+        GfInterval bake_interval = husdComputeBakeInterval(
+                stage, HUSDgetUsdTimeCode(time_sample), shutter_range);
+        husdBakeSkinning(stage, edit_layer, exemplars_to_bake, bake_interval);
+
+        UT_Date::printSeconds(seconds, timer.stop(), false, true, true);
+        UT_ErrorLog::format(
+                3, "Crowd Procedural: bake skinning time {0}", seconds);
+    }
+    else
+    {
+        husdModifyAnimSources(
+                stage, edit_layer, exemplars_to_bake, paths_to_reduce,
+                paths_skipped, visualize, prototype_material, instance_material,
+                default_material);
+
+        UT_Date::printSeconds(seconds, timer.stop(), false, true, true);
+        UT_ErrorLog::format(
+                3, "Crowd Procedural: edit skel:animationSource time {0}",
+                seconds);
+    }
 
     return true;
 }

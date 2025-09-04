@@ -39,6 +39,7 @@ HUSD_API bool HUSDapplyCrowdProcedural(
         fpreal lod_threshold,
         fpreal offscreen_quality,
         bool optimize_identical_poses,
+        bool bake_prototype_agents,
         bool bake_all_agents,
         const HUSD_Path &prototype_material,
         const HUSD_Path &instance_material,
