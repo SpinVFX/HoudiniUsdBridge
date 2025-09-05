@@ -204,9 +204,9 @@ private:
     geo_AttribForeignSource	 myForeignSource;
 };
 
-template<>
-class GEO_FilePropAttribSource<std::string, std::string> :
-    public GEO_FilePropSource
+/// Specialization for USD types such as std::string or SdfAssetPath.
+template <typename StringT>
+class GEO_FilePropAttribSource<StringT, std::string> : public GEO_FilePropSource
 {
 public:
 			 GEO_FilePropAttribSource(
@@ -221,7 +221,7 @@ public:
                                 for (exint j = 0; j < tuple_size; ++j)
                                 {
                                     const GT_String str = attrib->getS(i, j);
-                                    myValue.push_back(str.toStdString());
+                                    myValue.emplace_back(str.toStdString());
                                 }
                             }
                          }
@@ -232,7 +232,7 @@ public:
 			 }
 
 private:
-    VtArray<std::string> myValue;
+    VtArray<StringT> myValue;
 };
 
 /// Convert from a GT_DataArray to a VtArray when the types are not identical

@@ -641,6 +641,54 @@ initPartition(GEO_FilePrim &fileprim,
     }
 }
 
+template <typename GtT, typename GtComponentT>
+GEO_FilePropSource *
+geoCreateFilePropAttribSource(
+        const SdfValueTypeName &usd_attr_type,
+        const GT_DataArrayHandle &src_hou_attr)
+{
+    if constexpr (SYSisSame<GtComponentT, std::string>())
+    {
+        // VtValue doesn't have implicit conversions from std::string to
+        // SdfAssetPath, so we need to explicitly convert if we end up authoring
+        // asset paths (either explicitly chosen by the user, or from matching
+        // the schema's attribute type).
+        if (usd_attr_type == SdfValueTypeNames->AssetArray)
+        {
+            return new GEO_FilePropAttribSource<SdfAssetPath, GtComponentT>(
+                    src_hou_attr);
+        }
+    }
+
+    return new GEO_FilePropAttribSource<GtT, GtComponentT>(src_hou_attr);
+}
+
+template <typename GtT>
+GEO_FilePropSource *
+geoCreateFilePropConstantArraySource(
+        const SdfValueTypeName &usd_attr_type,
+        const UT_Array<GtT> &values)
+{
+    if constexpr (SYSisSame<GtT, std::string>())
+    {
+        // VtValue doesn't have implicit conversions from std::string to
+        // SdfAssetPath, so we need to explicitly convert if we end up authoring
+        // asset paths (either explicitly chosen by the user, or from matching
+        // the schema's attribute type).
+        if (usd_attr_type == SdfValueTypeNames->AssetArray)
+        {
+            UT_Array<SdfAssetPath> path_values(values.size());
+            for (const std::string &path : values)
+                path_values.append(SdfAssetPath(path));
+
+            return new GEO_FilePropConstantArraySource<SdfAssetPath>(
+                    path_values);
+        }
+    }
+
+    return new GEO_FilePropConstantArraySource<GtT>(values);
+}
+
 /// Creates the index array when building indexed primvars (for
 /// GEOcreateIndexedAttr()).
 template <typename UsdT, typename GtComponentT>
@@ -827,6 +875,7 @@ GEOcreateIndexedAttr(GEO_FilePrim &fileprim,
                      const UT_StringRef &attr_name,
                      const UT_StringRef &decoded_attr_name,
                      const TfToken &usd_attr_name,
+                     const SdfValueTypeName &usd_attr_type,
                      bool attr_is_constant,
                      bool attr_is_default,
                      int64 dataid,
@@ -862,7 +911,8 @@ GEOcreateIndexedAttr(GEO_FilePrim &fileprim,
             indices_prop->setValueIsDefault(true);
         indices_prop->addCustomData(HUSDgetDataIdToken(), VtValue(dataid));
 
-        prop_source = new GEO_FilePropConstantArraySource<GtT>(values);
+        prop_source = geoCreateFilePropConstantArraySource(
+                usd_attr_type, values);
         return true;
     }
     else
@@ -1050,8 +1100,6 @@ GEOinitProperty(GEO_FilePrim &fileprim,
         bool override_is_constant,
         bool override_is_array)
 {
-    typedef GEO_FilePropAttribSource<GtT, GtComponentT> FilePropAttribSource;
-
     // If the primvars prefix should always be added, do this first before
     // checking the attribute against the prim schema.
     if (create_primvar == GEO_CreatePrimvar::Enabled)
@@ -1180,7 +1228,7 @@ GEOinitProperty(GEO_FilePrim &fileprim,
         if (!create_indices_attr
             || !GEOcreateIndexedAttr<GtT, GtComponentT>(
                     fileprim, prop_source, src_hou_attr, entries_per_elem,
-                    attr_name, decoded_attr_name, usd_attr_name,
+                    attr_name, decoded_attr_name, usd_attr_name, usd_attr_type,
                     disable_indexing, attr_is_default, dataid, options))
         {
             // Unless we created an indexed primvar, build a data array from
@@ -1202,7 +1250,10 @@ GEOinitProperty(GEO_FilePrim &fileprim,
 
             // Otherwise, create a normal data array.
             if (!prop_source)
-                prop_source = new FilePropAttribSource(src_hou_attr);
+            {
+                prop_source = geoCreateFilePropAttribSource<GtT, GtComponentT>(
+                        usd_attr_type, src_hou_attr);
+            }
             else
             {
                 // Don't need to author the interpolation metadata.
@@ -2556,7 +2607,14 @@ initExtraAttrib(GEO_FilePrim &fileprim,
     }
     else if (storage == GT_STORE_STRING)
     {
-        INIT_ATTRIB(std::string, std::string, SdfValueTypeNames->StringArray);
+        SdfValueTypeName usd_attr_type = SdfValueTypeNames->StringArray;
+        if (geoMultiMatch(
+                    options.myAssetPathAttribs, attr_name, decoded_attr_name))
+        {
+            usd_attr_type = SdfValueTypeNames->AssetArray;
+        }
+
+        INIT_ATTRIB(std::string, std::string, usd_attr_type);
     }
 
 #undef INIT_ATTRIB

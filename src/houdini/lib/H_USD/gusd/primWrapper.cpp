@@ -1157,7 +1157,8 @@ Gusd_AddAttribute(const UsdAttribute &attr,
                   UT_StringArray &scalar_constant_attribs,
                   UT_StringArray &bool_attribs,
                   UT_StringArray &uint_attribs,
-                  UT_StringArray &uint64_attribs)
+                  UT_StringArray &uint64_attribs,
+                  UT_StringArray &asset_path_attribs)
 {
     if (interpolation == UsdGeomTokens->vertex ||
         interpolation == UsdGeomTokens->varying)
@@ -1254,6 +1255,8 @@ Gusd_AddAttribute(const UsdAttribute &attr,
         uint_attribs.append(attrname);
     else if (scalar_type == SdfValueTypeNames->UInt64)
         uint64_attribs.append(attrname);
+    else if (scalar_type == SdfValueTypeNames->Asset)
+        asset_path_attribs.append(attrname);
 }
 
 static void
@@ -1630,6 +1633,7 @@ GusdPrimWrapper::loadPrimvars(
     UT_StringArray bool_attribs;
     UT_StringArray uint_attribs;
     UT_StringArray uint64_attribs;
+    UT_StringArray asset_path_attribs;
     UT_StringArray index_attribs;
     for( const UsdGeomPrimvar &primvar : primvars )
     {
@@ -1753,7 +1757,7 @@ GusdPrimWrapper::loadPrimvars(
                 primvar, gtData, attrname, interpolation, minUniform, minPoint,
                 minVertex, primPath, remapIndicies, vertex, point, primitive,
                 constant, constant_attribs, scalar_attribs, bool_attribs,
-                uint_attribs, uint64_attribs);
+                uint_attribs, uint64_attribs, asset_path_attribs);
 
         if (primvar.IsIndexed())
             index_attribs.append(attrname);
@@ -1826,7 +1830,8 @@ GusdPrimWrapper::loadPrimvars(
                     attr, data, attrname, interpolation, minUniform, minPoint,
                     minVertex, primPath, remapIndicies, vertex, point,
                     primitive, constant, constant_attribs, scalar_attribs,
-                    bool_attribs, uint_attribs, uint64_attribs);
+                    bool_attribs, uint_attribs, uint64_attribs,
+                    asset_path_attribs);
         }
     }
 
@@ -1852,6 +1857,8 @@ GusdPrimWrapper::loadPrimvars(
                 uint_attribs, *constant, "usdconfiguintattribs"_sh);
         Gusd_RecordAttribPattern(
                 uint64_attribs, *constant, "usdconfiguint64attribs"_sh);
+        Gusd_RecordAttribPattern(
+                asset_path_attribs, *constant, "usdconfigassetpathattribs"_sh);
         Gusd_RecordAttribPattern(
                 index_attribs, *constant, "usdconfigindexattribs"_sh);
     }

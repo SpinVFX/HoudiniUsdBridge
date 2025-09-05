@@ -792,15 +792,6 @@ GusdGU_PackedUSD::getLocalTransform(UT_Matrix4D &m) const
     return true;
 }
 
-static constexpr UT_StringLit theConstantAttribsName(
-        "usdconfigconstantattribs");
-static constexpr UT_StringLit theScalarConstantAttribsName(
-        "usdconfigscalarconstantattribs");
-static constexpr UT_StringLit theBoolAttribsName("usdconfigboolattribs");
-static constexpr UT_StringLit theUIntAttribsName("usdconfiguintattribs");
-static constexpr UT_StringLit theUInt64AttribsName("usdconfiguint64attribs");
-static constexpr UT_StringLit theIndexAttribsName("usdconfigindexattribs");
-
 static void
 Gusd_GetAttribPattern(
         GU_Detail &gdp,
@@ -1109,20 +1100,27 @@ void
 GusdGU_PackedUSD::mergeGeometry(GU_Detail &destgdp,
                                 UT_Array<GU_DetailHandle> &details)
 {
-    UT_StringHolder constant_attribs_pattern = Gusd_AccumulateAttribPattern(
-            destgdp, details, theConstantAttribsName.asRef());
-    UT_StringHolder scalar_attribs_pattern = Gusd_AccumulateAttribPattern(
-            destgdp, details, theScalarConstantAttribsName.asRef());
-    UT_StringHolder bool_attribs_pattern = Gusd_AccumulateAttribPattern(
-            destgdp, details, theBoolAttribsName.asRef());
-    UT_StringHolder uint_attribs_pattern = Gusd_AccumulateAttribPattern(
-            destgdp, details, theUIntAttribsName.asRef());
-    UT_StringHolder uint64_attribs_pattern = Gusd_AccumulateAttribPattern(
-            destgdp, details, theUInt64AttribsName.asRef());
-    UT_StringHolder index_attribs_pattern = Gusd_AccumulateAttribPattern(
-            destgdp, details, theIndexAttribsName.asRef());
+    static constexpr UT_StringLit theAttribPatternNames[] = {
+        "usdconfigconstantattribs",
+        "usdconfigscalarconstantattribs",
+        "usdconfigboolattribs",
+        "usdconfiguintattribs",
+        "usdconfiguint64attribs",
+        "usdconfigassetpathattribs",
+        "usdconfigindexattribs"
+    };
+    static constexpr int theNumAttribs = SYSarraySize(theAttribPatternNames);
 
-    UT_Array<GU_Detail *> gdps;
+    // Accumulate attribs like "usdconfigconstantattribs" for the details that
+    // will be merged together.
+    UT_StringHolder attrib_patterns[theNumAttribs];
+    for (int i = 0; i < theNumAttribs; ++i)
+    {
+        attrib_patterns[i] = Gusd_AccumulateAttribPattern(
+                destgdp, details, theAttribPatternNames[i].asRef());
+    }
+
+    UT_SmallArray<GU_Detail *> gdps;
     for (GU_DetailHandle &gdh : details)
     {
         UT_ASSERT(gdh.isValid());
@@ -1131,25 +1129,17 @@ GusdGU_PackedUSD::mergeGeometry(GU_Detail &destgdp,
 
     GUmatchAttributesAndMerge(destgdp, gdps);
 
-    // Add usdconfigconstantattribs attribute to the unpacked geometry.
-    auto addStringAttrib = [&](const UT_StringHolder &attr_name,
-                               const UT_StringHolder &pattern) {
-        if (pattern.isstring())
-        {
-            GA_RWHandleS pattern_attr = destgdp.addStringTuple(
-                    GA_ATTRIB_DETAIL, attr_name, 1);
-            pattern_attr.set(GA_DETAIL_OFFSET, pattern);
-        }
-    };
+    // Write out the combined attrib patterns to the merged geometry.
+    for (int i = 0; i < theNumAttribs; ++i)
+    {
+        const UT_StringHolder &pattern = attrib_patterns[i];
+        if (!pattern.isstring())
+            continue;
 
-    addStringAttrib(
-            theConstantAttribsName.asHolder(), constant_attribs_pattern);
-    addStringAttrib(
-            theScalarConstantAttribsName.asHolder(), scalar_attribs_pattern);
-    addStringAttrib(theBoolAttribsName.asHolder(), bool_attribs_pattern);
-    addStringAttrib(theUIntAttribsName.asHolder(), uint_attribs_pattern);
-    addStringAttrib(theUInt64AttribsName.asHolder(), uint64_attribs_pattern);
-    addStringAttrib(theIndexAttribsName.asHolder(), index_attribs_pattern);
+        GA_RWHandleS pattern_attr = destgdp.addStringTuple(
+                GA_ATTRIB_DETAIL, theAttribPatternNames[i].asHolder(), 1);
+        pattern_attr.set(GA_DETAIL_OFFSET, pattern);
+    }
 }
 
 bool
