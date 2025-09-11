@@ -578,6 +578,21 @@ BRAY_HdMaterial::Sync(HdSceneDelegate *sceneDelegate,
         scene.updateMaterial(bmat, BRAY_EVENT_MATERIAL);
     }
 
+    BRAY_HdParam        &rparm = *UTverify_cast<BRAY_HdParam *>(renderParam);
+    if (rparm.needCryptoMaterial() &&
+        BRAY_HdUtil::getUsingStageSceneIndex())
+    {
+        // id is unsuitable to use as built-in material name cryptomatte layer
+        // directly because instancing may cause non-deterministic pathing.
+        HdRenderIndex &renderindex =
+            sceneDelegate->GetRenderIndex();
+        HdSceneIndexBaseRefPtr sceneindex =
+            renderindex.GetTerminalSceneIndex();
+        UT_StringHolder name = BRAY_HdUtil::getAnInstancePath(sceneindex, id);
+        if (name.isstring())
+            bmat.setNiceName(name);
+    }
+
     *dirtyBits &= ~HdChangeTracker::AllSceneDirtyBits;
 }
 

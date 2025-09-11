@@ -623,6 +623,13 @@ public:
 
     // Returns true if no dirty bits (or only internal bits) set
     static bool             noDirtyBits(const HdDirtyBits &dirtyBits);
+
+    // Get a stable, human-readable prototype path from sceneindex. If native
+    // instancing, it will iterate over all instances and return the first name
+    // from sorted list.
+    static UT_StringHolder  getAnInstancePath(
+                                const HdSceneIndexBaseRefPtr &sceneindex,
+                                const SdfPath &prototypeId);
     
 private:
     static void processSubdivTags(UT_Array<GT_PrimSubdivisionMesh::Tag> &result,

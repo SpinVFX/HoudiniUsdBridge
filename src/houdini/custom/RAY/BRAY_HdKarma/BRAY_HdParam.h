@@ -239,6 +239,7 @@ public:
 
     // Need nice/stable native instance names for cryptomatte object layer
     bool            needCryptoName() const { return myNeedCryptoName; }
+    bool            needCryptoMaterial() const { return myNeedCryptoMaterial; }
 
     // Return HdInstancer from scene index given instancer ID
     HdInstancer     *getInstancer(const SdfPath &instancerid) const;
@@ -287,6 +288,7 @@ private:
     mutable UT_RWLock            myFieldToVolumesLock;
     UT_StringMap<UT_StringSet>   myFieldToVolumes;
     bool                         myNeedCryptoName;
+    bool                         myNeedCryptoMaterial;
 };
 
 PXR_NAMESPACE_CLOSE_SCOPE

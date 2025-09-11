@@ -133,6 +133,7 @@ BRAY_HdParam::BRAY_HdParam(BRAY::ScenePtr &scene,
     , myStatsUpdateTime(120)
     , myMaxDeformSegments(scene.isKarmaXPU() ? MAX_XPU_GEO_MOTIONSEGS : SYS_INT32_MAX)
     , myNeedCryptoName(false)
+    , myNeedCryptoMaterial(false)
     , myDelegate(delegate)
 {
     setFPS(24);
@@ -683,6 +684,7 @@ BRAY_HdParam::processRasterProducts(const VtValue &value)
 {
     myGlobalPrimvars.clear();
     myNeedCryptoName = false;
+    myNeedCryptoMaterial = false;
     if (value.IsEmpty())
         return;
 
@@ -713,6 +715,8 @@ BRAY_HdParam::processRasterProducts(const VtValue &value)
         {
             static constexpr UT_StringLit       theHoldouts("holdouts;");
             static constexpr UT_StringLit       theObjectName("__name");
+            static constexpr UT_StringLit       theMaterialName("__materialname");
+
             UT_StringRef sourceType = findString(var, UsdRenderTokens->sourceType);
             UT_StringRef sourceName = findString(var, UsdRenderTokens->sourceName);
             //UT_StringRef dataType = findString(var, UsdRenderTokens->dataType);
@@ -729,6 +733,12 @@ BRAY_HdParam::processRasterProducts(const VtValue &value)
                 {
                     // Need nice names for cryptomatte object layer
                     myNeedCryptoName = true;
+                }
+                if (!myNeedCryptoMaterial &&
+                    sourceName.endsWith(theMaterialName))
+                {
+                    // Need nice names for cryptomatte material layer
+                    myNeedCryptoMaterial = true;
                 }
             }
         }
