@@ -239,6 +239,7 @@ HUSD_SetAttributes::setAttributes(const UT_StringRef &primpath,
             }
             case UT_OPTION_STRING:
             case UT_OPTION_STRINGRAW:
+            case UT_OPTION_STRINGUTF8:
             {
                 UT_StringHolder val = it.entry()->getOptionS();
                 if (!setAttribute(primpath, buf.buffer(), val,
@@ -339,6 +340,8 @@ HUSD_SetAttributes::setAttributes(const UT_StringRef &primpath,
                 break;
             }
             case UT_OPTION_STRINGARRAY:
+            case UT_OPTION_STRINGRAWARRAY:
+            case UT_OPTION_STRINGUTF8ARRAY:
             {
                 const UT_StringArray &val = it.entry()->getOptionSArray();
                 if (!setAttributeArray(primpath, buf.buffer(), val,
