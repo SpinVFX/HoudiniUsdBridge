@@ -318,6 +318,10 @@ GT_DataArrayHandle attribGT(const VtValue &value, GT_Type tinfo, int64 data_id)
 	attr = createGTArray(value.Get<VtVec4dArray>(), tinfo, data_id);
     else if(value.IsHolding<VtVec2dArray>())
 	attr = createGTArray(value.Get<VtVec2dArray>(), tinfo, data_id);
+    else if (value.IsHolding<VtQuatfArray>())
+        attr = createGTArray(value.Get<VtQuatfArray>(), tinfo, data_id);
+    else if(value.IsHolding<VtMatrix4dArray>())
+        attr = createGTArray(value.Get<VtMatrix4dArray>(), tinfo, data_id);
     else if(value.IsHolding<VtArray<float> >())
 	attr = createGTArray(value.Get<VtArray<float> >(), tinfo, data_id);
     else if(value.IsHolding<VtArray<double> >())

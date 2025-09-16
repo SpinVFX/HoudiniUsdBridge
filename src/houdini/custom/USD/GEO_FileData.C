@@ -579,8 +579,15 @@ GEO_FileData::Open(const std::string& filePath)
 		!cook_option.empty())
 		options.myUInt64Attribs.compile(cook_option.c_str());
 
-            if (getCookOption(&myCookArgs, "assetpathattribs", gdp, cook_option)
-                && !cook_option.empty())
+            getCookOption(&myCookArgs, "assetpathattribs", gdp, cook_option);
+            if (author_material_path)
+            {
+                // usdmaterialreffile is authored as an asset path.
+                cook_option.append(" ");
+                cook_option.append(
+                        GEO_FilePrimTokens->usdmaterialreffile.GetString());
+            }
+            if (!cook_option.empty())
                 options.myAssetPathAttribs.compile(cook_option.c_str());
 
 	    if (getCookOption(&myCookArgs, "indexattribs",

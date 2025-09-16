@@ -1217,9 +1217,9 @@ HUSD_BindMaterial::assignMaterialsFromAttribute(
 
             if (!targetprim && create_empty_materials)
             {
-                std::string reffile;
+                SdfAssetPath reffile;
                 if (reffilespec)
-                    reffile = reffilespec->GetDefaultValue().Get<std::string>();
+                    reffile = reffilespec->GetDefaultValue().Get<SdfAssetPath>();
 
                 std::string refprim;
                 if (refprimspec)
@@ -1227,11 +1227,12 @@ HUSD_BindMaterial::assignMaterialsFromAttribute(
 
                 // If usdmaterialreffile is non-empty, author a reference to the
                 // file rather than creating an empty material.
-                if (!reffile.empty())
+                if (!reffile.GetAssetPath().empty())
                 {
                     HUSD_EditReferences editrefs(myWriteLock);
                     editrefs.addReference(
-                            targetpath.GetAsString(), reffile, refprim);
+                            targetpath.GetAsString(), reffile.GetAssetPath(),
+                            refprim);
                 }
                 else
                 {

@@ -1206,6 +1206,24 @@ BRAY_HdInstancer::erasePrototype(const SdfPath &protypeid,
 	UT_ASSERT(it->second);
 	scene.updateObject(it->second, BRAY_EVENT_DEL);
         myInstanceMap.erase(it);
+        if (myInstanceMap.empty())
+        {
+            HdInstancer	*parentInstancer =
+                GetDelegate()->GetRenderIndex().GetInstancer(GetParentId());
+            if (parentInstancer)
+            {
+                // If nested instancing, erase current instancer from parent
+                // instance map
+                BRAY_HdInstancer *instancer = UTverify_cast<BRAY_HdInstancer*>(
+                    parentInstancer);
+                instancer->erasePrototype(GetId(), scene);
+            }
+            if (mySceneGraph)
+            {
+                scene.updateObject(mySceneGraph, BRAY_EVENT_DEL);
+                mySceneGraph = BRAY::ObjectPtr();
+            }
+        }
         return;
     }
 
@@ -1216,6 +1234,19 @@ BRAY_HdInstancer::erasePrototype(const SdfPath &protypeid,
 	UT_ASSERT(lit->second);
 	lit->second.clear(scene);
         myLightInstanceMap.erase(lit);
+        if (myLightInstanceMap.empty())
+        {
+            HdInstancer	*parentInstancer =
+                GetDelegate()->GetRenderIndex().GetInstancer(GetParentId());
+            if (parentInstancer)
+            {
+                // If nested instancing, erase current instancer from parent
+                // instance map
+                BRAY_HdInstancer *instancer = UTverify_cast<BRAY_HdInstancer*>(
+                    parentInstancer);
+                instancer->erasePrototype(GetId(), scene);
+            }
+        }
         return;
     }
 }

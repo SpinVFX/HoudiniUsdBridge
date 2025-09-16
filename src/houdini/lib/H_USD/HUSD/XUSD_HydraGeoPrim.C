@@ -3010,6 +3010,32 @@ XUSD_HydraGeoPoints::Sync(HdSceneDelegate *scene_delegate,
 		 scene_delegate, id, dirty_bits, gt_prim, attrib_list,
                  GT_TYPE_NONE, freq);
 
+    if(myAttribMap.find(UT_StringHolder("GS_Alpha")) != myAttribMap.end())
+    {
+        // if point prim is gsplat 
+        // it needs GLStateCheck for view update
+        myHydraPrim.needsGLStateCheck(true);
+        // it needs gsplat attributes
+        updateAttrib(TfToken("GS_Alpha"), "GS_Alpha"_sh,
+                    scene_delegate, id, dirty_bits, gt_prim, attrib_list,
+                    GT_TYPE_NONE, freq);
+        updateAttrib(TfToken("orient"), "orient"_sh,
+                    scene_delegate, id, dirty_bits, gt_prim, attrib_list,
+                    GT_TYPE_NONE, freq);
+        updateAttrib(TfToken("scale"), "scale"_sh,
+                    scene_delegate, id, dirty_bits, gt_prim, attrib_list,
+                    GT_TYPE_NONE, freq);
+        updateAttrib(TfToken("GS_SPH_R"), "GS_SPH_R"_sh,
+                    scene_delegate, id, dirty_bits, gt_prim, attrib_list,
+                    GT_TYPE_NONE, freq);
+        updateAttrib(TfToken("GS_SPH_G"), "GS_SPH_G"_sh,
+                    scene_delegate, id, dirty_bits, gt_prim, attrib_list,
+                    GT_TYPE_NONE, freq);
+        updateAttrib(TfToken("GS_SPH_B"), "GS_SPH_B"_sh,
+                    scene_delegate, id, dirty_bits, gt_prim, attrib_list,
+                    GT_TYPE_NONE, freq);
+    }
+
     auto points = new GT_PrimPointMesh(attrib_list[GT_OWNER_POINT],
 				       attrib_list[GT_OWNER_DETAIL]);
 

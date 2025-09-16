@@ -627,14 +627,29 @@ initPartition(GEO_FilePrim &fileprim,
                 continue;
 
             UT_ASSERT(!partition.myIndices.isEmpty());
-            const UT_StringHolder material_path
+            const UT_StringHolder attr_val
                     = material_attrs[i]->getS(partition.myIndices[0]);
 
+            GEO_FilePropSource *prop_source;
+            SdfValueTypeName prop_type;
+
+            // usdmaterialreffile is authored as an asset path
+            if (theMaterialAttrNames[i]
+                == GEO_FilePrimTokens->usdmaterialreffile)
+            {
+                prop_type = SdfValueTypeNames->Asset;
+                prop_source = new GEO_FilePropConstantSource<SdfAssetPath>(
+                        SdfAssetPath(attr_val.toStdString()));
+            }
+            else
+            {
+                prop_type = SdfValueTypeNames->String;
+                prop_source = new GEO_FilePropConstantSource<std::string>(
+                        attr_val.toStdString());
+            }
+
             prop = subprim.addProperty(
-                    theMaterialAttrNames[i],
-                    SdfValueTypeNames->String,
-                    new GEO_FilePropConstantSource<std::string>(
-                            material_path.toStdString()));
+                    theMaterialAttrNames[i], prop_type, prop_source);
             prop->setValueIsDefault(true);
             prop->setValueIsUniform(true);
         }
