@@ -1191,8 +1191,8 @@ HUSDsetParmFromProperty(const HUSD_DataHandle &data,
     if (rel)
     {
         SdfPathVector rel_targets;
-        if (rel.GetTargets(&rel_targets))
-            return HUSDsetRelationshipNodeParm(parm, rel_targets, true, &lock);
+        rel.GetTargets(&rel_targets);
+        return HUSDsetRelationshipNodeParm(parm, rel_targets, true, &lock);
     }
 
     return false;
