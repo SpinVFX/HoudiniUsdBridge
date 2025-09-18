@@ -182,6 +182,9 @@ protected:
                                   const PXR_NS::SdfPath &proto_id,
                                   const PXR_NS::SdfPath &instancer_id);
 
+    void        updateRenderTag(HdSceneDelegate *scene_delegate,
+                                const SdfPath &id);
+
     XUSD_HydraGeoPrim		&myHydraPrim;
     UT_Matrix4D 		 myPrimTransform;
     GT_TransformHandle           myGTPrimTransform;
@@ -250,6 +253,8 @@ public:
     
     void Finalize(HdRenderParam *rparm) override;
     HdDirtyBits GetInitialDirtyBitsMask() const override;
+    void UpdateRenderTag(HdSceneDelegate *delegate,
+                         HdRenderParam *renderParam) override;
 
 protected:
     HdDirtyBits _PropagateDirtyBits(HdDirtyBits bits) const override;
@@ -302,6 +307,8 @@ public:
     
     void Finalize(HdRenderParam *rparm) override;
     HdDirtyBits GetInitialDirtyBitsMask() const override;
+    void UpdateRenderTag(HdSceneDelegate *delegate,
+                         HdRenderParam *renderParam) override;
 
 protected:
     HdDirtyBits _PropagateDirtyBits(HdDirtyBits bits) const override;
@@ -335,6 +342,8 @@ public:
     
     void Finalize(HdRenderParam *renderParam) override;
     HdDirtyBits GetInitialDirtyBitsMask() const override;
+    void UpdateRenderTag(HdSceneDelegate *delegate,
+                         HdRenderParam *renderParam) override;
 
 protected:
     HdDirtyBits _PropagateDirtyBits(HdDirtyBits bits) const override;
@@ -362,6 +371,8 @@ public:
     
     void Finalize(HdRenderParam *rparm) override;
     HdDirtyBits GetInitialDirtyBitsMask() const override;
+    void UpdateRenderTag(HdSceneDelegate *delegate,
+                         HdRenderParam *renderParam) override;
 
 protected:
     HdDirtyBits _PropagateDirtyBits(HdDirtyBits bits) const override;
@@ -389,6 +400,8 @@ public:
     
     void Finalize(HdRenderParam *rparm) override;
     HdDirtyBits GetInitialDirtyBitsMask() const override;
+    void UpdateRenderTag(HdSceneDelegate *delegate,
+                         HdRenderParam *renderParam) override;
 
 protected:
     HdDirtyBits _PropagateDirtyBits(HdDirtyBits bits) const override;
