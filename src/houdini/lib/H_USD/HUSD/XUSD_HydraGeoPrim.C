@@ -241,8 +241,7 @@ XUSD_HydraGeoBase::isDeferred(const SdfPath &id,
 
     if(srparm->scene().isDeferredUpdate())
     {
-        // Always set the tag so t
-        // hat we don't get purposes crossed when
+        // Always set the tag so that we don't get purposes crossed when
         // switching back to HGL. 
         HUSD_HydraPrim::RenderTag tag =
             HUSD_HydraPrim::renderTag(sd->GetRenderTag(id));
@@ -1117,6 +1116,21 @@ XUSD_HydraGeoBase::removeFromDisplay(HdSceneDelegate *scene_delegate,
 	myHydraPrim.scene().removeDisplayGeometry(&myHydraPrim);
 }
 
+void
+XUSD_HydraGeoBase::updateRenderTag(HdSceneDelegate *scene_delegate,
+                                   const SdfPath &id)
+{
+    HUSD_HydraPrim::RenderTag tag =
+        HUSD_HydraPrim::renderTag(scene_delegate->GetRenderTag(id));
+    if(myHydraPrim.renderTag() != tag)
+    {
+        myHydraPrim.setRenderTag(tag);
+        myHydraPrim.dirty(HUSD_HydraGeoPrim::VIS_CHANGE);
+    }        
+}
+
+
+
 // -------------------------------------------------------------------------
 
 XUSD_HydraGeoMesh::XUSD_HydraGeoMesh(TfToken const& type_id,
@@ -1174,6 +1188,35 @@ XUSD_HydraGeoMesh::_InitRepr(TfToken const &representation,
 			     HdDirtyBits *dirty_bits)
 {
 }
+
+void
+XUSD_HydraGeoMesh::UpdateRenderTag(HdSceneDelegate *delegate,
+                                   HdRenderParam   *rparm)
+{
+    HdMesh::UpdateRenderTag(delegate, rparm);
+    
+    HUSD_HydraPrim::RenderTag tag =
+        HUSD_HydraPrim::renderTag(delegate->GetRenderTag(GetId()));
+    if(myHydraPrim.renderTag() != tag)
+    {
+        myHydraPrim.setRenderTag(tag);
+        myHydraPrim.dirty(HUSD_HydraGeoPrim::VIS_CHANGE);
+        
+        if(myHydraPrim.isConsolidated())
+        {
+            // Remove the prim from its group (which includes the tag as a
+            // membership ID)
+            myHydraPrim.scene().removeConsolidatedPrim(myHydraPrim.id());
+            myHydraPrim.setConsolidated(false);
+
+            // Re-consolidate under the different tag.
+            TfToken null;
+            HdDirtyBits bits =  HdChangeTracker::DirtyVisibility;
+            Sync(delegate, rparm, &bits, null);
+        }
+    }
+}
+
 
 void
 XUSD_HydraGeoMesh::Sync(HdSceneDelegate *scene_delegate,
@@ -2363,6 +2406,14 @@ XUSD_HydraGeoCurves::~XUSD_HydraGeoCurves()
 }
 
 void
+XUSD_HydraGeoCurves::UpdateRenderTag(HdSceneDelegate *delegate,
+                                     HdRenderParam *rparm)
+{
+    HdBasisCurves::UpdateRenderTag(delegate, rparm);
+    updateRenderTag(delegate, GetId());
+}
+
+void
 XUSD_HydraGeoCurves::Sync(HdSceneDelegate *scene_delegate,
 			  HdRenderParam *rparm,
 			  HdDirtyBits *dirty_bits,
@@ -2739,6 +2790,14 @@ XUSD_HydraGeoVolume::_InitRepr(TfToken const &representation,
 }
 
 void
+XUSD_HydraGeoVolume::UpdateRenderTag(HdSceneDelegate *delegate,
+                                     HdRenderParam *rparm)
+{
+    HdVolume::UpdateRenderTag(delegate, rparm);
+    updateRenderTag(delegate, GetId());
+}
+
+void
 XUSD_HydraGeoVolume::Sync(HdSceneDelegate *scene_delegate,
 			  HdRenderParam *rparm,
 			  HdDirtyBits *dirty_bits,
@@ -2872,6 +2931,14 @@ XUSD_HydraGeoPoints::XUSD_HydraGeoPoints(TfToken const& type_id,
 XUSD_HydraGeoPoints::~XUSD_HydraGeoPoints()
 {
     resetPrim();
+}
+
+void
+XUSD_HydraGeoPoints::UpdateRenderTag(HdSceneDelegate *delegate,
+                                     HdRenderParam *rparm)
+{
+    HdPoints::UpdateRenderTag(delegate, rparm);
+    updateRenderTag(delegate, GetId());
 }
 
 void
@@ -3012,6 +3079,15 @@ XUSD_HydraGeoBounds::~XUSD_HydraGeoBounds()
 {
     resetPrim();
 }
+
+void
+XUSD_HydraGeoBounds::UpdateRenderTag(HdSceneDelegate *delegate,
+                                     HdRenderParam *rparm)
+{
+    HdBasisCurves::UpdateRenderTag(delegate, rparm);
+    updateRenderTag(delegate, GetId());
+}
+
 
 void
 XUSD_HydraGeoBounds::Sync(HdSceneDelegate *scene_delegate,
