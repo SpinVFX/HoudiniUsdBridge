@@ -1515,15 +1515,18 @@ initCommonBoneCaptureAttrib(
     const TfToken &interp
             = prim_is_curve ? GEOgetInterpTokenFromCurveOwner(attr_owner) :
                               GEOgetInterpTokenFromMeshOwner(attr_owner);
-    // When importing boneCapture from an agent, translate into the UsdSkel
-    // skinning attributes.
+
+    UT_Matrix4D geom_bind_xform(1.0);
+    initSkelJointInfluenceAttribs(
+            fileprim, indices, weights, influences_per_pt, interp,
+            geom_bind_xform);
+
     if (agent_shape_info)
     {
-        UT_Matrix4D geom_bind_xform(1.0);
-        initSkelJointInfluenceAttribs(
-                fileprim, indices, weights, influences_per_pt, interp,
-                geom_bind_xform);
-
+        // The skel:joints attribute requires the skeleton hierarchy to build
+        // full joint paths like '/Root/Parent/Child', so we can only author
+        // this correctly when importing as an agent shape where we can access
+        // the agent's rig.
         GEO_FileProp *prop = fileprim.addProperty(
                 UsdSkelTokens->skelJoints, SdfValueTypeNames->TokenArray,
                 new GEO_FilePropConstantSource<VtTokenArray>(joints));
