@@ -140,9 +140,13 @@ public:
     /// Returns true if any attribute we have fetched has many time samples.
     bool		 getIsTimeVarying() const;
 
-    /// Returns the overal sampling of fethced attributes.
+    /// Returns the overall sampling of fetched attributes.
     HUSD_TimeSampling	 getTimeSampling() const 
 			 { return myTimeSampling; }
+
+    /// Resets the time sampling tracker (i.e., forgetting whether any
+    /// previously fetched attributes were time sampled or not).
+    void		 resetTimeSampling(); 
 
 private:
     HUSD_AutoAnyLock		&myAnyLock;

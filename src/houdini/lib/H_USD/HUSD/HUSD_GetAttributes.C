@@ -270,6 +270,12 @@ HUSD_GetAttributes::getIsTimeVarying() const
     return HUSDisTimeVarying( myTimeSampling );
 }
 
+void
+HUSD_GetAttributes::resetTimeSampling()
+{
+    myTimeSampling = HUSD_TimeSampling::NONE;
+}
+
 //----------------------------------------------------------------------------
 // Instantiate the template types explicitly
 

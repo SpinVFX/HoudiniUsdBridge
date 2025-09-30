@@ -1214,10 +1214,9 @@ husdCreateAndSetParmAttrib< UT_StringArray >(
 
 static inline bool
 husdOverrideMatParm( UsdPrim &prim, 
-	const UT_StringHolder &name, const UT_OptionEntry *value )
+	const UT_StringHolder &name, const UT_OptionEntry *value,
+	const UsdTimeCode &tc)
 {
-    UsdTimeCode		tc( UsdTimeCode::Default() );
-    
     switch( value->getType() )
     {
 	case UT_OPTION_INT:
@@ -1280,7 +1279,7 @@ husdOverrideMatParm( UsdPrim &prim,
 
 static inline bool
 husdOverrideMatParms( const UsdShadeNodeGraph &usd_mat_or_graph, 
-	const UT_Options &parms )
+	const UT_Options &parms, const UsdTimeCode &tc )
 {
     bool	ok = true;
     UsdPrim	material = usd_mat_or_graph.GetPrim();
@@ -1300,12 +1299,12 @@ husdOverrideMatParms( const UsdShadeNodeGraph &usd_mat_or_graph,
 
 	    shader_path.sprintf("%s/%s", mat_path.c_str(), shader_name.c_str());
 	    auto shader = stage->OverridePrim( HUSDgetSdfPath( shader_path ));
-	    if( !husdOverrideMatParm( shader, parm_name, value ))
+	    if( !husdOverrideMatParm( shader, parm_name, value, tc ))
 		ok = false;
 	}
 	else
 	{
-	    if( !husdOverrideMatParm( material, parm_name, value ))
+	    if( !husdOverrideMatParm( material, parm_name, value, tc ))
 		ok = false;
 	}
     }
@@ -1336,7 +1335,8 @@ HUSD_CreateMaterial::createDerivedMaterial(
     // TODO: make it a choice between inheriting and specializing.
     husdAddBasePrim( usd_mat_or_graph_prim, 
 	    HUSD_PrimRefType::SPECIALIZE, base_material_path );
-    return husdOverrideMatParms( usd_mat_or_graph, material_parameters );
+    return husdOverrideMatParms( usd_mat_or_graph, material_parameters,
+        HUSDgetUsdTimeCode(myTimeCode));
 }
 
 static inline UT_StringHolder
