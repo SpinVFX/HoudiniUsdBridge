@@ -2053,6 +2053,43 @@ XUSD_HydraGeoMesh::consolidateMesh(HdSceneDelegate    *scene_delegate,
     }
 
     GT_PrimitiveHandle ph;
+
+    // Ensure that all attributes fit the correct size.
+    // Some nodes can extend attribs beyond the length of their owner.
+    // It isn't a problem for normal meshes, the tail just gets cut off,
+    // but for consolidated meshes, it will overflow to the next mesh
+    {
+        GT_AttributeListHandle vert, pnt, prim;
+        if(mesh->getPointAttributes())
+        {
+            pnt = mesh->getPointAttributes()->limitLengths(
+                    mesh->getPointCount());
+        }
+        if(mesh->getVertexAttributes())
+        {
+            vert = mesh->getVertexAttributes()->limitLengths(
+                    mesh->getVertexCount());
+        }
+        if (mesh->getUniformAttributes())
+        {
+            prim = mesh->getUniformAttributes()->limitLengths(
+                    mesh->getFaceCount());
+        }
+
+        if(mesh->getPrimitiveType() == GT_PRIM_POLYGON_MESH)
+        {
+            mesh = new GT_PrimPolygonMesh(*mesh, pnt, vert, prim,
+                                          mesh->getDetailAttributes());
+        }
+        else // subd
+        {
+            auto smesh = (GT_PrimSubdivisionMesh*)mesh;
+            mesh = new GT_PrimSubdivisionMesh(*smesh, pnt, vert, prim,
+                                              mesh->getDetailAttributes());
+        }
+        ph = mesh;
+    }
+
     if(has_transform || has_prim_transform)
     {
         GT_AttributeListHandle vert, pnt;
@@ -2068,7 +2105,7 @@ XUSD_HydraGeoMesh::consolidateMesh(HdSceneDelegate    *scene_delegate,
                 pnt = mesh->getPointAttributes()->transform(xform);
             if(mesh->getVertexAttributes())
                 vert = mesh->getVertexAttributes()->transform(xform);
-            
+
             if(mesh->getPrimitiveType() == GT_PRIM_POLYGON_MESH)
             {
                 mesh = new GT_PrimPolygonMesh(*mesh, pnt, vert,
