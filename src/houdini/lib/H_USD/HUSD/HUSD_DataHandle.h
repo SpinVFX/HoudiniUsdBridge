@@ -98,7 +98,8 @@ public:
 					mirroring = HUSD_NOT_FOR_MIRRORING);
 				 HUSD_DataHandle(const HUSD_DataHandle &src);
     explicit			 HUSD_DataHandle(void *stage_ptr);
-    explicit                     HUSD_DataHandle(const UT_StringRef &filepath);
+    explicit                     HUSD_DataHandle(const UT_StringRef &filepath,
+                                        HUSD_LoadMasks *loadmasks = nullptr);
 				~HUSD_DataHandle();
 
     // Test if myData has been set.

@@ -117,6 +117,33 @@ TF_MAKE_STATIC_DATA(TfType, theSchemaBaseType) {
     TF_VERIFY(!theSchemaBaseType->IsUnknown());
 }
 
+static void
+_ApplyLoadMasksToStage(const UsdStageRefPtr &stage,
+    const HUSD_LoadMasks *load_masks)
+{
+    if (stage && load_masks && !load_masks->muteLayers().empty())
+    {
+        std::vector<std::string>	 mutelayers;
+
+        // We don't need to worry about updating layer muting for anonymous
+        // LOP layers because we only get here creating a stage from a layer
+        // on disk, which guarantees no inclusion of any LOP layers.
+        for (auto &&identifier : load_masks->muteLayers())
+            mutelayers.push_back(identifier.toStdString());
+        stage->MuteAndUnmuteLayers(
+            mutelayers, std::vector<std::string>());
+    }
+    if (stage && load_masks && !load_masks->loadAll())
+    {
+        UsdStageLoadRules        loadrules(UsdStageLoadRules::LoadNone());
+
+        for (auto &&path : load_masks->loadPaths())
+            loadrules.LoadWithDescendants(HUSDgetSdfPath(path));
+
+        stage->SetLoadRules(loadrules);
+    }
+}
+
 class husd_UpdateReferencesFromMap
 {
 public:
@@ -3390,27 +3417,40 @@ HUSDcreateStageFromRootLayer(const SdfLayerRefPtr &rootlayer,
                 ? UsdStage::LoadNone
                 : UsdStage::LoadAll);
 
-    if (load_masks && !load_masks->muteLayers().empty())
-    {
-        std::vector<std::string>	 mutelayers;
+    _ApplyLoadMasksToStage(stage, load_masks);
 
-        // We don't need to worry about updating layer muting for anonymous
-        // LOP layers because we only get here creating a stage from a layer
-        // on disk, which guarantees no inclusion of any LOP layers.
-        for (auto &&identifier : load_masks->muteLayers())
-            mutelayers.push_back(identifier.toStdString());
-        stage->MuteAndUnmuteLayers(
-            mutelayers, std::vector<std::string>());
-    }
-    if (load_masks && !load_masks->loadAll())
-    {
-        UsdStageLoadRules        loadrules(UsdStageLoadRules::LoadNone());
+    return stage;
+}
 
-        for (auto &&path : load_masks->loadPaths())
-            loadrules.LoadWithDescendants(HUSDgetSdfPath(path));
+UsdStageRefPtr
+HUSDcreateStageFromFile(const UT_StringRef &filepath,
+        const HUSD_LoadMasks *load_masks,
+        const UsdStageWeakPtr &context_stage)
+{
+    UsdStageRefPtr		 stage;
 
-        stage->SetLoadRules(loadrules);
-    }
+    UsdStagePopulationMask stage_mask = load_masks
+        ? HUSDgetUsdStagePopulationMask(*load_masks)
+        : UsdStagePopulationMask::All();
+    if (stage_mask == UsdStagePopulationMask::All())
+        stage = UsdStage::Open(filepath.toStdString(),
+            (context_stage
+                ? context_stage->GetPathResolverContext()
+                : ArGetResolver().CreateDefaultContext()),
+            (load_masks && !load_masks->loadAll())
+                ? UsdStage::LoadNone
+                : UsdStage::LoadAll);
+    else
+        stage = UsdStage::OpenMasked(filepath.toStdString(),
+            context_stage
+                ? context_stage->GetPathResolverContext()
+                : ArGetResolver().CreateDefaultContext(),
+            stage_mask,
+            (load_masks && !load_masks->loadAll())
+                ? UsdStage::LoadNone
+                : UsdStage::LoadAll);
+
+    _ApplyLoadMasksToStage(stage, load_masks);
 
     return stage;
 }
@@ -4837,6 +4877,5 @@ HUSDconvertVariantSelectionFallbacks(
         utfallbacks.emplace(it.first.c_str(), utarray);
     }
 }
-
 
 PXR_NAMESPACE_CLOSE_SCOPE

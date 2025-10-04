@@ -1574,11 +1574,12 @@ XUSD_RenderSettings::partitionProducts()
     for (exint i = 0, n = myProducts.size(); i < n; ++i)
     {
         const XUSD_RenderProduct        *p = myProducts[i].get();
+        SdfPath                          campath = cameraPath(p);
         bool                             found = false;
         for (int g = 0, ng = myProductGroups.size(); g < ng; ++g)
         {
             int first = myProductGroups[g][0];
-            if (p->cameraPath() == myProducts[first]->cameraPath())
+            if (campath == cameraPath(myProducts[first].get()))
             {
                 myProductGroups[g].append(i);
                 found = true;

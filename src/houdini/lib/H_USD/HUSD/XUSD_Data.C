@@ -38,6 +38,7 @@
 #include <UT/UT_DirUtil.h>
 #include <UT/UT_EnvControl.h>
 #include <UT/UT_Exit.h>
+#include <UT/UT_Lock.h>
 #include <UT/UT_Set.h>
 #include <UT/UT_StringMMPattern.h>
 #include <algorithm>
@@ -52,11 +53,11 @@
 
 PXR_NAMESPACE_OPEN_SCOPE
 
-static UT_Set<XUSD_Data *>	 theRegisteredData;
-static bool			 theExitCallbackRegistered = false;
-
 namespace
 {
+UT_Lock                  theRegisteredDataLock;
+UT_Set<XUSD_Data *>      theRegisteredData;
+bool                     theExitCallbackRegistered = false;
 
 class xusd_ReferenceInfo
 {
@@ -419,6 +420,8 @@ XUSD_PostLayersInfo::~XUSD_PostLayersInfo()
 void
 XUSD_Data::exitCallback(void *)
 {
+    UT_AutoLock     lock(theRegisteredDataLock);
+
     for (auto &&data : theRegisteredData)
 	data->reset();
     theRegisteredData.clear();
@@ -435,7 +438,11 @@ XUSD_Data::XUSD_Data(HUSD_MirroringType mirroring)
 	UT_Exit::addExitCallback(exitCallback);
 	theExitCallbackRegistered = true;
     }
-    theRegisteredData.insert(this);
+
+    {
+        UT_AutoLock     lock(theRegisteredDataLock);
+        theRegisteredData.insert(this);
+    }
 }
 
 XUSD_Data::XUSD_Data(const UsdStageRefPtr &stage)
@@ -451,7 +458,11 @@ XUSD_Data::XUSD_Data(const UsdStageRefPtr &stage)
         UT_Exit::addExitCallback(exitCallback);
         theExitCallbackRegistered = true;
     }
-    theRegisteredData.insert(this);
+
+    {
+        UT_AutoLock     lock(theRegisteredDataLock);
+        theRegisteredData.insert(this);
+    }
 
     myRootLayerData = UTmakeShared<XUSD_RootLayerData>(myStage);
     myStageLayers = UTmakeShared<XUSD_LayerArray>();
@@ -462,6 +473,7 @@ XUSD_Data::XUSD_Data(const UsdStageRefPtr &stage)
 
 XUSD_Data::~XUSD_Data()
 {
+    UT_AutoLock     lock(theRegisteredDataLock);
     theRegisteredData.erase(this);
 }
 

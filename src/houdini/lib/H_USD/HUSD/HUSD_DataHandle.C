@@ -275,12 +275,13 @@ HUSD_DataHandle::HUSD_DataHandle(void *stage_ptr)
     myDataLock = myData->myDataLock;
 }
 
-HUSD_DataHandle::HUSD_DataHandle(const UT_StringRef &filepath)
+HUSD_DataHandle::HUSD_DataHandle(const UT_StringRef &filepath,
+        HUSD_LoadMasks *loadmasks)
     : myNodeId(OP_INVALID_ITEM_ID),
       myMirroring(HUSD_EXTERNAL_STAGE),
       myEditBlockCount(0)
 {
-    UsdStageRefPtr stage = UsdStage::Open(filepath.toStdString());
+    UsdStageRefPtr stage = HUSDcreateStageFromFile(filepath, loadmasks);
 
     if (stage)
     {

@@ -476,8 +476,12 @@ HUSDcreateStageInMemory(const HUSD_LoadMasks *load_masks,
 	const ArResolverContext *resolver_context = nullptr);
 HUSD_API UsdStageRefPtr
 HUSDcreateStageFromRootLayer(const SdfLayerRefPtr &rootlayer,
-        const HUSD_LoadMasks *load_masks,
-        const UsdStageWeakPtr &context_stage);
+        const HUSD_LoadMasks *load_masks = nullptr,
+        const UsdStageWeakPtr &context_stage = UsdStageWeakPtr());
+HUSD_API UsdStageRefPtr
+HUSDcreateStageFromFile(const UT_StringRef &filepath,
+        const HUSD_LoadMasks *load_masks = nullptr,
+        const UsdStageWeakPtr &context_stage = UsdStageWeakPtr());
 
 // Copies meters per unit, up axis, fps, and tcps from the stage's root
 // layer onto the supplied layer. New sublayers added to a stage should
