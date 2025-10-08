@@ -338,8 +338,9 @@ public:
                     auto idx = grp.myPrimIDs.find(prim_id);
                     if(idx != grp.myPrimIDs.end())
                     {
-                        grp.myPrimGroup->dirty(
-                            HUSD_HydraGeoPrim::husd_DirtyBits(dirty_bits));
+                        if(grp.myPrimGroup)
+                            grp.myPrimGroup->dirty(
+                                HUSD_HydraGeoPrim::husd_DirtyBits(dirty_bits));
                     }
                 }
             }
