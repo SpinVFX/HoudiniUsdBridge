@@ -511,6 +511,10 @@ husd_PyOutputProcessor::shouldSave(const UT_StringRef &save_path,
         myPythonObjectName.c_str(),
         save_path.c_str(),
         identifier.c_str());
+    // In case any paths have backslashes, convert them all to forward
+    // slashes. We don't want every output processor to have to worry
+    // about platform-specific slashes.
+    cmd.substitute("\\", "/");
 
     int result = husdRunPythonAndReturnInt(
         cmd.buffer(), "shouldSave()", false, myPythonContext, &error);
