@@ -442,7 +442,7 @@ husdGetTemplateForTransform()
 	PRM_Name()
     };
     static PRM_Default		 theTransformDefault(0,
-					theTransformChoices[0].getToken());
+					theTransformChoices[2].getToken());
     static PRM_ChoiceList	 theTransformMenu(PRM_CHOICELIST_SINGLE,
 					theTransformChoices);
     static PRM_Template		 theTransformTemplate(PRM_STRING, 1,

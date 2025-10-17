@@ -95,13 +95,21 @@ husdApplyXform(const SdfPath &sdfpath,
     UT_StringHolder		 xformopsuffix;
     UsdGeomXformOp		 xformop;
     std::vector<UsdGeomXformOp>	 xformops;
+    SdfPath                      suffix_map_path;
     bool			 does_reset = false;
     bool                         record_suffix = (suffix_map != nullptr);
 
-    xformopsuffix = name.isEmpty() ? "xform1"_sh : name;
+    xformopsuffix = name;
     if (suffix_map)
     {
-        auto it = suffix_map->find(sdfpath);
+        // Create a path that combines the prim path and xformop suffix in case
+        // we are writing several xforms on the same prim from one "edit
+        // properties" node.
+        if (xformopsuffix.isstring())
+            suffix_map_path = sdfpath.AppendProperty(TfToken(xformopsuffix));
+        else
+            suffix_map_path = sdfpath;
+        auto it = suffix_map->find(suffix_map_path);
         if (it != suffix_map->end())
         {
             xformopsuffix = it->second;
@@ -128,6 +136,7 @@ husdApplyXform(const SdfPath &sdfpath,
             if (testop.GetOpName() == fullname)
             {
                 xformop = testop;
+                xformopsuffix = overwritesuffix;
                 break;
             }
         }
@@ -160,9 +169,16 @@ husdApplyXform(const SdfPath &sdfpath,
             }
         }
         if (!xformop)
+        {
+            // If we need to generate a new unique xformop suffix, use xform1
+            // as the starting point if we were passed an empty string as the
+            // suffix.
+            if (!xformopsuffix.isstring())
+                xformopsuffix = "xform1"_sh;
             HUSDgenerateUniqueTransformOpSuffix(
                 xformopsuffix, xformable, UsdGeomXformOp::TypeTransform,
                 name.isEmpty());
+        }
     }
 
     // If we don't have one yet, create an xform op (and the associated
@@ -238,7 +254,7 @@ husdApplyXform(const SdfPath &sdfpath,
         }
     }
     if (record_suffix)
-        suffix_map->emplace(sdfpath, xformopsuffix);
+        suffix_map->emplace(suffix_map_path, xformopsuffix);
 }
 
 bool
