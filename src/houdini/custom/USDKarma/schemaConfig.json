@@ -1,0 +1,15 @@
+{
+    "sdrNodes":
+    {
+	"kma": [
+	    "KMAskyDomeLight"
+	]
+    },
+    "sublayers": [
+	"usd/schema.usda",
+	"usdLux/schema.usda",
+        "usdGeom/schema.usda"
+	],
+    "skipCodeGeneration": true
+}
+
