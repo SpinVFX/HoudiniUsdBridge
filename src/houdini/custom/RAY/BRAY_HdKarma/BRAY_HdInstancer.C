@@ -70,18 +70,6 @@ namespace
 	return theTokens;
     }
 
-    static UT_Set<TfToken> &
-    transformVisTokens()
-    {
-	static UT_Set<TfToken>	theTokens({
-                HdTokens->velocities,
-                HdTokens->accelerations,
-                BRAYHdTokens->karma_object_rendervisibility,
-                //UsdGeomTokens->angularVelocities
-	});
-	return theTokens;
-    }
-
     template <typename V3, bool DO_INTERP>
     static void
     doApplyTranslate(UT_Array<GfMatrix4d> &transforms,
@@ -937,7 +925,7 @@ BRAY_HdInstancer::syncPrimvars(HdSceneDelegate* delegate,
                         propstmp,
                         HdInterpolationConstant,
                         BRAY_HdUtil::PrimvarSpan(),
-                        &transformVisTokens(),
+                        &transformTokens(),
                         false);
     }
 }
