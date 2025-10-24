@@ -1372,8 +1372,7 @@ namespace
         }
         if (mask & BRAY_RAY_HYDRA_RENDER)
         {
-            result = BRAY_RayVisibility(result | (mask &
-                BRAY_RAY_RENDER_MASK));
+            result = BRAY_RayVisibility(result | mask);
         }
         return result;
     }
