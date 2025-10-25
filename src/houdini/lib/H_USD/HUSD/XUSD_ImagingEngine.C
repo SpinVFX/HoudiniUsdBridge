@@ -479,6 +479,7 @@ XUSD_ImagingEngine::createSceneAPI(bool display_unloaded,
     // Create the new scene API
     if (_useSceneIndices) {
         UsdImagingCreateSceneIndicesInfo info;
+        info.addDrawModeSceneIndex = enable_usd_drawmodes;
         info.displayUnloadedPrimsWithBounds = display_unloaded;
         info.overridesSceneIndexCallback =
                 std::bind(
