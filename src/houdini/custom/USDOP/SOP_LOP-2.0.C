@@ -520,7 +520,7 @@ SOP_LOP2Verb::cook(const CookParms &cookparms) const
         if (!lop)
         {
             cache.reset();
-            cookparms.sopAddError(SOP_MESSAGE, "Invalid LOP node path.");
+            cookparms.sopAddWarning(SOP_MESSAGE, "Invalid LOP node path.");
             return;
         }
 
