@@ -69,6 +69,7 @@ public:
 	LIGHT_CYLINDER,
 	LIGHT_DOME,
 	LIGHT_MESH,
+	LIGHT_PORTAL,
         LIGHT_UNKNOWN
     };
     LightType	type() const	     { return myLightType; }

@@ -39,6 +39,7 @@
 #include <pxr/imaging/hd/sceneDelegate.h>
 #include <pxr/base/vt/value.h>
 #include <pxr/usd/usdLux/tokens.h>
+#include <pxr/imaging/hd/material.h>
 #include <gusd/UT_Gf.h>
 
 #include <SYS/SYS_Math.h>
@@ -118,9 +119,17 @@ XUSD_HydraLight::Sync(HdSceneDelegate *del,
     _UpdateInstancer(del, dirty_bits);
     HdInstancer::_SyncInstancerAndParents(del->GetRenderIndex(), inst_id);
     
-    if (bits & DirtyTransform)
-	myLight.Transform(XUSD_HydraUtils::fullTransform(del, id));
+    if (bits & (DirtyTransform | DirtyParams)) 
+    {
+        UT_Matrix4D space(1.0);
+        VtValue val = del->GetLightParamValue(id, HdLightTokens->domeOffset);
+        if (val.IsHolding<GfMatrix4d>())
+            space = GusdUT_Gf::Cast(val.UncheckedGet<GfMatrix4d>());
+        
+	myLight.Transform(XUSD_HydraUtils::fullTransform(del, id) * space);
     
+    }
+       
     if(HdChangeTracker::IsInstancerDirty(*dirty_bits, id) ||
         dirty_indices)
     {
@@ -204,7 +213,6 @@ XUSD_HydraLight::Sync(HdSceneDelegate *del,
             myLight.transforms().entries(0);
             myLight.ids().entries(0);
         }
-
     }
 
     if (bits & DirtyParams)
@@ -525,13 +533,36 @@ XUSD_HydraLight::Sync(HdSceneDelegate *del,
 	if(myLight.type() == HUSD_HydraLight::LIGHT_UNKNOWN)
 	{
 	    // TODO: make this more generic, supporting other renderers
-	    TfToken shaderId;
+	    TfToken shaderid;
 	    if(XUSD_HydraUtils::evalLightAttrib(
-		    shaderId, del, id, TfToken("kma:light:shaderId")))
-		myLight.setShaderId(shaderId.GetText());
+		    shaderid, del, id, TfToken("kma:light:shaderId")))
+            {
+		myLight.setShaderId(shaderid.GetText());
+            }
 	    else if(XUSD_HydraUtils::evalLightAttrib(
-		    shaderId, del, id, UsdLuxTokens->lightShaderId))
-		myLight.setShaderId(shaderId.GetText());
+		    shaderid, del, id, UsdLuxTokens->lightShaderId))
+            {
+		myLight.setShaderId(shaderid.GetText());
+            }
+            else
+            {
+                HdMaterialNetwork matnet;
+                VtValue           matval = del->GetMaterialResource(id);
+                if (matval.IsHolding<HdMaterialNetworkMap>())
+                {
+                    auto netmap = matval.UncheckedGet<HdMaterialNetworkMap>();
+                    matnet = netmap.map[HdMaterialTerminalTokens->light];
+                    if (matnet.nodes.size() > 0)
+                    {
+                        shaderid = matnet.nodes[0].identifier;
+                        myLight.setShaderId(shaderid.GetText());
+                    }
+                }
+            }
+            
+            static UT_StringHolder portal("PortalLight");
+            if(myLight.shaderId() == portal)
+                myLight.setType(HUSD_HydraLight::LIGHT_PORTAL);
 	}
 
 	SdfAssetPath texpath;
