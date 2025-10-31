@@ -275,14 +275,15 @@ HUSD_PrimHandle::getStatus() const
 	{
 	    return HUSD_PRIM_UNKNOWN;
 	}
-        // Implicit prototypes and instance proxies aren't editable
-        // directly, so that status should take precedence over others
-        else if (lock.obj().IsPrototype() ||
-                 lock.obj().IsInPrototype())
+        else if (lock.obj().IsInPrototype())
+        {
             return HUSD_PRIM_ISIMPLICITPROTOTYPE;
+        }
         else if (lock.obj().IsInstanceProxy())
+        {
             return HUSD_PRIM_ISINSTANCEPROXY;
-        else if (getActive() == HUSD_FALSE || 
+        }
+        else if (getActive() == HUSD_FALSE ||
                  getActive() == HUSD_OVERRIDDEN_FALSE)
         {
             return HUSD_PRIM_ISINACTIVE;
@@ -540,11 +541,9 @@ HUSD_PrimHandle::getActive() const
     XUSD_AutoObjectLock<UsdPrim> lock(*this);
     HUSD_PrimAttribState	 active = HUSD_NOTAPPLICABLE;
 
-    if (lock.obj() && 
-        !lock.obj().IsPseudoRoot() && 
-        !lock.obj().IsPrototype() &&
-        !lock.obj().IsInstanceProxy()&& 
-        !lock.obj().IsInPrototype())
+    if (lock.obj() &&
+        !lock.obj().IsPseudoRoot() &&
+        !lock.obj().IsPrototype())
     {
         // When we want to pull the overrides from the Sdf Layers without
         // composing them onto the LOP stage, we need to emulate the logic
@@ -594,7 +593,9 @@ HUSD_PrimHandle::getVisible(const HUSD_TimeCode &timecode) const
     XUSD_AutoObjectLock<UsdPrim> lock(*this);
     HUSD_PrimAttribState	 visible = HUSD_NOTAPPLICABLE;
 
-    if (lock.obj() && !lock.obj().IsPrototype())
+    if (lock.obj() &&
+        !lock.obj().IsPseudoRoot() &&
+        !lock.obj().IsPrototype())
     {
 	UsdGeomImageable	 imageable(lock.obj());
 	UsdTimeCode		 usdtime(HUSDgetUsdTimeCode(timecode));
@@ -664,9 +665,7 @@ HUSD_PrimHandle::getSelectable() const
     HUSD_PrimAttribState	 selectable = HUSD_NOTAPPLICABLE;
 
     if (lock.obj() && 
-        !lock.obj().IsPseudoRoot() && 
-        !lock.obj().IsPrototype() && 
-        !lock.obj().IsInstanceProxy() && 
+        !lock.obj().IsPseudoRoot() &&
         !lock.obj().IsInPrototype())
     {
         // When we want to pull the overrides from the Sdf Layers without
@@ -720,8 +719,7 @@ HUSD_PrimHandle::getSoloState() const
 
     if (lock.obj() &&
         !lock.obj().IsPseudoRoot() &&
-        !lock.obj().IsInPrototype() &&
-        !lock.obj().IsPrototype())
+        !lock.obj().IsInPrototype())
     {
         SdfLayerHandle               layer;
         HUSD_PathSet                 paths;
