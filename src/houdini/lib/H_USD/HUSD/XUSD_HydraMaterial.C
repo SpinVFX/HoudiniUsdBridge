@@ -57,6 +57,10 @@ static UT_StringHolder theSwizzleG("g");
 static UT_StringHolder theSwizzleB("b");
 static UT_StringHolder theSwizzleA("a");
 static UT_StringHolder theStName("st");
+static UT_StringHolder theUsdPrimvarReaderPrefix("ND_UsdPrimvarReader_");
+static UT_StringHolder theResultName("result");
+static UT_StringHolder theOutName("out");
+
 
 PXR_NAMESPACE_OPEN_SCOPE
 
@@ -247,11 +251,7 @@ XUSD_HydraMaterial::Sync(HdSceneDelegate *scene_del,
 	for(auto &it : map.map)
 	{
 	    UT_StringMap<UT_StringMap<StringPair>> in_out_map;
-            enum
-            {
-                SURFACE_SHADER,
-                DISPLACEMENT_SHADER
-            } shader_type;
+            ShaderType shader_type;
             
             if(it.first == HdMaterialTerminalTokens->surface)
                 shader_type = SURFACE_SHADER;
@@ -303,6 +303,22 @@ XUSD_HydraMaterial::Sync(HdSceneDelegate *scene_del,
 			 HusdHdMaterialTokens->UsdPrimvarReader.GetText(),
 				 16))
 		{
+                    // Create a MatX node for this just in case it's being used
+                    // in a materialx network. This isn't technically correct
+                    // as it's not a MatX node, but users seem to be using it
+                    // interchangeably with the mtlx version.
+                    UT_StringHolder type("ND_UsdPrimvarReader");
+                    UT_WorkBuffer   node_type;
+                    node_type.strcpy(nt.identifier.GetText());
+                    const char *suffix = node_type.findChar('_');
+                    if(suffix)
+                        type += suffix;
+                    GT_MaterialNodePtr mat = new GT_MaterialNode(type,nindex);
+                    mat->setName(nodepath);
+                    nindex++;
+                    matx_node.emplace(nodepath, mat);
+                    syncMatXNode(mat, scene_del, nt.parameters);
+                    
 		    auto var_it = nt.parameters.find(
 			HusdHdMaterialTokens->varname);
 
@@ -345,15 +361,16 @@ XUSD_HydraMaterial::Sync(HdSceneDelegate *scene_del,
                         if(!has_matx)
                             myMaterial.clearMaps();
 
+                        has_matx = true;
+                        
                         UT_StringHolder type(nt.identifier);
                         GT_MaterialNodePtr mat = new GT_MaterialNode(type,
                                                                      nindex);
+                        mat->setName(nodepath);
                         nindex++;
                         matx_node.emplace(nodepath, mat);
-                        //UTdebugPrint("MatX: ", nodepath);
-                        mat->setName(nodepath);
                         syncMatXNode(mat, scene_del, nt.parameters);
-                        has_matx = true;
+                        //UTdebugPrint("MatX: ", nodepath, type);
                     }
                 }
 	    }
@@ -362,90 +379,12 @@ XUSD_HydraMaterial::Sync(HdSceneDelegate *scene_del,
             {
                 myMaterial.setValid(true);
                 myMaterial.setIsMatX(true);
-
-                UT_StringMap<bool> input_nodes;
+                
+                UT_StringSet input_nodes;
             
-                for(auto &mx_node : matx_node)
-                {
-                    auto &&mat_name = mx_node.first;
-#ifdef DEBUG_MATERIAL
-                    UTdebugPrint("material", mat_name);
-#endif
-                    auto && mat = myMaterial;
-                    mat.clearOverrides();
-                    
-                    auto matx_entry = matx_node.find(mat_name);
-                    if(matx_entry != matx_node.end())
-                    {
-                        GT_MaterialNode *node = matx_entry->second.get();
-                        
-                        auto entry = in_out_map.find(mat_name);
-                        if(entry != in_out_map.end())
-                        {
-                            for(auto &input : entry->second)
-                            {
-                                auto &&input_name = input.first;
-                                auto &&connect = input.second;
-                                auto &&mapnode = connect.first;
-                                auto &&output_name = connect.second;
+                connectMaterialX(matx_node, in_out_map, input_nodes);
 
-                                auto ientry = matx_node.find(mapnode);
-                                if(ientry != matx_node.end())
-                                {
-                                    node->addInput(input_name, output_name,
-                                                   ientry->second);
-                                    input_nodes[mapnode] = true;
-                                    handleSpecialMatXNodes(ientry->second);
-                                    //UTdebugPrint("  -Input", input_name,
-                                    //            mapnode, ":", output_name);
-                                }
-                            }
-                        }
-                        //node->parms().dump();
-                    }
-                }
-
-                bool found = false;
-                for(auto &mx_node : matx_node)
-                    if(input_nodes.find(mx_node.first) == input_nodes.end())
-                    {
-                        GT_MaterialNodePtr prev_node;
-                        UT_Set<int> visited;
-                        if(shader_type == SURFACE_SHADER)
-                            prev_node = myMaterial.getMatXNode();
-                        else
-                            prev_node = myMaterial.getMatXDisplaceNode();
-
-                        GT_MaterialNodePtr node = mx_node.second.get();
-                        while(node &&
-                              (node->type() == "ND_dot_surfaceshader" ||
-                               node->type() == "ND_dot_displacementshader"))
-                        {
-                            node = node->getInput("in");
-                        }
-                        if(!node)
-                            continue;
-                        
-                        if(prev_node &&
-                           prev_node->networkMatch(node.get(), visited))
-                        {
-                            visited.clear();
-                            prev_node->copyParms(node.get(), visited);
-                        }
-                        else
-                        {
-                            //UTdebugPrint("Node network differs");
-                            myMaterial.bumpMatXNodeVersion();
-                            if(shader_type == SURFACE_SHADER)
-                                myMaterial.setMatXNode(node);
-                            else
-                                myMaterial.setMatXDisplaceNode(node);
-                        }
-                        found = true;
-                        break;
-                    }
-
-                if(found)
+                if(findMaterialXTerminal(matx_node, input_nodes, shader_type))
                 {
                     myMaterial.setMaterialVersion(
                         myMaterial.getMaterialVersion()+1);
@@ -889,6 +828,112 @@ XUSD_HydraMaterial::syncMatXNode(const GT_MaterialNodePtr &mat,
         UT_StringRef parmname(pt.first.GetText());
         XUSD_HydraUtils::addToOptions(opts, parmvalue, parmname);
     }
+}
+
+void
+XUSD_HydraMaterial::connectMaterialX(
+    UT_StringMap<GT_MaterialNodePtr> &matx_node,
+    const UT_StringMap<UT_StringMap<StringPair>> &in_out_map,
+    UT_StringSet &input_nodes)
+{
+               
+    for(auto &mx_node : matx_node)
+    {
+        auto &&mat_name = mx_node.first;
+#ifdef DEBUG_MATERIAL
+        UTdebugPrint("material", mat_name);
+#endif
+        auto && mat = myMaterial;
+        mat.clearOverrides();
+                    
+        auto matx_entry = matx_node.find(mat_name);
+        if(matx_entry != matx_node.end())
+        {
+            GT_MaterialNode *node = matx_entry->second.get();
+                        
+            auto entry = in_out_map.find(mat_name);
+            if(entry != in_out_map.end())
+            {
+                for(auto &input : entry->second)
+                {
+                    auto &&input_name = input.first;
+                    auto &&connect = input.second;
+                    auto &&mapnode = connect.first;
+                    auto &&output_name = connect.second;
+
+                    auto ientry = matx_node.find(mapnode);
+                    if(ientry != matx_node.end())
+                    {
+                        auto &output_type = ientry->second->type();
+                        if(output_type.startsWith(theUsdPrimvarReaderPrefix) &&
+                           output_name == theResultName)
+                        {
+                            // Unfortunate naming convention difference
+                            // between the UsdPrimvarReader and the Mtlx USD
+                            // Primvar Reader. output out vs. result
+                            node->addInput(input_name,theOutName,ientry->second);
+                        }
+                        else
+                            node->addInput(input_name, output_name,
+                                           ientry->second);
+                        input_nodes.emplace(mapnode);
+                        handleSpecialMatXNodes(ientry->second);
+                        // UTdebugPrint("  -Input", input_name,
+                        //              mapnode, ":", output_name);
+                    }
+                }
+            }
+            //node->parms().dump();
+        }
+    }
+}
+
+
+bool
+XUSD_HydraMaterial::findMaterialXTerminal(
+    const UT_StringMap<GT_MaterialNodePtr> &matx_node,
+    const UT_StringSet &input_nodes,
+    ShaderType shader_type)
+{
+    for(auto &mx_node : matx_node)
+        if(!input_nodes.contains(mx_node.first))
+        {
+            GT_MaterialNodePtr prev_node;
+            UT_Set<int> visited;
+            if(shader_type == SURFACE_SHADER)
+                prev_node = myMaterial.getMatXNode();
+            else
+                prev_node = myMaterial.getMatXDisplaceNode();
+
+            GT_MaterialNodePtr node = mx_node.second.get();
+            while(node &&
+                  (node->type() == "ND_dot_surfaceshader" ||
+                   node->type() == "ND_dot_displacementshader"))
+            {
+                node = node->getInput("in");
+            }
+            if(!node)
+                continue;
+                        
+            if(prev_node &&
+               prev_node->networkMatch(node.get(), visited))
+            {
+                visited.clear();
+                prev_node->copyParms(node.get(), visited);
+            }
+            else
+            {
+                //UTdebugPrint("Node network differs");
+                myMaterial.bumpMatXNodeVersion();
+                if(shader_type == SURFACE_SHADER)
+                    myMaterial.setMatXNode(node);
+                else
+                    myMaterial.setMatXDisplaceNode(node);
+            }
+
+            return true;
+        }
+    return false;
 }
 
 void

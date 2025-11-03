@@ -34,6 +34,7 @@
 
 #include <GT/GT_MaterialNode.h>
 #include <UT/UT_StringMap.h>
+#include <UT/UT_StringSet.h>
 
 
 PXR_NAMESPACE_OPEN_SCOPE
@@ -50,6 +51,13 @@ public:
               HdRenderParam *renderParam,
               HdDirtyBits *dirtyBits) override;
     HdDirtyBits GetInitialDirtyBitsMask() const override;
+
+protected:
+    enum ShaderType
+    {
+        SURFACE_SHADER,
+        DISPLACEMENT_SHADER
+    };
 
 private:
     using StringPair = std::pair<UT_StringHolder, UT_StringHolder>;
@@ -80,6 +88,14 @@ private:
                                  HUSD_HydraMaterial::map_info &info,
                                  UT_Matrix3F &xform);
     void        handleSpecialMatXNodes(const GT_MaterialNodePtr &mat);
+    void        connectMaterialX(
+                    UT_StringMap<GT_MaterialNodePtr> &matx_node,
+                    const UT_StringMap<UT_StringMap<StringPair>> &in_out_map,
+                    UT_StringSet &input_nodes);
+    bool        findMaterialXTerminal(
+                    const UT_StringMap<GT_MaterialNodePtr> &matx_node,
+                    const UT_StringSet &input_nodes,
+                    ShaderType type);
 
     HUSD_HydraMaterial &myMaterial;
 };
