@@ -51,6 +51,7 @@ namespace
     // Parameters for the default light shader
     static constexpr UT_StringLit   lightcolorName("lightcolor");
     static constexpr UT_StringLit   theStar("*");
+    static constexpr UT_StringLit   theIsPortalLight("isPortalLight");
 
     template <BRAY_LightProperty PROP, typename S, typename D>
     static void
@@ -317,6 +318,15 @@ namespace
         return ltype;
     }
 
+    static bool isPortalLight(HdSceneDelegate *sd, const SdfPath &id)
+    {
+        VtValue isportal = sd->GetLightParamValue(id,
+            TfToken(theIsPortalLight.c_str()));
+        if (isportal.IsHolding<bool>())
+            return isportal.UncheckedGet<bool>();
+        return false;
+    }
+
     using usdTokenAlias = BRAY_HdMaterialNetwork::usdTokenAlias;
     using usdTokenMappingArray = UT_Array<usdTokenAlias>;
 
@@ -538,6 +548,32 @@ namespace
         }
         return space;
     }
+
+    static void
+    xformPortalDomeLight(
+        HdSceneDelegate *sd,
+        const SdfPath &id,
+        UT_Array<GfMatrix4d>& xforms)
+    {
+        // In the case of a portal light, grab the transform
+        // from the light schema.
+        // The Portal Light Scene Index creates two prims:
+        // - a proxy mesh (which inherits the transform of the portal prim)
+        // - a portal light (which also uses the portal prim's
+        //   transform so the viewport guide displays correctly).
+        // However, Karma converts the portal to a dome light and
+        // needs the transform of the linked dome light instead.
+        // For this reason, the scene index embeds the dome light's
+        // transform into the light schema.
+
+        xforms.clear();
+
+        VtValue val = sd->GetLightParamValue(id, TfToken("portalDomeXform"));
+        if (val.IsHolding<GfMatrix4d>())
+            xforms.append(val.UncheckedGet<GfMatrix4d>());
+        else
+            xforms.append(GfMatrix4d(1.0)); // identity matrix
+    }
 }       // End namespace
 
 void
@@ -616,7 +652,10 @@ BRAY_HdLight::Sync(HdSceneDelegate *sd,
 
     if (bits & DirtyTransform)
     {
-	BRAY_HdUtil::xformBlur(sd, *rparm, id, myXform, oprops);
+        if (isPortalLight(sd, id))
+            xformPortalDomeLight(sd, id, myXform);
+        else
+	    BRAY_HdUtil::xformBlur(sd, *rparm, id, myXform, oprops);
         if (UT_ErrorLog::isMantraVerbose(8))
         {
             for (int i = 0, n = myXform.size(); i < n; ++i)
@@ -631,7 +670,7 @@ BRAY_HdLight::Sync(HdSceneDelegate *sd,
         // if dome-light poleAxis has already been set (which means
         // myLight.type() is set too) we need to honour the
         // starting alignment space.
-        if (myLight.type() == BRAY_LIGHT_ENVIRONMENT)
+        if (myLight.type() == BRAY_LIGHT_ENVIRONMENT && !isPortalLight(sd, id))
         {
             // returns identity if poleAxis prim isn't set
             BRAY::SpacePtr domespace = domeSpaceFromPoleAxis(sd, id);

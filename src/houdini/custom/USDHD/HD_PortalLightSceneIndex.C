@@ -37,6 +37,8 @@ TF_DEFINE_PRIVATE_TOKENS(
 
     // light schema tokens
     (domeOffset)
+    ((isPortalLight,        "isPortalLight"))
+    ((portalDomeXform,      "portalDomeXform"))
 
     ((material,             "material"))
     ((portalMesh,           "portalmesh"))
@@ -244,6 +246,14 @@ _BuildPortalDataSource(
     HdXformSchema portalXformSchema =
         HdXformSchema::GetFromParent(portalPrim.dataSource);
 
+    GfMatrix4d portalXform;
+    if (const auto portalDomeXform = portalXformSchema.GetMatrix()) {
+        portalXform = portalDomeXform->GetTypedValue(0.0f);
+    }
+    else {
+        portalXform.SetIdentity();
+    }
+
     // Get some relevant values from the portal light's data sources.
     // -------------------------------------------------------------------------
     const auto getPortalMatVal =
@@ -273,7 +283,20 @@ _BuildPortalDataSource(
     const auto computedPortalColor = GfCompMult(portalColor, domeColor);
     const float computedPortalIntensity = portalIntensity * domeIntensity;
     const float computedPortalExposure = domeExposure + portalExposure;
-    const auto computedPortalToDome = domeXform;
+    // The scene index returns two prims in case of portal:
+    // the portal light and the proxy mesh prims.
+    // 1. The portal proxy mesh: takes the portal prim transform.
+    //    The proxy is mainly required by Karma delegate to
+    //    maintain the portal workflow and backward compatiblity.
+    // 2. The portal light: has a viewport guide which requires to have the
+    //    same transform as the portal prim for it to work correctly
+    //    in the viewport. Hence setting portalXform in below code.
+    //    However Karma, under the hood, converts portal light to a
+    //    dome light which requires the linked dome-light transform.
+    //    We piggyback the dome light transform into light schema
+    //    for karma delegate. BRAY_HdLight then overrides the xform
+    //    by portalDomeXform.
+    const auto computedPortalToDome = portalXform; //domeXform;
 
     setPortalParamVal(_tokens->colorMap,         VtValue(domeColorMapAssetPath));
     setPortalParamVal(HdLightTokens->color,      VtValue(computedPortalColor));
@@ -320,6 +343,10 @@ _BuildPortalDataSource(
         HdRetainedTypedSampledDataSource<VtValue>::New(domeSingleSided);
     const auto renderLightGeoDataSource =
         HdRetainedTypedSampledDataSource<VtValue>::New(domeRenderGeo);
+    const auto domeXformDataSource =
+        HdRetainedTypedSampledDataSource<GfMatrix4d>::New(domeXform);
+    const auto isPortalDataSource =
+        HdRetainedTypedSampledDataSource<bool>::New(true);
 
     // Assemble the final data source for the portal light.
     // -------------------------------------------------------------------------
@@ -331,13 +358,19 @@ _BuildPortalDataSource(
         _tokens->renderContext, portalMatInterface.Finish()));
 
     names.push_back(HdLightSchemaTokens->light);
-    sources.push_back(HdRetainedContainerDataSource::New(
-        HdTokens->filters,      computedFiltersDataSource,
-        HdTokens->lightLink,    computedLightLinkDataSource,
-        HdTokens->shadowLink,   computedShadowLinkDataSource,
-        _tokens->portalMISBias, portalMISBiasDataSource,
-        _tokens->singleSided,   singlesidedDataSource,
-        _tokens->renderLightGeo,renderLightGeoDataSource));
+    auto baseLightSchemaContainer = HdRetainedContainerDataSource::New(
+        HdTokens->filters,          computedFiltersDataSource,
+        HdTokens->lightLink,        computedLightLinkDataSource,
+        HdTokens->shadowLink,       computedShadowLinkDataSource,
+        _tokens->portalMISBias,     portalMISBiasDataSource,
+        _tokens->singleSided,       singlesidedDataSource,
+        _tokens->renderLightGeo,    renderLightGeoDataSource);
+    auto extendedLightSchemaContainer = HdOverlayContainerDataSource::New(
+        baseLightSchemaContainer,
+        HdRetainedContainerDataSource::New(
+            _tokens->isPortalLight,     isPortalDataSource,
+            _tokens->portalDomeXform,   domeXformDataSource));
+    sources.push_back(extendedLightSchemaContainer);
 
     // portal xform
     HdDataSourceBaseHandle xformDS = HdXformSchema::BuildRetained(
