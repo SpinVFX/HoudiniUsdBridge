@@ -180,7 +180,7 @@ gusdAddAttribute(
                     true);
         }
     }
-    if (interpolation == UsdGeomTokens->vertex)
+    else if (interpolation == UsdGeomTokens->vertex)
     {
         if (data->entries() < num_pts)
         {
@@ -218,23 +218,42 @@ gusdAddAttribute(
 
 static UT_IntrusivePtr<GT_Int32Array>
 gusdBuildSegEndPointIndices(
-        const VtVec3fArray& points,
-        const VtIntArray& counts)
+        exint num_points,
+        const VtIntArray& counts,
+        const VtIntArray& orders)
 {
-    // Build a array that maps values defined on segment end points to
-    // verticies. The number of segment end points is 2 more than the
-    // number of control points so just skip the first and last values.
-
-    auto seg_end_point_indices = UTmakeIntrusive<GT_Int32Array>(points.size(), 1);
+    // Build a array that maps `varying` interpolation values, defined on
+    // segment end points, to vertices. Depending on the curve's order there may
+    // be fewer segment end points than vertices (e.g. 2 less for cubic curves),
+    // in which case we duplicate the first and last values.
+    auto seg_end_point_indices = UTmakeIntrusive<GT_Int32Array>(num_points, 1);
 
     GT_Offset src_idx = 0;
     GT_Offset dst_idx = 0;
-    for (const auto& c : counts)
+    for (size_t curve_idx = 0, num_curves = counts.size();
+         curve_idx < num_curves; ++curve_idx)
     {
-        ++src_idx;
+        const int curve_vtx_count = counts[curve_idx];
+        const int curve_degree = orders[curve_idx] - 1;
 
-        for (int i = 0; i < c; ++i)
+        const int num_seg_end_pts = curve_vtx_count - curve_degree + 1;
+        int extra_pts = curve_vtx_count - num_seg_end_pts;
+        UT_ASSERT(extra_pts >= 0);
+        extra_pts = SYSmax(extra_pts, 0);
+
+        // Note if there is an odd number of extra points, the rounding here
+        // means we will duplicate the last value an extra time.
+        const int extra_start_pts = extra_pts / 2;
+
+        int i = 0;
+        for ( ; i < extra_start_pts; ++i)
+            seg_end_point_indices->set(src_idx, dst_idx++);
+
+        for ( ; i < (extra_start_pts + num_seg_end_pts - 1); ++i)
             seg_end_point_indices->set(src_idx++, dst_idx++);
+
+        for ( ; i < curve_vtx_count; ++i)
+            seg_end_point_indices->set(src_idx, dst_idx++);
 
         ++src_idx;
     }
@@ -292,10 +311,11 @@ GusdNURBSCurvesWrapper::refine(
     if (num_curves == 0)
         return false; // Nothing to do.
 
-    int numPoints = std::accumulate( usdCounts.begin(), usdCounts.end(), 0 );
-    int numSegs = numPoints + usdCounts.size(); // # of knots minus degree.
+    int numPoints = std::accumulate(usdCounts.begin(), usdCounts.end(), 0);
+    int totalOrder = std::accumulate(usdOrder.begin(), usdOrder.end(), 0);
+    int numSegs = numPoints - totalOrder + usdCounts.size(); // # of points minus degree.
     int numSegEndPoints = numSegs + usdCounts.size();
-    int numKnots = numPoints + std::accumulate( usdOrder.begin(), usdOrder.end(), 0 );
+    int numKnots = numPoints + totalOrder;
 
     // point positions
     UsdAttribute pointsAttr = usdCurves.GetPointsAttr();
@@ -357,7 +377,7 @@ GusdNURBSCurvesWrapper::refine(
         }
 
         auto seg_end_point_indices = gusdBuildSegEndPointIndices(
-                usdPoints, usdCounts);
+                numPoints, usdCounts, usdOrder);
 
         UsdAttribute widthsAttr = usdCurves.GetWidthsAttr();
         VtFloatArray usdWidths;
@@ -436,7 +456,7 @@ GusdNURBSCurvesWrapper::refine(
             if (colorPrimvar.GetInterpolation() == UsdGeomTokens->varying)
             {
                 seg_end_point_indices = gusdBuildSegEndPointIndices(
-                        usdPoints, usdCounts);
+                        numPoints, usdCounts, usdOrder);
             }
 
             gusdAddAttribute(
