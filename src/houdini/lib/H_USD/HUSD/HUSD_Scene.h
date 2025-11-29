@@ -281,6 +281,10 @@ public:
     void         pendingRemovalLight(const HUSD_Path &path,
                                     HUSD_HydraLightPtr prim);
     HUSD_HydraLightPtr fetchPendingRemovalLight(const HUSD_Path &path);
+    
+    void         pendingRemovalMaterial(const HUSD_Path &path,
+                                        HUSD_HydraMaterialPtr prim);
+    HUSD_HydraMaterialPtr fetchPendingRemovalMaterial(const HUSD_Path &path);
 
     void         pendingRemovalInstancer(const HUSD_Path &path,
                                          PXR_NS::XUSD_HydraInstancer *inst);
@@ -338,6 +342,7 @@ protected:
     UT_Map<HUSD_Path, HUSD_HydraGeoPrimPtr>          myPendingRemovalGeom;
     UT_Map<HUSD_Path, HUSD_HydraCameraPtr>           myPendingRemovalCamera;
     UT_Map<HUSD_Path, HUSD_HydraLightPtr>            myPendingRemovalLight;
+    UT_Map<HUSD_Path, HUSD_HydraMaterialPtr>         myPendingRemovalMaterial;
     UT_Map<HUSD_Path, PXR_NS::XUSD_HydraInstancer *> myPendingRemovalInstancer;
     UT_Array<HUSD_HydraGeoPrimPtr>                   myDuplicateGeo;
     UT_Array<HUSD_HydraCameraPtr>                    myDuplicateCam;

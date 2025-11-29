@@ -374,13 +374,22 @@ XUSD_ViewerDelegate::CreateSprim(TfToken const& typeId,
     }
     else if (typeId == HdPrimTypeTokens->material)
     {
-	auto entry = myScene.materials().find(path);
-	if(entry == myScene.materials().end())
-	{
-	    auto hmat = new HUSD_HydraMaterial(primId, myScene);
-	    myScene.addMaterial( hmat );
-	    sprim = hmat->hydraMaterial();
-	}
+        auto entry = myScene.fetchPendingRemovalMaterial(path);
+        if(entry)
+        {
+            myScene.addMaterial(entry.get());
+            sprim = entry->hydraMaterial();
+        }
+        else
+        {
+            auto mentry = myScene.materials().find(path);
+            if(mentry == myScene.materials().end())
+            {
+                auto hmat = new HUSD_HydraMaterial(primId, myScene);
+                myScene.addMaterial( hmat );
+                sprim = hmat->hydraMaterial();
+            }
+        }
     }
     else if (typeId == HdPrimTypeTokens->extComputation)
     {
@@ -429,8 +438,7 @@ XUSD_ViewerDelegate::DestroySprim(HdSprim *sPrim)
 	auto mat = myScene.materials().find(id);
 	if(mat != myScene.materials().end())
 	{
-	    HUSD_HydraMaterial	*mprim = mat->second.get();
-	    myScene.removeMaterial(mprim);
+            myScene.pendingRemovalMaterial(id, mat->second);
 	    return;
 	}
     

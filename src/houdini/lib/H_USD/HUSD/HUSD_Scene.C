@@ -939,6 +939,7 @@ HUSD_Scene::reset()
     myPendingRemovalGeom.clear();
     myPendingRemovalCamera.clear();
     myPendingRemovalLight.clear();
+    myPendingRemovalMaterial.clear();
     myPendingRemovalInstancer.clear();    
     myDuplicateGeo.entries(0);
     myDuplicateCam.entries(0);
@@ -1852,6 +1853,7 @@ HUSD_Scene::clearPendingRemovalPrims()
     if (myPendingRemovalGeom.empty() &&
         myPendingRemovalCamera.empty() &&
         myPendingRemovalLight.empty() &&
+        myPendingRemovalMaterial.empty() &&
         myPendingRemovalInstancer.empty() &&
         myDuplicateGeo.isEmpty() &&
         myDuplicateCam.isEmpty() &&
@@ -1873,6 +1875,10 @@ HUSD_Scene::clearPendingRemovalPrims()
     for(auto light : myPendingRemovalLight)
         removeLight(light.second.get());
     myPendingRemovalLight.clear();
+
+    for(auto mat : myPendingRemovalMaterial)
+        removeMaterial(mat.second.get());
+    myPendingRemovalMaterial.clear();
 
     for(auto inst : myPendingRemovalInstancer)
         delete inst.second;
@@ -1959,6 +1965,30 @@ HUSD_Scene::fetchPendingRemovalLight(const HUSD_Path &path)
         myPendingRemovalLight.erase(path);
         light->setPendingDelete(false);
         return light;
+    }
+    return nullptr;
+}
+
+void
+HUSD_Scene::pendingRemovalMaterial(const HUSD_Path &path,
+                                   HUSD_HydraMaterialPtr prim)
+{
+    UT_ASSERT(myPendingRemovalMaterial.find(path) ==
+              myPendingRemovalMaterial.end());
+    myPendingRemovalMaterial[path] = prim;
+    prim->setPendingDelete(true);
+}
+
+HUSD_HydraMaterialPtr
+HUSD_Scene::fetchPendingRemovalMaterial(const HUSD_Path &path)
+{
+    auto entry = myPendingRemovalMaterial.find(path);
+    if(entry != myPendingRemovalMaterial.end())
+    {
+        HUSD_HydraMaterialPtr mat = entry->second;
+        myPendingRemovalMaterial.erase(path);
+        mat->setPendingDelete(false);
+        return mat;
     }
     return nullptr;
 }
