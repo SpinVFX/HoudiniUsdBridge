@@ -134,6 +134,7 @@ expandPercent(UT_WorkBuffer& store, const char* str,
 		    }
 		    else
 		    {
+                        store.append('<');
 			store.append(pfmt);
 			store.append('>');
 		    }
