@@ -1446,37 +1446,22 @@ public:
             // Use a UsdPrimCompositionQuery to find all composition arcs.
             UsdPrimCompositionQuery query(prim, myQueryFilter);
             auto arcs = query.GetCompositionArcs();
-            size_t narcs = arcs.size();
 
-            // A reference, inherit, or specialize arc to this stage will
-            // always show up as the second or later arc, pointing to the
-            // same layer stack as the "root" arc (which ties the prim to
-            // this stage).
-            if (narcs > 1 && arcs[0].GetArcType() == PcpArcTypeRoot)
+            // Check arcs for reference, inherit, or specialize arcs that
+            // point to the requested node in the root layer stack.
+            for (int i = 0, n = arcs.size(); i < n; i++)
             {
-                const PcpLayerStackRefPtr &root_layer_stack =
-                    arcs[0].GetTargetNode().GetLayerStack();
+                PcpNodeRef target = arcs[i].GetTargetNode();
+                PcpArcType arctype = target.GetArcType();
 
-                if (root_layer_stack)
+                if (arctype == PcpArcTypeInherit ||
+                    arctype == PcpArcTypeReference ||
+                    arctype == PcpArcTypeSpecialize)
                 {
-                    // Check subsequent arcs for reference, inherit, or
-                    // specialize arcs that point to the requested node in
-                    // the root layer stack.
-                    for (int i = 1; i < narcs; i++)
+                    if (myRefPaths.contains(target.GetPath()) &&
+                        arcs[i].IsIntroducedInRootLayerStack())
                     {
-                        PcpNodeRef target = arcs[i].GetTargetNode();
-                        PcpArcType arctype = target.GetArcType();
-
-                        if (arctype == PcpArcTypeInherit ||
-                            arctype == PcpArcTypeReference ||
-                            arctype == PcpArcTypeSpecialize)
-                        {
-                            if (myRefPaths.contains(target.GetPath()) &&
-                                target.GetLayerStack() == root_layer_stack)
-                            {
-                                return true;
-                            }
-                        }
+                        return true;
                     }
                 }
             }
@@ -1553,33 +1538,19 @@ public:
                 auto arcs = query.GetCompositionArcs();
                 size_t narcs = arcs.size();
 
-                // A reference, inherit, or specialize arc to this stage will
-                // always show up as the second or later arc, pointing to the
-                // same layer stack as the "root" arc (which ties the prim to
-                // this stage).
-                if (narcs > 1 && arcs[0].GetArcType() == PcpArcTypeRoot)
+                // Check arcs for reference, inherit, or specialize arcs
+                // that point to the requested node in the root layer stack.
+                for (int i = 0; i < narcs; i++)
                 {
-                    const PcpLayerStackRefPtr &root_layer_stack =
-                        arcs[0].GetTargetNode().GetLayerStack();
+                    PcpNodeRef target = arcs[i].GetTargetNode();
+                    PcpArcType arctype = target.GetArcType();
 
-                    if (root_layer_stack)
+                    if (arctype == PcpArcTypeInherit ||
+                        arctype == PcpArcTypeReference ||
+                        arctype == PcpArcTypeSpecialize)
                     {
-                        // Check subsequent arcs for reference, inherit, or
-                        // specialize arcs that point to the requested node in
-                        // the root layer stack.
-                        for (int i = 1; i < narcs; i++)
-                        {
-                            PcpNodeRef target = arcs[i].GetTargetNode();
-                            PcpArcType arctype = target.GetArcType();
-
-                            if (arctype == PcpArcTypeInherit ||
-                                arctype == PcpArcTypeReference ||
-                                arctype == PcpArcTypeSpecialize)
-                            {
-                                if (target.GetLayerStack() == root_layer_stack)
-                                    matches.insert(target.GetPath());
-                            }
-                        }
+                        if (arcs[i].IsIntroducedInRootLayerStack())
+                            matches.insert(target.GetPath());
                     }
                 }
             }
