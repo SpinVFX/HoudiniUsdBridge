@@ -1720,6 +1720,14 @@ public:
     bool matchPrimitive(const UsdPrim &prim,
             bool *prune_branch) const override
     {
+        if (myBoundsType == INVALID)
+        {
+            // No bounds type means no bounds comparisons. Nothing matches,
+            // and our pattern isn't time dependent.
+            *prune_branch = true;
+            return false;
+        }
+
         BBoxCacheVector &bboxcache = myBBoxCache.get();
 
         if (!myTimeCodesOverridden &&
@@ -2008,6 +2016,14 @@ public:
     bool matchPrimitive(const UsdPrim &prim,
             bool *prune_branch) const override
     {
+        if (mySizeType == INVALID)
+        {
+            // No size type means no size comparisons. Nothing matches,
+            // and our pattern isn't time dependent.
+            *prune_branch = true;
+            return false;
+        }
+
         if (prim.GetPrimPath() == myCameraPath)
             return false;
 
@@ -2342,7 +2358,7 @@ private:
     
     fpreal64                                        myMinValue = 0.0;
     fpreal64                                        myMaxValue = 0.0;
-    bool                                            myClip     = false;
+    bool                                            myClip = false;
     SizeType                                        mySizeType;
     PointInstancerMode                              myPointInstancerMode;
     SdfPath                                         myCameraPath;
@@ -2626,6 +2642,15 @@ public:
     bool matchPrimitive(const UsdPrim &prim,
             bool *prune_branch) const override
     {
+        UT_ASSERT(myTimeCodes.size() == myCenter.size());
+        if (myTimeCodes.empty())
+        {
+            // No time codes means no distance comparisons. Nothing matches,
+            // and our pattern isn't time dependent.
+            *prune_branch = true;
+            return false;
+        }
+
         BBoxCacheVector &bboxcache = myBBoxCache.get();
         if (!myTimeCodesOverridden)
             myMayBeTimeVarying.get() = true;
@@ -2725,6 +2750,13 @@ private:
                     xform.getTranslates(center);
                     myCenter.push_back(center);
                 }
+            }
+            else
+            {
+                // We didn't find a prim to act as our "center", so clear the
+                // time codes array as well. The length of the time codes and
+                // "centers" arrays need to be the same.
+                myTimeCodes.clear();
             }
         }
     }

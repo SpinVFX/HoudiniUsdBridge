@@ -619,7 +619,8 @@ public:
     static GT_PrimitiveHandle createPointPrimFromVDB(
         const BRAY::ObjectPtr::FieldList &fields,
         const BRAY::OptionSet &props,
-        const BRAY_HdParam &rparm);
+        const BRAY_HdParam &rparm,
+        const GT_AttributeListHandle& vdbPrimavars);
 
     // Returns true if no dirty bits (or only internal bits) set
     static bool             noDirtyBits(const HdDirtyBits &dirtyBits);

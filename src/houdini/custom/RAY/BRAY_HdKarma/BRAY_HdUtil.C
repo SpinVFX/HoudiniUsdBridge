@@ -5123,7 +5123,8 @@ GT_PrimitiveHandle
 BRAY_HdUtil::createPointPrimFromVDB(
         const BRAY::ObjectPtr::FieldList &fields,
         const BRAY::OptionSet &props,
-        const BRAY_HdParam &rparm)
+        const BRAY_HdParam &rparm,
+        const GT_AttributeListHandle& vdbPrimavars)
 {
     //UT_StopWatch timer;
     //timer.start();
@@ -5186,11 +5187,9 @@ BRAY_HdUtil::createPointPrimFromVDB(
 	    rparm);
     }
 
-    GT_AttributeListHandle uattribs;
-
     //UT_ErrorLog::format(8, "converted vdb point to mesh in {}s", timer.lap());
 
-    return UTmakeIntrusive<GT_PrimPointMesh>(vdb_attribs, uattribs);
+    return UTmakeIntrusive<GT_PrimPointMesh>(vdb_attribs, vdbPrimavars);
 }
 
 bool

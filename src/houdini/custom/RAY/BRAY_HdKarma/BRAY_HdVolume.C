@@ -307,7 +307,7 @@ BRAY_HdVolume::Sync(HdSceneDelegate* sceneDelegate,
 	    {
                 UT_ErrorLog::format(8, "create point mesh");
                 GT_PrimitiveHandle pointprim =
-                    BRAY_HdUtil::createPointPrimFromVDB(fields, props, rparm);
+                    BRAY_HdUtil::createPointPrimFromVDB(fields, props, rparm, myDetailAttribs);
                 myVolume = scene.createGeometry(pointprim);
                 // for vdp point (converted to pointmesh) we don't need to
                 // call the update if object is initialized first time. The last
@@ -327,7 +327,7 @@ BRAY_HdVolume::Sync(HdSceneDelegate* sceneDelegate,
             if (vdbpoint)
             {
                 GT_PrimitiveHandle pointprim =
-                    BRAY_HdUtil::createPointPrimFromVDB(fields, props, rparm);
+                    BRAY_HdUtil::createPointPrimFromVDB(fields, props, rparm, myDetailAttribs);
                 myVolume.setGeometry(scene, pointprim);
             }
             else
