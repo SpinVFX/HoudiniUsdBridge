@@ -185,7 +185,7 @@ public:
                         BRAY::ScenePtr &sd,
                         const BRAY_HdParam &rparam,
                         MaterialId &matId,
-                        UT_Array<BRAY::FacesetMaterial> *fmats = nullptr);
+                        const UT_Set<SdfPath> *fmats = nullptr);
 
     // Check to see if there's a karma procedural
     static bool isKarmaProcedural(HdSceneDelegate *sd, const SdfPath &id);

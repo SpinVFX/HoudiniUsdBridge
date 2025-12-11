@@ -458,8 +458,11 @@ BRAY_HdMesh::Sync(HdSceneDelegate *sceneDelegate,
 
         // Build list of required primvars
         UT_SmallArray<const BRAY_HdUtil::PrimvarSet *>	mptrs;
-        BRAY_HdUtil::getRequiredPrimvars(mptrs, scene, rparm, matId, &fmats);
-
+        UT_Set<SdfPath> subsetmats;
+        for (const auto &set : top.GetGeomSubsets())
+            if (!set.materialId.IsEmpty()) subsetmats.insert(set.materialId);
+        BRAY_HdUtil::getRequiredPrimvars(mptrs, scene, rparm, matId,
+            &subsetmats);
 	if ((poly_holes && pmesh->getFaceCount() != top.GetFaceVertexCounts().size())
             || !BRAY_HdUtil::matchAttributes(sceneDelegate, rparm, id, primType,
 		    HdInterpolationConstant, pmesh->getDetail(),
@@ -584,7 +587,14 @@ BRAY_HdMesh::Sync(HdSceneDelegate *sceneDelegate,
 
             // Build list of required primvars
 	    UT_SmallArray<const BRAY_HdUtil::PrimvarSet *>	mptrs;
-            BRAY_HdUtil::getRequiredPrimvars(mptrs, scene, rparm, matId, &fmats);
+            UT_Set<SdfPath> subsetmats;
+            for (const auto &set : top.GetGeomSubsets())
+            {
+                if (!set.materialId.IsEmpty())
+                    subsetmats.insert(set.materialId);
+            }
+            BRAY_HdUtil::getRequiredPrimvars(mptrs, scene, rparm, matId,
+                &subsetmats);
 	    alist[3] = BRAY_HdUtil::makeAttributes(sceneDelegate, rparm, id,
 			primType, 1, props, HdInterpolationConstant,
                         mptrs);

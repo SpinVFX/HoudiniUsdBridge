@@ -3189,7 +3189,7 @@ BRAY_HdUtil::getRequiredPrimvars(UT_Array<const PrimvarSet *> &mptrs,
         BRAY::ScenePtr &scene,
         const BRAY_HdParam &rparam,
         MaterialId &matId,
-        UT_Array<BRAY::FacesetMaterial> *fmats)
+        const UT_Set<SdfPath> *fmats)
 {
     UT_ASSERT(mptrs.size() == 0);
     matId.resolvePath();        // Need to resolve the path to find it
@@ -3200,7 +3200,7 @@ BRAY_HdUtil::getRequiredPrimvars(UT_Array<const PrimvarSet *> &mptrs,
     {
         for (const auto &fmat : *fmats)
         {
-            if (!addPrimvars(mptrs, fmat.myMaterial))
+            if (!addPrimvars(mptrs, scene.findMaterial(toStr(fmat))))
                 return;
         }
     }
