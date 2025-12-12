@@ -163,6 +163,7 @@ public:
         /// @ {
         bool enable_usd_draw_modes = true;
         bool use_scene_indices = false;
+        bool force_null_hgi = false;
         /// @}
     };
     

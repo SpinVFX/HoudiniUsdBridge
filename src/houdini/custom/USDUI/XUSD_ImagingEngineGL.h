@@ -307,7 +307,7 @@ protected:
     static void _ComputeRenderTags(UsdImagingGLRenderParams const& params,
                           TfTokenVector *renderTags);
 
-    void _InitializeHgiIfNecessary();
+    void _InitializeHgiIfNecessary(bool force_null_hgi);
 
     void _SetRenderDelegateAndRestoreState(
         HdPluginRenderDelegateUniqueHandle &&);

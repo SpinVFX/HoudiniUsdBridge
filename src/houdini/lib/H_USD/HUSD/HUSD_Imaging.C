@@ -635,7 +635,8 @@ HUSD_Imaging::HUSD_Imaging()
       mySlapcompWarningCBData(nullptr),
       mySlapcompEnabled(false),
       mySlapcompStateChanged(false),
-      mySlapcompHasErrors(false)
+      mySlapcompHasErrors(false),
+      myAllowStormRenderer(true)
 {
     myPrivate = UTmakeUnique<husd_ImagingPrivate>(*this);
     myPrivate->myRenderParams.myShowProxy = true;
@@ -884,6 +885,12 @@ HUSD_Imaging::setAspectPolicy(HUSD_AspectConformPolicy p)
         myConformPolicy = CameraUtilDontConform;
 }
 
+void
+HUSD_Imaging::setAllowStormRenderer(bool allow_storm)
+{
+    myAllowStormRenderer = allow_storm;
+}
+
 bool
 HUSD_Imaging::setDefaultLights(bool doheadlight, bool dodomelight)
 {
@@ -1025,6 +1032,22 @@ HUSD_Imaging::setupRenderer(const UT_StringRef &renderer_name,
 
     if (myRendererName != new_renderer_name)
     {
+        // The first time we are asked to create a renderer, if storm is
+        // supposed to be supported, we must create a dummy imaging engine
+        // to initialize OpenGL and the Hgi library. Otherwise, if we are
+        // running in a non-graphical process, we wouldn't be allowed to
+        // create a Storm renderer (because Hgi isn't initialized).
+        static bool theFirstRendererCreation = true;
+        if (myAllowStormRenderer && theFirstRendererCreation)
+        {
+            XUSD_ImagingEngine::Parameters params;
+            params.force_null_hgi = false;
+            theFirstRendererCreation = false;
+            // Calling this function like this will allocate an imaging engine,
+            // then immediately delete it as we free the returned unique ptr.
+            XUSD_ImagingEngine::createImagingEngine(params);
+        }
+
         // Make sure we preload any required extra libraries.
         theRendererInfoMap[new_renderer_name].preloadLibraries();
 
@@ -1123,6 +1146,7 @@ HUSD_Imaging::setupRenderer(const UT_StringRef &renderer_name,
         params.allowAsynchronousSceneProcessing = false;
         params.enable_usd_draw_modes = drawmode;
         params.use_scene_indices = use_scene_indexes;
+        params.force_null_hgi = !myAllowStormRenderer;
         
 	myPrivate->myImagingEngine =
             XUSD_ImagingEngine::createImagingEngine(params);

@@ -307,7 +307,7 @@ XUSD_ImagingEngineGL::XUSD_ImagingEngineGL(const Parameters &params)
     if (wrapper.isOpenGLAvailable())
         _InitGL();
 
-    _InitializeHgiIfNecessary();
+    _InitializeHgiIfNecessary(params.force_null_hgi);
 }
 
 bool
@@ -798,7 +798,7 @@ XUSD_ImagingEngineGL::GetCurrentRendererId() const
 }
 
 void
-XUSD_ImagingEngineGL::_InitializeHgiIfNecessary()
+XUSD_ImagingEngineGL::_InitializeHgiIfNecessary(bool force_null_hgi)
 {
 // In pxr/imaging/hgi/hgi.cpp there is a hard-coded reference to "HgiMetal"
 // when using Hgi::CreatePlatformDefaultHgi() on Mac, but we don't build
@@ -806,19 +806,22 @@ XUSD_ImagingEngineGL::_InitializeHgiIfNecessary()
 // (and, instead, force usage of our NullHgi).
 // We still need to use "HgiGL" on Windows & Linux, however, to support Storm.
 #ifndef MBSD
-    RE_Wrapper wrapper(true);
-    if (wrapper.isOpenGLAvailable())
+    if (!force_null_hgi)
     {
-        // If the client of XUSD_ImagingEngine does not provide a HdDriver,
-        // we construct a default one that is owned by XUSD_ImagingEngine.
-        // The cleanest pattern is for the client app to provide this since
-        // you may have multiple XUSD_ImagingEngine in one app that ideally
-        // all use the same HdDriver and Hgi to share GPU resources.
-        if (_hgiDriver.driver.IsEmpty())
+        RE_Wrapper wrapper(true);
+        if (wrapper.isOpenGLAvailable())
         {
-            _hgi = Hgi::CreatePlatformDefaultHgi();
-            _hgiDriver.name = HgiTokens->renderDriver;
-            _hgiDriver.driver = VtValue(_hgi.get());
+            // If the client of XUSD_ImagingEngine does not provide a HdDriver,
+            // we construct a default one that is owned by XUSD_ImagingEngine.
+            // The cleanest pattern is for the client app to provide this since
+            // you may have multiple XUSD_ImagingEngine in one app that ideally
+            // all use the same HdDriver and Hgi to share GPU resources.
+            if (_hgiDriver.driver.IsEmpty())
+            {
+                _hgi = Hgi::CreatePlatformDefaultHgi();
+                _hgiDriver.name = HgiTokens->renderDriver;
+                _hgiDriver.driver = VtValue(_hgi.get());
+            }
         }
     }
 #endif
