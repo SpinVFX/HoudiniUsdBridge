@@ -1186,6 +1186,22 @@ HUSD_Imaging::setupRenderer(const UT_StringRef &renderer_name,
 
     if (myRendererName != new_renderer_name)
     {
+        // The first time we are asked to create a renderer, if storm is
+        // supposed to be supported, we must create a dummy imaging engine
+        // to initialize OpenGL and the Hgi library. Otherwise, if we are
+        // running in a non-graphical process, we wouldn't be allowed to
+        // create a Storm renderer (because Hgi isn't initialized).
+        static bool theFirstRendererCreation = true;
+        if (myAllowStormRenderer && theFirstRendererCreation)
+        {
+            XUSD_ImagingEngine::Parameters params;
+            params.force_null_hgi = false;
+            theFirstRendererCreation = false;
+            // Calling this function like this will allocate an imaging engine,
+            // then immediately delete it as we free the returned unique ptr.
+            XUSD_ImagingEngine::createImagingEngine(params);
+        }
+
         // Make sure we preload any required extra libraries.
         theRendererInfoMap[new_renderer_name].preloadLibraries();
 
