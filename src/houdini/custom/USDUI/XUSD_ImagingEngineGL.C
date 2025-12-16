@@ -813,16 +813,6 @@ XUSD_ImagingEngineGL::SetRendererPlugin(TfToken const &id,
 
     _SetRenderDelegateAndRestoreState(std::move(plugin));
 
-    HUSD_RendererInfo::getRendererInfo(
-        resolvedId.GetText(), UT_StringHolder()).preloadLibraries();
-    HdPluginRenderDelegateUniqueHandle renderDelegate =
-        registry.CreateRenderDelegate(resolvedId, settings);
-    if (!renderDelegate) {
-        return false;
-    }
-
-    _SetRenderDelegateAndRestoreState(std::move(renderDelegate));
-
     return true;
 }
 
