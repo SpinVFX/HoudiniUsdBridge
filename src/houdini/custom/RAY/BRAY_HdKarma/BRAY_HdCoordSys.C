@@ -78,7 +78,7 @@ BRAY_HdCoordSys::Sync(HdSceneDelegate *sd,
     if (*dirtyBits)
     {
         BRAY_HdCameraProps      cpropset;
-        cpropset.init<BRAY_HdUtil::EVAL_GENERIC>(sd, *rparm, GetId(),
+        cpropset.init<BRAY_HdUtil::EVAL_CAMERA_PARM>(sd, *rparm, GetId(),
                 myCoordSys.objectProperties());
         cpropset.setProperties(scene, myCoordSys);
     }
