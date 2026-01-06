@@ -1796,7 +1796,7 @@ XUSD_HydraGeoMesh::Sync(HdSceneDelegate *scene_delegate,
     }
 
     myGeometryNeedTangents = (!tanu_exists && !tanv_exists);
-    
+
     for(auto &itr : myExtraAttribs)
     {
 	auto &attrib = itr.first;
@@ -2512,6 +2512,16 @@ XUSD_HydraGeoCurves::Sync(HdSceneDelegate *scene_delegate,
     
     if(*dirty_bits & HdChangeTracker::DirtyMaterialId)
     {
+
+	SdfPath mat_id = scene_delegate->GetMaterialId(GetId());
+
+	SetMaterialId(mat_id);
+
+        // Clear out all materials and material parms
+        myExtraAttribs.clear();
+        myExtraUVAttribs.clear();
+
+
         for(auto matref : myHydraPrim.materialReferences())
         {
             auto entry = myHydraPrim.scene().materials().find(matref);
@@ -2520,11 +2530,12 @@ XUSD_HydraGeoCurves::Sync(HdSceneDelegate *scene_delegate,
         }
         
         myHydraPrim.clearMaterials();
-        
-        int prev_mat = myMaterialID;
-        myMaterialID = myHydraPrim.scene().getDefaultMaterialID();
-        
-	SdfPath mat_id = scene_delegate->GetMaterialId(GetId());
+
+        const int def_mat_id = myHydraPrim.scene().getDefaultMaterialID();
+        const int prev_mat = myMaterialID;
+        myMaterialID = def_mat_id;
+        myMaterials.clear();
+
         if(!mat_id.IsEmpty())
         {
             HUSD_Path path(mat_id);
@@ -2532,14 +2543,22 @@ XUSD_HydraGeoCurves::Sync(HdSceneDelegate *scene_delegate,
             if(entry != myHydraPrim.scene().materials().end())
             {
                 auto &hmat = entry->second;
-                if(hmat->isValid())
-                {
-                    myMaterialID = hmat->getMaterialID();
-                    hmat->addPrimRef(myHydraPrim.id());
-                    myHydraPrim.addMaterialRef(hmat->path());
-                }
+                // ensure these attribs are present on the geometry.
+                for(auto &it : hmat->requiredUVs())
+                    myExtraUVAttribs[it.first] = it.first;
+                for(auto &it : hmat->shaderParms())
+                    myExtraAttribs[it.second] = it.first;
+
+                //UTdebugPrint("Material", path.pathStr());
+                myMaterialID = hmat->getMaterialID();
+                myMaterials.append(path);
+
+                // Link the material and the prim
+                hmat->addPrimRef(myHydraPrim.id());
+                myHydraPrim.addMaterialRef(hmat->path());
             }
         }
+
         if(myMaterialID != prev_mat)
             myDirtyMask = myDirtyMask | HUSD_HydraGeoPrim::MAT_CHANGE;
     }
@@ -2766,6 +2785,64 @@ XUSD_HydraGeoCurves::Sync(HdSceneDelegate *scene_delegate,
     updateAttrib(HdTokens->normals, "N"_sh,
 		 scene_delegate, id, dirty_bits, gt_prim, attrib_list,
 		 GT_TYPE_NORMAL, freq);
+
+
+    for(auto &itr : myExtraAttribs)
+    {
+	auto &attrib = itr.first;
+
+        if(attrib == theHydraDisplayColor)
+            continue;
+	auto entry = myAttribMap.find(attrib);
+	if(entry != myAttribMap.end())
+	{
+	    TfToken htoken(attrib);
+	    updateAttrib(htoken, attrib, scene_delegate, id,
+			 dirty_bits, gt_prim, attrib_list, GT_TYPE_NONE,
+                         freq);
+	}
+    }
+
+    bool uv_attempted = false;
+    bool st_attempted = false;
+    for(auto &itr : myExtraUVAttribs)
+    {
+	auto &attrib = itr.first;
+        // Don't attempt to refill if this attrib was already in myExtraAttribs.
+        if(myExtraAttribs.find(attrib) != myExtraAttribs.end())
+            continue;
+
+	auto entry = myAttribMap.find(attrib);
+	if(entry != myAttribMap.end())
+	{
+	    TfToken htoken(attrib);
+	    updateAttrib(htoken, attrib, scene_delegate, id,
+			 dirty_bits, gt_prim, attrib_list, GT_TYPE_NONE,
+                         freq);
+	}
+        else 
+        {
+            UT_StringHolder gt_attrib;
+            if(attrib == "uv" && !st_attempted)
+            {
+                TfToken htoken("st");
+                gt_attrib = "st";
+                st_attempted = true;
+                updateAttrib(htoken, gt_attrib, scene_delegate, id,
+                             dirty_bits, gt_prim, attrib_list, GT_TYPE_NONE,
+                             freq);
+            }
+            else if(attrib == "st" && !uv_attempted)
+            {
+                TfToken htoken("uv");
+                gt_attrib = "uv";
+                updateAttrib(htoken, gt_attrib, scene_delegate, id,
+                             dirty_bits, gt_prim, attrib_list, GT_TYPE_NONE,
+                             freq);
+                uv_attempted = true;
+            }
+         }
+    }
 
     GT_PrimitiveHandle ph;
     GT_AttributeListHandle verts;
