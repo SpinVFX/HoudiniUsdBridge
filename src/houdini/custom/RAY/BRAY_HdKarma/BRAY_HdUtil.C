@@ -2699,23 +2699,26 @@ BRAY_HdUtil::convertAttribute(const SdfPath &id,
         const TfToken &token)
 {
     GT_DataArrayHandle  data = convertAttribute(val, token);
-    if (indices.size())
+    if (data)
     {
-        if (!data->entries())
-            return data;
-        GT_DataArrayHandle      indirect = gtArray(indices);
-        data = UTmakeIntrusive<GT_DAIndirect>(indirect, data);
-    }
-    else if (data->getStorage() == GT_STORE_STRING
-            && data->entries() > 32)
-    {
-        static int warn_count = 0;
-        if (warn_count++ < 4)
+        if (indices.size())
         {
-            UT_ErrorLog::format(2,
-                    "Warning: Non-indexed attribute '{}' string found on {}. {}{}",
-                    token, id, "This may affect performance",
-                    warn_count == 4 ? " - further messages will be truncated":"");
+            if (!data->entries())
+                return data;
+            GT_DataArrayHandle      indirect = gtArray(indices);
+            data = UTmakeIntrusive<GT_DAIndirect>(indirect, data);
+        }
+        else if (data->getStorage() == GT_STORE_STRING
+                && data->entries() > 32)
+        {
+            static int warn_count = 0;
+            if (warn_count++ < 4)
+            {
+                UT_ErrorLog::format(2,
+                        "Warning: Non-indexed attribute '{}' string found on {}. {}{}",
+                        token, id, "This may affect performance",
+                        warn_count == 4 ? " - further messages will be truncated":"");
+            }
         }
     }
     return data;

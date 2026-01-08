@@ -1771,6 +1771,16 @@ HUSDgetDialogScriptToken()
 
 }
 
+const TfToken &
+HUSDgetNodeTypeNameToken()
+{
+    // See the note in HUSDgetDialogScriptToken().
+    static const TfToken	 theToken("houdini:nodeTypeName");
+
+    return theToken;
+
+}
+
 const TfType &
 HUSDfindType(const UT_StringRef &type_name)
 {
