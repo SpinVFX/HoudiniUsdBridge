@@ -2395,19 +2395,26 @@ HUSD_Info::getXformFromOpOrder(const UT_StringRef &primpath,
         *time_sampling = HUSDgetWorldTransformTimeSampling(
                 husdGetPrimAtPath(myAnyLock, primpath));
 
-    UsdPrim prim(husdGetPrimAtPath(myAnyLock, primpath));
+    UsdGeomXformable prim(husdGetPrimAtPath(myAnyLock, primpath));
     if (!prim)
         return UT_Matrix4D::getIdentityMatrix();
 
+    UsdTimeCode tc = HUSDgetUsdTimeCode(time_code);
     GfMatrix4d xform{1.0};
-    UT_StringArray::const_reverse_iterator it = xformOpOrder.rbegin();
-    for (; it != xformOpOrder.rend(); ++it)
+    bool resets_xform_stack = false;
+    auto xformops = prim.GetOrderedXformOps(&resets_xform_stack);
+    for (auto it = xformOpOrder.rbegin(); it != xformOpOrder.rend(); it++)
     {
-        const UsdAttribute &xformAttr =
-                prim.GetAttribute(TfToken((*it).toStdString()));
-        VtValue xformVal;
-        xformAttr.Get(&xformVal, UsdTimeCode::EarliestTime());
-        xform *= xformVal.Get<GfMatrix4d>();
+        // Find the xformop that corresponds to the requested op name.
+        for (auto &&xformop : xformops)
+        {
+            if (*it == xformop.GetName().GetString())
+            {
+                // Apply the xformop to our accumulated xform.
+                xform *= xformop.GetOpTransform(tc);
+                break;
+            }
+        }
     }
     return GusdUT_Gf::Cast(xform);
 }
