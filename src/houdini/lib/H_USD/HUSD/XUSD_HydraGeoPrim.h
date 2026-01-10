@@ -320,6 +320,7 @@ protected:
     GT_DataArrayHandle	 myIndices;
     GT_Basis		 myBasis;
     bool		 myWrap;
+    bool                 myPinned;
 };
 
 /// Container for a hydra volume primitive.
