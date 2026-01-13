@@ -4682,6 +4682,7 @@ BRAY_HdUtil::updateObjectPrimvarProperties(BRAY::OptionSet &props,
                 VtValue	value = sd.Get(id, d.name);
                 changed |= setRenderVisibility(props, value);
                 defined.erase(BRAY_OBJ_VISIBILITY_MASK);
+                defined.erase(BRAY_OBJ_RENDER_MASK);
                 continue;
             }
             if (prop.first != BRAY_OBJECT_PROPERTY)
