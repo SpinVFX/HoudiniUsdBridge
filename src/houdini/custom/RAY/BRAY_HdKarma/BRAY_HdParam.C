@@ -713,7 +713,6 @@ BRAY_HdParam::processRasterProducts(const VtValue &value)
         delegateVarList vlist = var_it->second.Get<delegateVarList>();
         for (const auto &var : vlist)
         {
-            static constexpr UT_StringLit       theHoldouts("holdouts;");
             static constexpr UT_StringLit       theObjectName("__name");
             static constexpr UT_StringLit       theMaterialName("__materialname");
 
@@ -722,12 +721,10 @@ BRAY_HdParam::processRasterProducts(const VtValue &value)
             //UT_StringRef dataType = findString(var, UsdRenderTokens->dataType);
             if (!strcmp(sourceType, "primvar"))
             {
-                myGlobalPrimvars.insert(sourceName);
-                if (sourceName.startsWith(theHoldouts))
-                {
-                    myGlobalPrimvars.insert(
-                            UT_StringHolder(sourceName.c_str()+theHoldouts.length()));
-                }
+                // skip prefix if any
+                exint semi = sourceName.lastCharIndex(';');
+                myGlobalPrimvars.insert(sourceName.c_str() + semi + 1);
+
                 if (!myNeedCryptoName &&
                     sourceName.endsWith(theObjectName))
                 {
