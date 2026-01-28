@@ -1349,6 +1349,7 @@ XUSD_HydraGeoMesh::Sync(HdSceneDelegate *scene_delegate,
     // Available attributes
     if(!gt_prim || myAttribMap.size() == 0 ||
        (*dirty_bits & HdChangeTracker::DirtyPrimvar) ||
+       (*dirty_bits & HdChangeTracker::DirtyNormals) ||
        	HdChangeTracker::IsTopologyDirty(*dirty_bits, id))
     {
 	XUSD_HydraUtils::buildAttribMap(scene_delegate, id, myAttribMap);

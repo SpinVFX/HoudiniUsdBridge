@@ -30,6 +30,7 @@
 #include <pxr/pxr.h>
 #include <pxr/usd/usdGeom/tokens.h>
 #include <pxr/usd/sdf/path.h>
+#include <pxr/usd/sdf/pathTable.h>
 #include <pxr/base/tf/token.h>
 
 class GT_GEOPrimPacked;
@@ -255,11 +256,11 @@ public:
     using GEO_FileGprimArrayEntry = GEO_FileRefiner::GEO_FileGprimArrayEntry;
     using GEO_FileGprimArray = GEO_FileRefiner::GEO_FileGprimArray;
 
-    // Struct used to keep names unique
-    struct NameInfo {
-        size_t count;       // number of times name has been used.
-
-        NameInfo() : count(0) {}
+    /// Struct used to keep names unique
+    struct NameInfo
+    {
+        /// Tracks the numeric suffix that was last used.
+        exint myCount = 0;
     };
 
     ////////////////////////////////////////////////////////////////////////////
@@ -267,31 +268,33 @@ public:
     GEO_PathHandle add( 
         const SdfPath&              path,
         bool                        add_numeric_suffix,
-        GT_PrimitiveHandle          prim,
+        const GT_PrimitiveHandle   &prim,
         const UT_Matrix4D&          xform,
         GA_DataId                   topology_id,
         const TfToken &             purpose,
         const GEO_AgentShapeInfoPtr& agent_shape_info);
 
     // Complete any final work after refining all prims.
-    void finish( GEO_FileRefiner& refiner );
+    const GEO_FileGprimArray& finish(GEO_FileRefiner& refiner);
 
     /// Add an XUSD_LockedGeo for the geometry containing the volume / VDB, and
     /// determine a suitable file path identifier.
     void registerVolumeGeometry(const GT_Primitive &gt_volume);
 
-    ////////////////////////////////////////////////////////////////////////////
-
-    // The results of the refine
-    GEO_FileRefiner::GEO_FileGprimArray m_gprims;
-
-    // Map used to generate unique names for each prim
-    UT_Map<SdfPath, NameInfo> m_names;
-
 private:
     GEO_VolumeFileMap &myVolumeFilePaths;
     UT_Array<XUSD_LockedGeoPtr> &myUnpackedGeos;
     const std::string& myPrimaryFilePath;
+
+    /// The results of the refine
+    GEO_FileRefiner::GEO_FileGprimArray myGprims;
+
+    // Map used to generate unique names for each prim
+    UT_Map<SdfPath, NameInfo> myNameInfoMap;
+
+    /// Map used to efficiently update path handles when a name conflict causes
+    /// us to add a suffix to existing paths.
+    SdfPathTable<GEO_PathHandle> myPathHandleMap;
 };
 
 PXR_NAMESPACE_CLOSE_SCOPE

@@ -501,8 +501,7 @@ GEO_FileRefiner::refinePrim(
 const GEO_FileRefiner::GEO_FileGprimArray &
 GEO_FileRefiner::finish()
 {
-    m_collector.finish(*this);
-    return m_collector.m_gprims;
+    return m_collector.finish(*this);
 }
 
 /// Convert a prim's name into a prim path taking into account prefix and
@@ -1846,11 +1845,61 @@ GEO_FileRefiner::addPrimitive( const GT_PrimitiveHandle& gtPrimIn )
     }
 }
 
+/// Add a numeric suffix to the last component of the path.
+static SdfPath
+geoAddNumericSuffix(const SdfPath &path, exint count)
+{
+    UT_WorkBuffer buf;
+    buf.format("{0}_{1}", path.GetNameToken().GetString(), count);
+
+    return path.ReplaceName(TfToken(buf.toStdString()));
+}
+
+/// Replace a path with a new default suffix (e.g. /foo/bar -> /foo/bar_0).
+/// Returns the suffix value that was used (e.g. 2 for /foo/bar_2)
+static exint
+geoAddSuffixToExistingPath(
+        const SdfPath &path,
+        SdfPathTable<GEO_PathHandle> &path_map)
+{
+    SdfPath suffixed_path;
+    exint count = 0;
+
+    while (true)
+    {
+        // Check for conflicts in the rare case that there is already a prim
+        // inserted with the suffix we're trying to add.
+        suffixed_path = geoAddNumericSuffix(path, count);
+        if (path_map.find(suffixed_path) == path_map.end())
+            break;
+
+        ++count;
+    }
+
+    // Rename the keys in the path table, and then go through and update the
+    // handles to change any references to the paths.
+    path_map.UpdateForRename(path, suffixed_path);
+
+    auto range = path_map.FindSubtreeRange(suffixed_path);
+    for (auto it = range.first; it != range.second; ++it)
+    {
+        // Note SdfPathTable implicitly inserts ancestors, so skip over
+        // default values here.
+        if (!it->second)
+            continue;
+
+        UT_ASSERT(it->second->HasPrefix(path));
+        *it->second = it->second->ReplacePrefix(path, suffixed_path);
+    }
+
+    return count;
+}
+
 GEO_PathHandle
 GEO_FileRefinerCollector::add(
         const SdfPath &path,
-        bool add_numeric_suffix,
-        GT_PrimitiveHandle prim,
+        bool force_add_numeric_suffix,
+        const GT_PrimitiveHandle &prim,
         const UT_Matrix4D &xform,
         GA_DataId topology_id,
         const TfToken &purpose,
@@ -1858,60 +1907,58 @@ GEO_FileRefinerCollector::add(
 {
     UT_ASSERT(path.IsAbsolutePath());
 
-    // If addNumericSuffix is true, use the name directly unless there
-    // is a conflict. Otherwise add a numeric suffix to keep names unique.
-    size_t count = 0;
-    auto it = m_names.find( path );
-    if( it == m_names.end() ) {
-        // Name has not been used before
-        m_names[path] = NameInfo();
-        if( !add_numeric_suffix ) {
-            auto path_handle = UTmakeShared<SdfPath>(path);
-            m_gprims.emplace_back(
-                    path_handle, prim, xform, topology_id, purpose,
-                    agent_shape_info);
-            if (agent_shape_info)
-                agent_shape_info->myPrims.append(path_handle);
+    bool add_numeric_suffix = force_add_numeric_suffix;
+    exint count = 0;
 
-            return path_handle;
+    auto it = myNameInfoMap.find(path);
+    if (it != myNameInfoMap.end())
+    {
+        // Go back and add a suffix to the name of the first prim to use
+        // this name, since it wasn't explicitly added before.
+        if (it->second.myCount == 0 && !force_add_numeric_suffix)
+        {
+            it->second.myCount = geoAddSuffixToExistingPath(
+                    path, myPathHandleMap);
         }
+
+        add_numeric_suffix = true;
+        count = ++it->second.myCount;
     }
-    else {
-        if( !add_numeric_suffix && it->second.count == 0 ) {
-
-            for (GEO_FileGprimArrayEntry &entry : m_gprims) {
-                if( *entry.path == path ) {
-                    // We have a name conflict. Go back and change the 
-                    // name of the first prim to use this name.
-                    *entry.path = SdfPath( path.GetString() + "_0" );
-                }
-                else if( TfStringStartsWith(entry.path->GetString(),
-					    path.GetString()) ) {
-                    *entry.path = SdfPath(path.GetString() + "_0" +
-			entry.path->GetString().substr(
-			    path.GetString().length()));
-                }
-            }
-        }
-        ++it->second.count;
-        count = it->second.count;
+    else
+    {
+        myNameInfoMap[path] = NameInfo();
     }
 
-    // Add a numeric suffix to get a unique name
-    auto new_path =
-        UTmakeShared<SdfPath>(TfStringPrintf("%s_%zu", path.GetText(), count));
+    if (add_numeric_suffix)
+    {
+        // If we're adding a suffix, handle this by attempting to insert again
+        // with the new path. This deals with the rare case of having further
+        // conflicts at the suffixed path.
+        SdfPath new_path = geoAddNumericSuffix(path, count);
 
-    m_gprims.emplace_back(
-            new_path, prim, xform, topology_id, purpose, agent_shape_info);
+        return add(
+                new_path, /*force_add_numeric_suffix=*/false, prim, xform,
+                topology_id, purpose, agent_shape_info);
+    }
+
+    // Otherwise, we can directly insert at the new path.
+    GEO_PathHandle new_path_handle = UTmakeShared<SdfPath>(path);
+    myGprims.emplace_back(
+            new_path_handle, prim, xform, topology_id, purpose,
+            agent_shape_info);
+
     if (agent_shape_info)
-        agent_shape_info->myPrims.append(new_path);
+        agent_shape_info->myPrims.append(new_path_handle);
 
-    return new_path;
+    myPathHandleMap[path] = new_path_handle;
+
+    return new_path_handle;
 }
 
-void
-GEO_FileRefinerCollector::finish( GEO_FileRefiner& refiner )
+const GEO_FileRefiner::GEO_FileGprimArray &
+GEO_FileRefinerCollector::finish(GEO_FileRefiner &refiner)
 {
+    return myGprims;
 }
 
 void
