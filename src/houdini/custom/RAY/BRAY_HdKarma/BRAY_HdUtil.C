@@ -5180,17 +5180,24 @@ BRAY_HdUtil::createPointPrimFromVDB(
             }
         }
     }
-    UT_ASSERT(vdb_attribs->hasName(thePName.asHolder()));
-
-    // create attributes with motion segments
-    if (*props.bval(BRAY_OBJ_MOTION_BLUR))
+    if (vdb_attribs && vdb_attribs->entries())
     {
-        vdb_attribs = BRAY_HdUtil::velocityBlur(vdb_attribs,
-	    *props.ival(BRAY_OBJ_GEO_VELBLUR),
-	    *props.ival(BRAY_OBJ_GEO_SAMPLES),
-	    rparm);
-    }
+        UT_ASSERT(vdb_attribs->hasName(thePName.asHolder()));
 
+        // create attributes with motion segments
+        if (*props.bval(BRAY_OBJ_MOTION_BLUR))
+        {
+            vdb_attribs = BRAY_HdUtil::velocityBlur(vdb_attribs,
+	        *props.ival(BRAY_OBJ_GEO_VELBLUR),
+	        *props.ival(BRAY_OBJ_GEO_SAMPLES),
+	        rparm);
+        }
+    }
+    else
+    {
+        vdb_attribs = GT_AttributeList::createAttributeList(
+            thePName.asHolder(), new GT_DANumeric<fpreal32>(0, 3, GT_TYPE_POINT));
+    }
     //UT_ErrorLog::format(8, "converted vdb point to mesh in {}s", timer.lap());
 
     return UTmakeIntrusive<GT_PrimPointMesh>(vdb_attribs, vdbPrimavars);
