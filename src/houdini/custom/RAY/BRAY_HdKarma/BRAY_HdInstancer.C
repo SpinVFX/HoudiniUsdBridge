@@ -873,6 +873,7 @@ BRAY_HdInstancer::syncPrimvars(HdSceneDelegate* delegate,
         {
             UT_StackBuffer<float>       xtimes(mySegments);
             exint usegs = GetDelegate()->SampleInstancerTransform(GetId(),
+                    rparm.shutterOpen(), rparm.shutterClose(),
                     mySegments, xtimes.array(), myXforms.data());
             if (usegs < myXforms.size())
             {
@@ -886,6 +887,7 @@ BRAY_HdInstancer::syncPrimvars(HdSceneDelegate* delegate,
                 // USD has more samples, so we need to grow the arrays
                 myXforms.setSize(usegs);
                 usegs = GetDelegate()->SampleInstancerTransform(GetId(),
+                    rparm.shutterOpen(), rparm.shutterClose(),
                     myXforms.size(), big_xtimes.array(), myXforms.data());
                 UT_ASSERT(usegs == myXforms.size());
             }
