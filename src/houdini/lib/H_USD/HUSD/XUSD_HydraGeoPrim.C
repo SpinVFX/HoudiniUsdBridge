@@ -1511,6 +1511,12 @@ XUSD_HydraGeoMesh::Sync(HdSceneDelegate *scene_delegate,
 		    if(entry != myHydraPrim.scene().materials().end())
 		    {
 			auto &hmat = entry->second;
+                        if(!hmat->isValid())
+                        {
+                            // UTdebugPrint("Not a valid material",
+                            //              hmat->getMaterialID());
+                            continue;
+                        }
 			// ensure these attribs are present on the generated
 			// geometry.
 			for(auto &it : hmat->requiredUVs())
