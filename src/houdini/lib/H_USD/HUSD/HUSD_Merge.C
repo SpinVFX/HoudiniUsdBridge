@@ -245,6 +245,7 @@ HUSD_Merge::addLayer(const UT_StringRef &filepath,
             myPrivate->mySubLayers.append(
                 XUSD_LayerAtPath(layer, layer->GetIdentifier()));
             myPrivate->mySubLayerIds.insert(layer->GetIdentifier());
+            myPrivate->myHeldLayers.insert(layer);
 
             success = true;
         }
