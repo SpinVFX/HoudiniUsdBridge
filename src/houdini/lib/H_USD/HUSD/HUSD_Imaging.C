@@ -1851,23 +1851,25 @@ HUSD_Imaging::updateRenderData(const UT_Matrix4D &view_matrix,
     HUSD_AutoReadLock *lock = myReadLock.get();
     if (lock->data() && lock->data()->isStageValid())
     {
-        UT_Vector4D ut_viewport;
-
         // Update the FPS setting in the "render context" from the stage. This
         // may affect velocity motion blur.
         myRenderSettingsContext->setFPS(
             lock->constData()->stage()->GetTimeCodesPerSecond());
-        ut_viewport.assign(viewport_rect.x(),
-                           viewport_rect.y(),
-                           viewport_rect.w(),
-                           viewport_rect.h());
-
         // UTdebugPrint("\n\n\n\n********************\nSet Window",
         //              viewport_rect);
         // UTdebugPrint("View", view_matrix);
         // UTdebugPrint("Proj", proj_matrix);
-        GfVec4d gf_viewport = GusdUT_Gf::Cast(ut_viewport);
-
+        GfVec4d gf_viewport;
+        if (myRenderSettings)
+            gf_viewport = GfVec4d(0.0,
+                0.0,
+                myRenderSettings->xres(nullptr),
+                myRenderSettings->yres(nullptr));
+        else
+            gf_viewport = GfVec4d(viewport_rect.x(),
+                viewport_rect.y(),
+                viewport_rect.w(),
+                viewport_rect.h());
         engine->SetRenderViewport(gf_viewport);
 
         SdfPath campath;
