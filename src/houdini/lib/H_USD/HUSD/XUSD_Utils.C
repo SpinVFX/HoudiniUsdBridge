@@ -3312,11 +3312,10 @@ HUSDcreateStageInMemory(UsdStage::InitialLoadSet load,
         // Add dependency tracking in case the global or context-specific
         // @fps value changes.
         if (OP_Node *node = OP_Node::lookupNode(resolver_context_nodeid))
-        {
-            node->dataMicroNode().addContextOptionDep(theFpsOption.asRef());
-            node->dataMicroNode().addExplicitInput(CHgetManager()->
-                getDefaultContextOptionMicroNode(theFpsOption.asRef()));
-        }
+            CHgetManager()->addContextOptionDependency(theFpsOption.asRef(),
+                CHgetManager()->shouldSetGlobalContextOptionDependency(
+                    theFpsOption.asRef(), options),
+                node->dataMicroNode());
     }
 
     return stage;
