@@ -1314,6 +1314,7 @@ _ClipFixActiveDataFromPathMap(const SdfLayerRefPtr &layer,
 bool
 _StitchLayersRecursive(const SdfLayerRefPtr &src,
 	const SdfLayerRefPtr &dest,
+        const std::set<std::string> *strip_sublayer_identifiers,
         XUSD_IdentifierToReferenceInfoMap &destreferenceinfomap,
 	XUSD_IdentifierToSavePathMap &stitchedpathmap,
 	std::set<std::string> &newdestlayers,
@@ -1323,7 +1324,14 @@ _StitchLayersRecursive(const SdfLayerRefPtr &src,
         bool set_layer_override_save_paths,
         HUSD_PathSet *varying_default_paths)
 {
-    bool		 success = true;
+    auto    should_ignore_layer_fn = [&](std::string layerpath)
+            {
+                return (strip_sublayer_identifiers &&
+                        strip_sublayer_identifiers->find(layerpath) !=
+                            strip_sublayer_identifiers->end()) ||
+                       HUSDisLayerPlaceholder(layerpath);
+            };
+    bool    success = true;
 
     // Make sure we haven't already processed this layer, which we may have
     // done if the same layer is referenced from within several other layers.
@@ -1336,6 +1344,19 @@ _StitchLayersRecursive(const SdfLayerRefPtr &src,
 
     // Stitch the source layer into the destination layer.
     HUSDstitchLayers(dest, src, varying_default_paths);
+    // If we have been asked to strip out certain sublayers, do so now.
+    // This will catch all the sublayers blindly copied over when an empty
+    // dest layer is first populated from the source layer.
+    if (strip_sublayer_identifiers)
+    {
+        auto sublayer_identifiers = dest->GetSubLayerPaths();
+        for (int i = sublayer_identifiers.size(); i --> 0; )
+        {
+            if (strip_sublayer_identifiers->find(sublayer_identifiers[i]) !=
+                strip_sublayer_identifiers->end())
+                dest->RemoveSubLayerPath(i);
+        }
+    }
     stitchedpathmap.emplace(src->GetIdentifier(),
 	XUSD_SavePathInfo(dest->GetIdentifier()));
 
@@ -1354,10 +1375,11 @@ _StitchLayersRecursive(const SdfLayerRefPtr &src,
 	    break;
 	}
 
-        // If we are handed a placeholder layer, create an entry in the
-        // path update map to remove this identifier from the dest layer.
-        // We don't want placeholders showing up in our stitched result.
-        if (HUSDisLayerPlaceholder(srclayer))
+        // If we are handed a placeholder layer, or there is a src layer we
+        // have been asked to strip out, create an entry in the path update
+        // map to remove this identifier from the dest layer. We don't
+        // want these layers showing up in our stitched result.
+        if (should_ignore_layer_fn(srclayer->GetIdentifier()))
         {
             stitchedpathmap.emplace(srclayer->GetIdentifier(),
                 XUSD_SavePathInfo());
@@ -1472,7 +1494,10 @@ _StitchLayersRecursive(const SdfLayerRefPtr &src,
         // Use the recursive stitch code so that every layer to save in the
         // hierarchy is copied to a new layer that can safely be used to
         // combine multiple time samples.
-        _StitchLayersRecursive(srclayer, destlayer,
+        // Note that we always pass nullptr for strip_sublayer_identifiers,
+        // because we only need to strip layers that are direct sublayers
+        // of the root layer.
+        _StitchLayersRecursive(srclayer, destlayer, nullptr,
             destreferenceinfomap, stitchedpathmap,
             newdestlayers, currentsamplesavelocations,
             save_locations_case_sensitive,
@@ -1538,8 +1563,9 @@ _StitchLayersRecursive(const SdfLayerRefPtr &src,
         std::string      srcsubpath = srcsubpaths[i];
         SdfLayerOffset   srcoffset = src->GetSubLayerOffset(i);
 
-	// Don't stitch together anonymous placeholder layers.
-        if (HUSDisLayerPlaceholder(srcsubpath))
+	// Don't stitch together anonymous placeholder layers or layers from
+	// the source that we have been asked to strip out.
+        if (should_ignore_layer_fn(srcsubpath))
             continue;
 
 	auto		 destpathit = stitchedpathmap.find(srcsubpath);
@@ -3164,6 +3190,7 @@ bool
 HUSDaddStageTimeSample(const UsdStageWeakPtr &src,
 	const UsdStageRefPtr &dest,
         const UsdTimeCode &timecode,
+        const std::set<std::string> *strip_sublayer_identifiers,
 	XUSD_LayerSet &held_layers,
         bool force_notifiable_file_format,
         bool set_layer_override_save_paths,
@@ -3197,13 +3224,20 @@ HUSDaddStageTimeSample(const UsdStageWeakPtr &src,
 
     if (existence_tracker)
         existence_tracker->collectNewStageData(src);
-    success = _StitchLayersRecursive(srclayer, destlayer,
-        destreferenceinfomap, stitchedpathmap,
-        newdestlayers, currentsamplesavelocations,
-        UT_EnvControl::getInt(ENV_HOUDINI_CASE_SENSITIVE_FS) != 0,
-        force_notifiable_file_format,
-        set_layer_override_save_paths,
-        varying_default_paths);
+    {
+        // Make sure all the work we do stitching together all the various
+        // layers doesn't cause any recomposition of the destination stage
+        // until all the changes are finished.
+        SdfChangeBlock changeblock;
+        success = _StitchLayersRecursive(srclayer, destlayer,
+            strip_sublayer_identifiers,
+            destreferenceinfomap, stitchedpathmap,
+            newdestlayers, currentsamplesavelocations,
+            UT_EnvControl::getInt(ENV_HOUDINI_CASE_SENSITIVE_FS) != 0,
+            force_notifiable_file_format,
+            set_layer_override_save_paths,
+            varying_default_paths);
+    }
     if (existence_tracker)
         existence_tracker->authorVisibility(dest, timecode);
 

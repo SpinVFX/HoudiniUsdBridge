@@ -2079,18 +2079,38 @@ XUSD_Data::getOrCreateStageForFlattening(
 }
 
 std::set<std::string>
-XUSD_Data::getStageLayersToRemoveFromLayerBreak() const
+XUSD_Data::getStageLayersToRemoveFromLayerBreak(LayerPathFormat format) const
 {
     std::set<std::string>	 identifiers;
 
     UT_ASSERT(myMirroring == HUSD_NOT_FOR_MIRRORING);
     if (myDataLock && myDataLock->isLocked())
     {
+        auto sublayerpaths = stage()->GetRootLayer()->GetSubLayerPaths();
+        int nsublayerpaths = sublayerpaths.size();
+        // The stage may have more layers than mySourceLayers, because of
+        // placeholders, but it must never have less or something has gone
+        // very wrong.
+        UT_ASSERT(mySourceLayers.size() <= sublayerpaths.size());
+        UT_ASSERT(mySourceLayers.size() <= myStageLayers->size());
 	for (int i = 0, n = mySourceLayers.size(); i < n; i++)
 	{
 	    if (mySourceLayers(i).myRemoveWithLayerBreak)
 	    {
-		identifiers.insert((*myStageLayers)(i)->GetIdentifier());
+	        if (format == LayerPathFormat::LayerIdentifier)
+	        {
+	            // Get the canonical identifier of the layer on the stage.
+	            identifiers.insert((*myStageLayers)(i)->GetIdentifier());
+	        }
+	        else if (format == LayerPathFormat::SubLayerPath)
+	        {
+	            // Get the corresponding entry from the "SubLayerPaths"
+	            // field on the root layer. This may not be in canonical
+	            // form. Also, mySourceLayers (weakest to strongest) is
+	            // in the reverse order from SubLayerPaths (strongest to
+	            // weakest).
+	            identifiers.insert(sublayerpaths[nsublayerpaths - 1 - i]);
+	        }
 	    }
 	}
     }
