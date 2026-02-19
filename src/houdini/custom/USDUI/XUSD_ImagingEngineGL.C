@@ -329,11 +329,11 @@ XUSD_ImagingEngineGL::_PrepareBatch(
     HD_TRACE_FUNCTION();
 
     if (_CanPrepare(root)) {
-        populateScene(root, params.enableUsdDrawModes);
-
         _PreSetTime(params);
         setTime(params.frame.GetValue());
         _PostSetTime(params);
+
+        populateScene(root, params.enableUsdDrawModes);
     }
 }
 

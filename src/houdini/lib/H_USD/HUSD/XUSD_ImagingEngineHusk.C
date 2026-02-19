@@ -308,12 +308,12 @@ XUSD_ImagingEngineHusk::prepareBatch(const UsdPrim &root, fpreal frame)
 
     if (_CanPrepare(root))
     {
-        populateScene(root, ENABLE_DRAW_MODES);
-
         preSetTime(root);
         // SetTime will only react if time actually changes.
         setTime(frame);
         postSetTime(root);
+
+        populateScene(root, ENABLE_DRAW_MODES);
     }
 }
 

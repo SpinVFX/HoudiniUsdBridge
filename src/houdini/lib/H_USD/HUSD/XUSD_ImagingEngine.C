@@ -593,9 +593,17 @@ XUSD_ImagingEngine::setCameraForSampling(SdfPath const &id)
     // The camera that is set for viewing will also be used for
     // time sampling.
     // XXX(HYD-2304): motion blur shutter window.
-    if (!_useSceneIndices && _sceneDelegate) {
-        _sceneDelegate->SetCameraForSampling(id);
+    if (_useSceneIndices)
+    {
+        // Set camera path on HdsiSceneGlobalsSceneIndex.
+        if (_appSceneIndices)
+        {
+            if (auto &sgsi = _appSceneIndices->sceneGlobalsSceneIndex)
+                sgsi->SetPrimaryCameraPrimPath(id);
+        }
     }
+    else if (_sceneDelegate)
+        _sceneDelegate->SetCameraForSampling(id);
 }
 
 HdPluginRenderDelegateUniqueHandle
