@@ -277,6 +277,53 @@ HUSDimportSkinnedGeometry(GU_Detail &gdp, HUSD_AutoReadLock &readlock,
     return true;
 }
 
+/// Build the list of blendshape channels.
+/// This is the combination of blendshape channels defined on the SkelAnimation,
+/// as well as blendshapes defined on any skinned prims. The SkelAnimation might
+/// not have animation defined for all available blendshapes, or might have
+/// extra channels that we don't want to lose animation for.
+static UT_StringArray
+husdGetBlendShapeChannels(
+        const UsdSkelAnimQuery &animquery,
+        const VtArray<UsdSkelSkinningQuery> &skinning_targets)
+{
+    UT_StringSet unique_channels;
+
+    if (animquery.IsValid())
+    {
+        for (const TfToken &channel_name : animquery.GetBlendShapeOrder())
+        {
+            unique_channels.insert(
+                    GusdUSD_Utils::TokenToStringHolder(channel_name));
+        }
+    }
+
+    for (const UsdSkelSkinningQuery &target : skinning_targets)
+    {
+        if (!target.HasBlendShapes())
+            continue;
+
+        VtTokenArray blend_shapes;
+        if (!target.GetBlendShapeOrder(&blend_shapes))
+            continue;
+
+        for (const TfToken &channel_name : blend_shapes)
+        {
+            unique_channels.insert(
+                    GusdUSD_Utils::TokenToStringHolder(channel_name));
+        }
+    }
+
+    // Sort to avoid depending on UT_StringSet's arbitrary ordering.
+    UT_StringArray channel_names(unique_channels.size());
+    for (const UT_StringHolder &channel_name : unique_channels)
+        channel_names.append(channel_name);
+
+    channel_names.sort();
+
+    return channel_names;
+}
+
 bool
 HUSDimportSkeleton(
         GU_Detail &gdp,
@@ -330,13 +377,13 @@ HUSDimportSkeleton(
 
         // Add attributes for blendshape channels (unless we're just generating
         // the bind pose).
-        const UsdSkelAnimQuery &animquery = skelquery.GetAnimQuery();
-        if (pose_type != HUSD_SkeletonPoseType::BindPose && animquery.IsValid())
+        if (pose_type != HUSD_SkeletonPoseType::BindPose)
         {
-            for (const TfToken &channel_token : animquery.GetBlendShapeOrder())
+            UT_StringArray channel_names = husdGetBlendShapeChannels(
+                    skelquery.GetAnimQuery(), binding.GetSkinningTargets());
+
+            for (const UT_StringHolder &channel_name : channel_names)
             {
-                UT_StringHolder channel_name
-                        = GusdUSD_Utils::TokenToStringHolder(channel_token);
                 UT_StringHolder attrib_name
                         = channel_name.forceValidVariableName();
 
@@ -392,6 +439,7 @@ HUSDimportSkeleton(
         // Record the SkelAnimation prim's path for round-tripping.
         if (pose_type == HUSD_SkeletonPoseType::Animation)
         {
+            const UsdSkelAnimQuery &animquery = skelquery.GetAnimQuery();
             if (animquery.IsValid())
             {
                 const UT_StringHolder animpath
@@ -608,6 +656,16 @@ HUSDimportAgentRig(HUSD_AutoReadLock &readlock,
     if (!husdFindSkelBindings(readlock, skelrootpath, skelcache, bindings))
         return nullptr;
 
+    if (bindings.size() > 1)
+    {
+        UT_WorkBuffer msg;
+        msg.format(
+                "'{0}' contains multiple skeleton bindings. Using '{1}'",
+                skelrootpath,
+                bindings[0].GetSkeleton().GetPath().GetAsString());
+        HUSD_ErrorScope::addWarning(HUSD_ERR_STRING, msg.buffer());
+    }
+
     const UsdSkelBinding &binding = bindings[0];
 
     const UsdSkelSkeleton &skel = binding.GetSkeleton();
@@ -618,15 +676,11 @@ HUSDimportAgentRig(HUSD_AutoReadLock &readlock,
         return nullptr;
 
     // Add blendshape channels to the rig.
-    const UsdSkelAnimQuery &animquery = skelquery.GetAnimQuery();
-    if (animquery.IsValid())
-    {
-        for (const TfToken &channel_name : animquery.GetBlendShapeOrder())
-        {
-            rig->addChannel(
-                GusdUSD_Utils::TokenToStringHolder(channel_name), 0.0, -1);
-        }
-    }
+    UT_StringArray channels = husdGetBlendShapeChannels(
+            skelquery.GetAnimQuery(), binding.GetSkinningTargets());
+
+    for (const UT_StringHolder &channel_name : channels)
+        rig->addChannel(channel_name, 0.0, -1);
 
     return rig;
 }

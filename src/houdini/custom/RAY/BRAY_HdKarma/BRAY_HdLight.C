@@ -683,7 +683,7 @@ BRAY_HdLight::Sync(HdSceneDelegate *sd,
     }
 
     lprops = myLight.lightProperties();
-    if (bits & DirtyParams)
+    if ((bits & DirtyParams) || (bits & DirtyResource))
     {
         HdMaterialNetwork       matnet;
         VtValue                 matval = sd->GetMaterialResource(id);
