@@ -1717,9 +1717,26 @@ HUSD_Save::addCombinedTimeSample(const HUSD_AutoReadLock &lock,
         // Set the force_notifiable_file_format parameter to false because
         // here we are writing these files to disk, so we don't need
         // accurate fine grained notifications to generate correct output.
-	success = HUSDaddStageTimeSample(indata->stage(), myPrivate->myStage,
-            HUSDgetUsdTimeCode(timecode), myPrivate->myHeldLayers, false, true,
-            trackPrimExistence() ? &myPrivate->myExistenceTracker : nullptr);
+        if (stripLayersAboveLayerBreaks())
+        {
+            std::set<std::string> strip_sublayer_identifiers =
+                indata->getStageLayersToRemoveFromLayerBreak(
+                    XUSD_Data::LayerPathFormat::SubLayerPath);
+            success = HUSDaddStageTimeSample(indata->stage(),
+                myPrivate->myStage,
+                HUSDgetUsdTimeCode(timecode),
+                &strip_sublayer_identifiers,
+                myPrivate->myHeldLayers, false, true,
+                trackPrimExistence() ? &myPrivate->myExistenceTracker : nullptr);
+        }
+        else
+        {
+            success = HUSDaddStageTimeSample(indata->stage(),
+                myPrivate->myStage,
+                HUSDgetUsdTimeCode(timecode), nullptr,
+                myPrivate->myHeldLayers, false, true,
+                trackPrimExistence() ? &myPrivate->myExistenceTracker : nullptr);
+        }
 	myPrivate->myLockedGeos.insert(indata->lockedGeos().begin(),
             indata->lockedGeos().end());
 	myPrivate->myReplacementLayers.insert(indata->replacements().begin(),

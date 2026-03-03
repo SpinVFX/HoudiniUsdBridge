@@ -76,7 +76,8 @@ HUSD_Stitch::addHandle(const HUSD_DataHandle &src,
         // accurate fine-grained notifications to author the combined stage
         // correctly.
 	HUSDaddStageTimeSample(indata->stage(), myPrivate->myStage,
-            HUSDgetUsdTimeCode(timecode), myPrivate->myHeldLayers, true, false,
+            HUSDgetUsdTimeCode(timecode), nullptr,
+            myPrivate->myHeldLayers, true, false,
             trackPrimExistence() ? &myPrivate->myExistenceTracker : nullptr,
             &myPrivate->myVaryingDefaultPaths);
 	// Hold onto lockedgeos to keep in memory any cooked OP data referenced

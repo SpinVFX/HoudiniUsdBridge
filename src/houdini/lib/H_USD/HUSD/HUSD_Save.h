@@ -114,6 +114,7 @@ public:
                                myEnsureMetricsSet(false),
                                myTrackPrimExistence(false),
                                myMuteLayersBeforeSave(false),
+                               myStripLayersAboveLayerBreaks(false),
                                myTimeSamplesRange(SYS_FP64_MAX, -SYS_FP64_MAX), // initially "invalid"
                                myTimeSamplesRangePadding(0)
                          { }
@@ -127,7 +128,8 @@ public:
     bool                 myEnsureMetricsSet;
     bool                 myTrackPrimExistence;
     bool                 myMuteLayersBeforeSave;
-    UT_IntervalD         myTimeSamplesRange;  
+    bool                 myStripLayersAboveLayerBreaks;
+    UT_IntervalD         myTimeSamplesRange;
     fpreal64             myTimeSamplesRangePadding;  
 };
 
@@ -210,6 +212,11 @@ public:
     void		 setMuteLayersBeforeSave(bool mute_layers)
                          { myFlags.myMuteLayersBeforeSave = mute_layers; }
                          
+    bool		 stripLayersAboveLayerBreaks() const
+                         { return myFlags.myStripLayersAboveLayerBreaks; }
+    void		 setStripLayersAboveLayerBreaks(bool strip_layers)
+                         { myFlags.myStripLayersAboveLayerBreaks = strip_layers; }
+
     const UT_IntervalD   &timeSamplesRange() const
                          { return myFlags.myTimeSamplesRange; }
     void                 setTimeSamplesRange(const UT_IntervalD &range)

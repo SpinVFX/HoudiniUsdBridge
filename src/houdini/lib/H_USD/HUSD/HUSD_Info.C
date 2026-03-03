@@ -957,7 +957,8 @@ HUSD_Info::getLayersAboveLayerBreak(UT_StringArray &identifiers) const
         std::set<std::string> stdidentifiers;
 
         stdidentifiers = myAnyLock.constData()->
-            getStageLayersToRemoveFromLayerBreak();
+            getStageLayersToRemoveFromLayerBreak(
+                XUSD_Data::LayerPathFormat::LayerIdentifier);
         for (auto &&identifier : stdidentifiers)
             identifiers.append(identifier);
         success = true;

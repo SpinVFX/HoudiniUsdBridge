@@ -166,7 +166,13 @@ public:
     bool                         activeLayerIsReusable() const;
     // Return the on-stage identifiers of any layers that are marked in the
     // source layers array to be removed due to a layer break.
-    std::set<std::string>	 getStageLayersToRemoveFromLayerBreak() const;
+    enum class LayerPathFormat
+    {
+        LayerIdentifier,
+        SubLayerPath
+    };
+    std::set<std::string>	 getStageLayersToRemoveFromLayerBreak(
+                                        LayerPathFormat format) const;
     // Creates a layer by flattening all our source layers together. Also
     // strips out any layers tagged by a Layer Break LOP.
     SdfLayerRefPtr		 createFlattenedLayer(

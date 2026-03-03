@@ -423,6 +423,7 @@ HUSD_API bool
 HUSDaddStageTimeSample(const UsdStageWeakPtr &src,
 	const UsdStageRefPtr &dest,
         const UsdTimeCode &timecode,
+        const std::set<std::string> *strip_sublayer_identifiers,
 	XUSD_LayerSet &held_layers,
         bool force_notifiable_file_format,
         bool set_layer_override_save_paths,
