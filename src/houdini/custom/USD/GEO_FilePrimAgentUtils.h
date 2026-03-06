@@ -199,13 +199,17 @@ class GT_PrimAgentDefinition : public GT_Primitive
 public:
     GT_PrimAgentDefinition(
         const GU_AgentDefinitionConstPtr &defn,
-        const SdfPath &path,
         const UT_Array<GT_PrimSkeletonPtr> &skeletons,
         const UT_Map<exint, exint> &shape_to_skel,
         const GT_AttributeListHandle &attribs);
 
     const GU_AgentDefinition &getDefinition() const { return *myDefinition; }
-    const SdfPath &getPath() const { return myPath; }
+
+    /// @{
+    /// The path to the root USD prim for the agent definition.
+    const GEO_PathHandle &getPath() const { return myPath; }
+    void setPath(const GEO_PathHandle &path) { myPath = path; }
+    /// @}
 
     /// The USD skeletons used by the agent definition.
     const UT_Array<GT_PrimSkeletonPtr> &getSkeletons() const
@@ -262,7 +266,7 @@ public:
 
 private:
     GU_AgentDefinitionConstPtr myDefinition;
-    SdfPath myPath;
+    GEO_PathHandle myPath;
     UT_Array<GT_PrimSkeletonPtr> mySkeletons;
     UT_Map<exint, exint> myShapeToSkel;
     UT_Map<exint, GEO_AgentShapeInfoPtr> myShapeInfos;

@@ -5068,7 +5068,7 @@ GEOinitGTPrim(GEO_FilePrim &fileprim,
             layer_instance.setInitialized();
 
             const SdfPath &defn_path
-                    = agent_instance->getDefinitionPrim()->getPath();
+                    = *agent_instance->getDefinitionPrim()->getPath();
             SdfPath layer_prototype_root
                     = defn_path.AppendChild(GEO_AgentPrimTokens->layers);
 
@@ -5111,8 +5111,8 @@ GEOinitGTPrim(GEO_FilePrim &fileprim,
             skel_instance.setInitialized();
 
             SdfPath skel_ref_path =
-                agent_instance->getDefinitionPrim()->getPath()
-                    .AppendChild(GEO_AgentPrimTokens->skeleton);
+                agent_instance->getDefinitionPrim()->getPath()->
+                    AppendChild(GEO_AgentPrimTokens->skeleton);
             // Currently Hydra isn't able to draw instanced skeletons, so don't
             // turn on instancing here.
             GEOinitInternalReference(

@@ -1310,34 +1310,32 @@ GEO_FileRefiner::addPrimitive( const GT_PrimitiveHandle& gtPrimIn )
                         *defn, geoBuildAgentRestPose(*agent), import_shapes,
                         skeletons, shape_to_skeleton);
 
-                // Add the agent definition primitive with an explicitly chosen
-                // path.
                 defn_prim = UTmakeIntrusive<GT_PrimAgentDefinition>(
-                        defn, m_pathPrefix.AppendPath(definition_path),
-                        skeletons, shape_to_skeleton, detail_attribs);
+                        defn, skeletons, shape_to_skeleton, detail_attribs);
 
                 if (import_skels)
                 {
+                    defn_prim->setPath(m_collector.add(
+                            m_pathPrefix.AppendPath(definition_path),
+                            /*add_numeric_suffix=*/false, defn_prim,
+                            UT_Matrix4D::getIdentityMatrix(), m_topologyId,
+                            purpose, m_agentShapeInfo));
+
                     TfToken skel_purpose = geoGetSkeletonPurpose(
                             purpose, *agent_instance, import_shapes);
 
                     for (GT_PrimSkeletonPtr &skel_prim : skeletons)
                     {
-                        SdfPath skel_path = definition_path.AppendChild(
+                        SdfPath skel_path = defn_prim->getPath()->AppendChild(
                                 GEO_AgentPrimTokens->skeleton);
 
                         GEO_PathHandle path = m_collector.add(
-                                m_pathPrefix.AppendPath(skel_path),
+                                skel_path,
                                 /* addNumericSuffix */ false, skel_prim,
                                 UT_Matrix4D::getIdentityMatrix(), m_topologyId,
                                 skel_purpose, m_agentShapeInfo);
                         skel_prim->setPath(path);
                     }
-
-                    SdfPath prev_override_path = m_overridePath;
-                    m_overridePath = definition_path;
-                    addPrimitive(defn_prim);
-                    m_overridePath = prev_override_path;
                 }
 
                 const GU_AgentShapeLibConstPtr &shapelib = defn->shapeLibrary();
@@ -1345,7 +1343,7 @@ GEO_FileRefiner::addPrimitive( const GT_PrimitiveHandle& gtPrimIn )
                 {
                     // Add each of shapes as prims nested inside the agent
                     // definition.
-                    SdfPath shapelib_path = definition_path.AppendChild(
+                    SdfPath shapelib_path = defn_prim->getPath()->AppendChild(
                             GEO_AgentPrimTokens->shapelibrary);
 
                     UT_Array<GEO_AgentShapeInfoPtr> shapes_to_import;
@@ -1363,8 +1361,7 @@ GEO_FileRefiner::addPrimitive( const GT_PrimitiveHandle& gtPrimIn )
                     }
 
                     refineAgentShapes(
-                            gtPrim, m_pathPrefix.AppendPath(shapelib_path),
-                            *defn, shapes_to_import);
+                            gtPrim, shapelib_path, *defn, shapes_to_import);
                 }
 
                 // Record the prim for this agent definition.

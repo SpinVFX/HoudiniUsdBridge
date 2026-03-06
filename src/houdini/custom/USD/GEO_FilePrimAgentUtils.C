@@ -345,12 +345,10 @@ GEObuildUsdSkeletons(const GU_AgentDefinition &defn,
 
 GT_PrimAgentDefinition::GT_PrimAgentDefinition(
         const GU_AgentDefinitionConstPtr &defn,
-        const SdfPath &path,
         const UT_Array<GT_PrimSkeletonPtr> &skeletons,
         const UT_Map<exint, exint> &shape_to_skel,
         const GT_AttributeListHandle &attribs)
     : myDefinition(defn)
-    , myPath(path)
     , mySkeletons(skeletons)
     , myShapeToSkel(shape_to_skel)
     , myAttributeList(attribs)
