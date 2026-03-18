@@ -919,7 +919,7 @@ husdGetRenderMask(const OP_Node &node)
 {
     const VOP_Node *vop_node = CAST_VOPNODE(&node);
     UT_ASSERT( vop_node );
-    
+
     UT_StringHolder render_mask;
     if( vop_node )
 	render_mask = vop_node->getRenderMask();
@@ -927,9 +927,15 @@ husdGetRenderMask(const OP_Node &node)
 	return render_mask;
 
     // See if it is a code building-block VOP that need Mantra auto-wrapper.
+    // Only VEX building-blocks need the VMantra auto-wrapper.
+    // Non-VEX languages (MaterialX, OSL) should use the default translator
+    // even if translatesDirectlyToUSD() returns false.
     static constexpr UT_StringLit theVexRenderMask("VMantra");
     if( vop_node && !vop_node->translatesDirectlyToUSD() )
-	return theVexRenderMask.asHolder();
+    {
+        if( vop_node->getLanguage()->getLanguageType() == VOP_LANGUAGE_VEX )
+            return theVexRenderMask.asHolder();
+    }
 
     // Else use the default render mask, which will match default translator.
     static UT_StringHolder theDefaultRenderMask("default");
