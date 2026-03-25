@@ -87,6 +87,18 @@ namespace
 	    return GT_BASIS_LINEAR;
 	}
     }
+
+    static bool
+    isPinned(const HdBasisCurvesTopology &top)
+    {
+        if (top.GetCurveWrap() != HdTokens->pinned
+                || top.GetCurveType() != HdTokens->cubic)
+        {
+            return false;
+        }
+        return top.GetCurveBasis() == HdTokens->bSpline
+            || top.GetCurveBasis() == HdTokens->catmullRom;
+    }
 }
 
 BRAY_HdCurves::BRAY_HdCurves(SdfPath const &id)
@@ -266,15 +278,14 @@ BRAY_HdCurves::Sync(HdSceneDelegate *sceneDelegate,
 
 	    curveBasis = usdCurveTypeToGt(top);
 	    counts = BRAY_HdUtil::gtArray(top.GetCurveVertexCounts());
-	    TfToken	wrapToken = top.GetCurveWrap();
-	    if (wrapToken == UsdGeomTokens->pinned)
+	    if (isPinned(top))
 	    {
 		wrap = false;
 		need_pin = true;
 	    }
 	    else
 	    {
-		wrap = (wrapToken == UsdGeomTokens->periodic);
+		wrap = (top.GetCurveWrap() == HdTokens->periodic);
 	    }
             UT_ErrorLog::format(8,
                     "{} topology change {} curves {} vertices wrap:{} pin:{}",
@@ -372,7 +383,7 @@ BRAY_HdCurves::Sync(HdSceneDelegate *sceneDelegate,
 	auto pmesh = UTverify_cast<const GT_PrimCurveMesh *>(prim.get());
 
         // Unpin the curves before updating.
-        if (top.GetCurveWrap() == UsdGeomTokens->pinned)
+        if (isPinned(top))
         {
             prim = pmesh->unpinCurves();
             pmesh = UTverify_cast<const GT_PrimCurveMesh *>(prim.get());
