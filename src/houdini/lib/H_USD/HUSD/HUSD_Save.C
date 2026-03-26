@@ -63,6 +63,7 @@
 #include <pxr/usd/sdf/primSpec.h>
 #include <pxr/usd/sdf/variableExpression.h>
 #include <pxr/usd/ar/resolver.h>
+#include <pxr/usd/ar/resolverContextBinder.h>
 #include <cctype>
 #include <utility>
 
@@ -549,8 +550,6 @@ saveVolumeGeo(const SdfPrimSpecHandle &primspec,
         if (it == saved_geo_map.end())
         {
             UT_String origpath;
-            UT_String newdir;
-            UT_String newfile;
 
             if (volumesavepath.empty())
             {
@@ -576,19 +575,14 @@ saveVolumeGeo(const SdfPrimSpecHandle &primspec,
             if (error.isstring())
                 return { SdfAssetPath(), 0 };
 
-            // Create the directory for holding the processed file path.
-            newpath.splitPath(newdir, newfile);
-            if (newdir.isstring() && UT_FileUtil::makeDirs(newdir))
-            {
-                // Record information for updating the volume file name
-                // and saving out the volume data to a file later.
-                newrefaspath = runOutputProcessors(output_processors,
-                    newpath, layer_save_path, false, false, error);
-                if (error.isstring())
-                    return { SdfAssetPath(), 0 };
-                saved_geo_map[geo_map_key] = newpath;
-                saved_geo_map[newpath.toStdString()] = newrefaspath;
-            }
+            // Record information for updating the volume filePath attribute
+            // and saving out the volume data to a file later.
+            newrefaspath = runOutputProcessors(output_processors,
+                newpath, layer_save_path, false, false, error);
+            if (error.isstring())
+                return { SdfAssetPath(), 0 };
+            saved_geo_map[geo_map_key] = newpath;
+            saved_geo_map[newpath.toStdString()] = newrefaspath;
         }
         else
         {
@@ -611,10 +605,31 @@ saveVolumeGeo(const SdfPrimSpecHandle &primspec,
 
                 if (gdp)
                 {
-                    husd_VolumeSavePrim saveprim = saveVolumesWithSavePath(
-                        gdp, is_vdb, oldpath, volumename, volumeindex,
-                        newpath.c_str(), volume_save_map);
-                    newindex = saveprim.myVolumeIndex;
+                    // Before writing the VDB file to disk, resolve the path
+                    // to maximize the chance we'll have a real path to a file
+                    // on disk that the VDB writing code will understand.
+                    ArResolvedPath resolved_path = ArGetResolver().
+                        ResolveForNewAsset(newpath.toStdString());
+                    UT_String diskpath = newpath.c_str();
+                    UT_String diskdir, diskfile;
+                    if (!resolved_path.IsEmpty())
+                    {
+                        diskpath = resolved_path.GetPathString();
+                        // Windows resolver returns paths with backslashes. Our
+                        // file path handling code doesn't like that.
+                        diskpath.substitute('\\', '/');
+                    }
+
+                    // Create the directory for holding the processed file path.
+                    diskpath.splitPath(diskdir, diskfile);
+                    if (diskdir.isstring() && UT_FileUtil::makeDirs(diskdir))
+                    {
+                        // Write the volume to disk.
+                        husd_VolumeSavePrim saveprim = saveVolumesWithSavePath(
+                            gdp, is_vdb, oldpath, volumename, volumeindex,
+                            diskpath, volume_save_map);
+                        newindex = saveprim.myVolumeIndex;
+                    }
                 }
             }
         }
@@ -668,8 +683,6 @@ saveImage(const SdfPrimSpecHandle &primspec,
     UT_StringHolder	 newrefaspath;
     UT_WorkBuffer        basepath;
     UT_String            newpath;
-    UT_String            newdir;
-    UT_String            newfile;
     bool                 user_supplied_path = false;
 
     if (layerattributes->hasOption("savepath") &&
@@ -754,11 +767,26 @@ saveImage(const SdfPrimSpecHandle &primspec,
             newpath, UT_StringHolder::theEmptyString, error))
         return SdfAssetPath();
 
-    // Create the directory for holding the processed file path.
-    newpath.splitPath(newdir, newfile);
-    if (newdir.isstring() && UT_FileUtil::makeDirs(newdir))
+    // Before writing the VDB file to disk, resolve the path
+    // to maximize the chance we'll have a real path to a file
+    // on disk that the VDB writing code will understand.
+    ArResolvedPath resolved_path = ArGetResolver().
+        ResolveForNewAsset(newpath.toStdString());
+    UT_String diskpath = newpath.c_str();
+    UT_String diskdir, diskfile;
+    if (!resolved_path.IsEmpty())
     {
-        auto it = image_save_map.find(newpath);
+        diskpath = resolved_path.GetPathString();
+        // Windows resolver returns paths with backslashes. Our
+        // file path handling code doesn't like that.
+        diskpath.substitute('\\', '/');
+    }
+
+    // Create the directory for holding the processed file path.
+    diskpath.splitPath(diskdir, diskfile);
+    if (diskdir.isstring() && UT_FileUtil::makeDirs(diskdir))
+    {
+        auto it = image_save_map.find(diskpath);
 
         // If we already wrote this original COP path to the requested path
         // on disk, we can just skip the actual image save.
@@ -770,31 +798,31 @@ saveImage(const SdfPrimSpecHandle &primspec,
             {
                 if (!user_supplied_path)
                 {
-                    char *dot = newfile.findChar('.');
+                    char *dot = diskfile.findChar('.');
                     UT_StringHolder root;
                     UT_StringHolder ext;
                     int unique_number = 1;
                     if (dot)
                     {
-                        root = UT_StringHolder(newfile, dot - newfile.c_str());
+                        root = UT_StringHolder(diskfile, dot - diskfile.c_str());
                         ext = UT_StringHolder(dot + 1);
                     }
                     else
-                        root = newfile.c_str();
+                        root = diskfile.c_str();
 
-                    while (image_save_map.contains(newpath))
+                    while (image_save_map.contains(diskpath))
                     {
-                        newfile.sprintf("%s.%d.%s",
+                        diskfile.sprintf("%s.%d.%s",
                             root.c_str(), unique_number++, ext.c_str());
-                        newpath.sprintf("%s/%s",
-                            newdir.c_str(), newfile.c_str());
+                        diskpath.sprintf("%s/%s",
+                            diskdir.c_str(), diskfile.c_str());
                     }
                 }
                 else
                 {
                     UT_WorkBuffer msg;
                     msg.sprintf("'%s' over '%s' as '%s'",
-                        oldpath.c_str(), it->second.c_str(), newpath.c_str());
+                        oldpath.c_str(), it->second.c_str(), diskpath.c_str());
                     HUSD_ErrorScope::addWarning(
                         HUSD_ERR_COP_TEXTURE_OVERWRITTEN,
                         msg.buffer());
@@ -802,14 +830,14 @@ saveImage(const SdfPrimSpecHandle &primspec,
             }
             // Don't use insert/emplace, we want to force a replacement in
             // case this is not the first time we're writing out this file.
-            image_save_map[newpath] = oldpath;
+            image_save_map[diskpath] = oldpath;
             // Save the image file to disk.
             IMG_SaveRastersToFilesParms saveparms;
-            IMG_File::saveRasterAsFile(newpath, raster.get(), saveparms);
-            if (UT_StringView(newpath).endsWith(".exr", false))
+            IMG_File::saveRasterAsFile(diskpath, raster.get(), saveparms);
+            if (UT_StringView(diskpath).endsWith(".exr", false))
             {
                 TIL_MakeTexture maker;
-                maker.makeTexture(newpath, newpath);
+                maker.makeTexture(diskpath, diskpath);
             }
         }
         // Use output processors to generate the file path that should be put
@@ -1803,6 +1831,10 @@ saveStage(const UsdStageWeakPtr &stage,
 	std::map<std::string, std::string> &saved_geo_map,
         husd_ImageSaveMap &image_save_map)
 {
+    // In case any code does asset resolution during the save operation (which
+    // at least the saveVolume code does, but output processors may as well),
+    // Bind the resolver context from the stage we are saving out.
+    ArResolverContextBinder context_binder(stage->GetPathResolverContext());
     husd_VolumeSaveMap volume_save_map;
     bool success = false;
 
